@@ -1,0 +1,11 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Data artifacts (regenerable via `python -m pipeline.run_pipeline`)
+data/
+
+# OS
+.DS_Store
