@@ -1,4 +1,4 @@
-## Intro
+## Intro - Atlastra
 
 This web app will focus on tracking, analyzing, and comparing soccer statistics across the top 5 leagues. Stats tracked will include basic counting stats (eg: g/a, appearances) as well as advanced stats(xG,xA,cc,BCC,BCM, successful dribbles, duel percentage, progressive passes, etc). Results of analysis will lead to graphs/visuals, and player scores based on a formula. Features on this app will include live scores, player profiles and statistics, a custom player ranking system, award predictions, and comparison features across players. 
 

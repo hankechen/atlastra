@@ -9,3 +9,6 @@ data/
 
 # OS
 .DS_Store
+
+# Generated reports (regenerable via analytics/story.py)
+reports/

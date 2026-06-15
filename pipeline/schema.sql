@@ -179,6 +179,117 @@ CREATE TABLE IF NOT EXISTS player_enrichment (
     PRIMARY KEY (player_id, league_key, season, source)
 );
 
+-- ---------- Historical match data (football-data.co.uk) ----------
+-- Fills the pre-Understat gap (2008/09-2013/14). Basic match stats only --
+-- NO xG, NO player-level data (see NOTES.md / scrape_history.py). Kept in its
+-- own name-based tables because Understat has no team_ids for this era, so it
+-- cannot join the `teams` dimension; teams are identified by football-data's
+-- club names. 1 row per fixture.
+CREATE TABLE IF NOT EXISTS matches_history (
+    league_key      VARCHAR NOT NULL REFERENCES leagues(league_key),
+    season          VARCHAR NOT NULL,      -- '0809'
+    match_date      DATE,
+    home_team       VARCHAR NOT NULL,
+    away_team       VARCHAR NOT NULL,
+    home_goals      INTEGER,
+    away_goals      INTEGER,
+    result          VARCHAR,               -- H / D / A
+    home_goals_ht   INTEGER,
+    away_goals_ht   INTEGER,
+    result_ht       VARCHAR,
+    home_shots      INTEGER,
+    away_shots      INTEGER,
+    home_shots_ot   INTEGER,               -- on target
+    away_shots_ot   INTEGER,
+    home_fouls      INTEGER,
+    away_fouls      INTEGER,
+    home_corners    INTEGER,
+    away_corners    INTEGER,
+    home_yellows    INTEGER,
+    away_yellows    INTEGER,
+    home_reds       INTEGER,
+    away_reds       INTEGER,
+    referee         VARCHAR,               -- England only in this era
+    source          VARCHAR DEFAULT 'football-data.co.uk',
+    PRIMARY KEY (league_key, season, home_team, away_team)
+);
+
+-- Derived standings for the historical seasons (name-based, mirrors
+-- team_season_stats but with the basic shot/discipline aggregates this source
+-- carries and no xG/xPoints). league_position uses points, then GD, then GF.
+CREATE TABLE IF NOT EXISTS team_season_history (
+    league_key      VARCHAR NOT NULL REFERENCES leagues(league_key),
+    season          VARCHAR NOT NULL,
+    team_name       VARCHAR NOT NULL,
+    matches_played  INTEGER,
+    wins            INTEGER,
+    draws           INTEGER,
+    losses          INTEGER,
+    goals_for       INTEGER,
+    goals_against   INTEGER,
+    goal_difference INTEGER,
+    points          INTEGER,
+    shots_for       INTEGER,
+    shots_ot_for    INTEGER,
+    corners_for     INTEGER,
+    yellows         INTEGER,
+    reds            INTEGER,
+    league_position INTEGER,
+    PRIMARY KEY (league_key, season, team_name)
+);
+
+-- ---------- Team-name canonicalization across data sources ----------
+-- football-data.co.uk (historical) and Understat spell many clubs differently
+-- ("Man United" vs "Manchester United", "Ath Bilbao" vs "Athletic Club"). This
+-- map folds a raw source spelling to one canonical name so a single club can be
+-- tracked across the era boundary. Populated by pipeline.load_name_map; clubs
+-- that appear in only one era (and need no rename) are simply absent here.
+CREATE TABLE IF NOT EXISTS team_name_map (
+    raw_name        VARCHAR PRIMARY KEY,
+    canonical_name  VARCHAR NOT NULL
+);
+
+-- ---------- Bridge view: one continuous standings history (2008/09-2025/26) --
+-- Unions the name-based historical standings (team_season_history, 08/09-13/14,
+-- no xG) with the Understat-keyed standings (team_season_stats, 14/15-, with xG)
+-- into a single 18-season league-table view. `team_name` is canonicalized via
+-- team_name_map so a club is one identity across both eras; `raw_name` keeps the
+-- original source spelling. Columns a given era lacks are NULL: xG/xPoints are
+-- NULL before 14/15; shots/corners/cards are NULL from 14/15 on.
+CREATE OR REPLACE VIEW standings_all AS
+SELECT
+    'historical' AS era,
+    h.league_key, h.season,
+    COALESCE(m.canonical_name, h.team_name) AS team_name,
+    h.team_name AS raw_name,
+    h.matches_played, h.wins, h.draws, h.losses,
+    h.goals_for, h.goals_against, h.goal_difference,
+    h.points, h.league_position,
+    CAST(NULL AS DOUBLE) AS xg_for,
+    CAST(NULL AS DOUBLE) AS xg_against,
+    CAST(NULL AS DOUBLE) AS expected_points,
+    h.shots_for, h.shots_ot_for, h.corners_for, h.yellows, h.reds
+FROM team_season_history h
+LEFT JOIN team_name_map m ON m.raw_name = h.team_name
+UNION ALL
+SELECT
+    'understat' AS era,
+    s.league_key, s.season,
+    COALESCE(m.canonical_name, t.team_name) AS team_name,
+    t.team_name AS raw_name,
+    s.matches_played, s.wins, s.draws, s.losses,
+    s.goals_for, s.goals_against, s.goal_difference,
+    s.points, s.league_position,
+    s.xg_for, s.xg_against, s.expected_points,
+    CAST(NULL AS INTEGER) AS shots_for,
+    CAST(NULL AS INTEGER) AS shots_ot_for,
+    CAST(NULL AS INTEGER) AS corners_for,
+    CAST(NULL AS INTEGER) AS yellows,
+    CAST(NULL AS INTEGER) AS reds
+FROM team_season_stats s
+JOIN teams t USING (team_id)
+LEFT JOIN team_name_map m ON m.raw_name = t.team_name;
+
 -- ---------- Helpful indexes ----------
 CREATE INDEX IF NOT EXISTS idx_pss_season   ON player_season_stats(league_key, season);
 CREATE INDEX IF NOT EXISTS idx_pss_player   ON player_season_stats(player_id);
