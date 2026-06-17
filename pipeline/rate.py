@@ -64,6 +64,17 @@ TKLINT = [("defensive_duels_won_per_90", 1), ("interceptions_per_90", 1)]  # pro
 RECOV  = [("possessions_won_per_90", 1)]         # proxy: recoveries
 BLOCKS = [("shots_blocked_per_90", 1)]
 CLEAR  = [("clearances_per_90", 1)]              # from SofaScore domestic
+# CB quality/rate metrics (possession-neutral) + build-up passing.
+# clearances/blocks/duels have no PAdj, so per-90 versions reward CBs under more
+# pressure (weaker teams) -- the CB vector leans on success-rates instead. NOTE:
+# progressive_passes uses per-90, NOT _padj: PAdj scales DOWN for high-possession
+# teams (it's built for defensive actions), which perversely penalises exactly the
+# ball-dominant CBs we want to rate up. interceptions_padj IS correct (defensive).
+PRGPACC  = [("progressive_pass_accuracy_pct", 1)]   # ball-progression quality
+DEFDUEL  = [("defensive_duels_won_pct", 1)]         # tackle success rate
+FWDPASPC = [("forward_pass_completion_pct", 1)]     # progressive passing accuracy
+ACCF3    = [("accurate_passes_to_final_third_per_90", 1)]  # build-up volume
+INTPADJ  = [("interceptions_padj", 1)]              # possession-adjusted (defensive)
 ERRORS = [("errors_per_90", 1)]                  # from SofaScore domestic (inv)
 BLKCLR = [("shots_blocked_per_90", 1), ("clearances_per_90", 1)]  # DM "blocks+clearances"
 FOULS  = [("fouls_per_90", 1)]
@@ -107,11 +118,15 @@ VECTORS = {
            ("take_ons", TAKEON, .08, False), ("recoveries", RECOV, .08, False),
            ("pass_pct", PASSPC, .06, False), ("errors", ERRORS, .04, True),
            ("dispossessed", DISP, .04, True)],
-    "CB": [("Tkl_Int", TKLINT, .18, False), ("aerial_pct", AERIAL, .18, False),
-           ("pass_pct", PASSPC, .14, False), ("PrgPasses", PRGP, .12, False),
-           ("clearances", CLEAR, .10, False), ("blocks", BLOCKS, .10, False),
-           ("errors", ERRORS, .08, True), ("recoveries", RECOV, .05, False),
-           ("fouls", FOULS, .05, True)],
+    # Rebuilt 2026-06: build-up / quality-rate-dominant, NOT per-90 defensive
+    # volume. The spec's volume vector inverted the ranking (weak-team CBs make
+    # more actions/90); this leans on success-rates + build-up passing so modern
+    # ball-playing CBs rate correctly. See METRIC_NOTES / rating-engine memory.
+    "CB": [("pass_pct", PASSPC, .16, False), ("def_duel_pct", DEFDUEL, .14, False),
+           ("aerial_pct", AERIAL, .12, False), ("PrgPasses", PRGP, .12, False),
+           ("prg_pass_acc", PRGPACC, .12, False), ("fwd_pass_pct", FWDPASPC, .08, False),
+           ("acc_passes_f3", ACCF3, .08, False), ("Int_padj", INTPADJ, .08, False),
+           ("errors", ERRORS, .06, True), ("fouls", FOULS, .04, True)],
     "GK": [("PSxG_GA", PREV, .30, False), ("save_pct", SAVEPC, .18, False),
            ("GA", GA, .12, True), ("pass_pct", PASSPC, .12, False),
            ("def_outside_box", GKOUT, .10, False), ("launched_pct", LAUNCH, .08, False)],
@@ -127,7 +142,12 @@ METRIC_NOTES = (
     "Tkl+Int<-defensive_duels_won+interceptions, recoveries<-possessions_won, "
     "dispossessed<-possessions_lost, GK def_outside_box<-exits, launched%<-long_pass_acc. "
     "clearances + errors backfilled from SofaScore domestic (pipeline.load_sofa_domestic). "
-    "still dropped (no source): GK cross-stop/claims, renormalised into the GK vector."
+    "still dropped (no source): GK cross-stop/claims, renormalised into the GK vector. "
+    "CB vector rebuilt to build-up/rates (pass%, def-duel-win%, aerial%, prog-passes/90, "
+    "prg-pass-acc, fwd-pass%, accurate-final-third-passes, interceptions_padj); raw per-90 "
+    "volume (clearances/blocks/recoveries) dropped -- it rewarded CBs under more pressure "
+    "(weaker teams) and inverted the ranking. progressive_passes uses per-90 NOT padj (PAdj "
+    "wrongly scales attacking output down for high-possession teams)."
 )
 
 

@@ -23,6 +23,7 @@ from pipeline import load_datamb as datamb_load_mod
 from pipeline import scrape_sofa_domestic as sofadom_scrape_mod
 from pipeline import load_sofa_domestic as sofadom_load_mod
 from pipeline import rate as rate_mod
+from pipeline import build_views as views_mod
 
 
 def main():
@@ -86,6 +87,9 @@ def main():
     except Exception as e:
         print(f"rating engine skipped ({repr(e)[:80]}); "
               f"run `python -m pipeline.rate` once datamb is loaded.")
+
+    print("\n### 8. BUILD STAT VIEWS (UCL / Top-5 / combined) ###")
+    views_mod.build_views()
 
     print("\nDone. Try:  python tests/test_use_cases.py")
 

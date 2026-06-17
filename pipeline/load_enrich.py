@@ -25,7 +25,8 @@ except ModuleNotFoundError:  # pragma: no cover
 warnings.filterwarnings("ignore")
 
 FOTMOB_RAW = RAW_DIR.parent / "fotmob"
-MATCH_THRESHOLD = 80  # min fuzzy score to accept a name match
+MATCH_THRESHOLD = 80    # phase 1: min token_sort score to accept a name match
+RECOVER_THRESHOLD = 90  # phase 2: min token_set score for leftover recovery
 
 # columns in the parquet that map 1:1 into player_enrichment
 ENRICH_COLS = [
@@ -52,6 +53,23 @@ def _val(v, col):
     if pd.isna(v):
         return None
     return int(round(float(v))) if col in INT_COLS else float(v)
+
+
+def _name_compatible(a: str, b: str) -> bool:
+    """Guard for phase-2 recovery: accept only when one name's tokens are a
+    subset of the other (e.g. 'Ezri Konsa' vs 'Ezri Konsa Ngoyo') or the
+    surnames match. Blocks spurious single-shared-token matches."""
+    ta, tb = a.split(), b.split()
+    if not ta or not tb:
+        return False
+    sa, sb = set(ta), set(tb)
+    return sa <= sb or sb <= sa or ta[-1] == tb[-1]
+
+
+def _mkrow(r, player_id, league_key, season, score):
+    vals = [_val(getattr(r, c, None), c) for c in ENRICH_COLS]
+    fid = int(r.fotmob_player_id) if pd.notna(r.fotmob_player_id) else None
+    return (player_id, league_key, season, fid, float(score), *vals)
 
 
 def _load_enrichment_frames() -> pd.DataFrame:
@@ -110,10 +128,11 @@ def load_enrich() -> None:
         for key, g in us.groupby(["league_key", "season"])
     }
 
-    rows, matched, unmatched = [], 0, 0
+    rows, matched, recovered, unmatched = [], 0, 0, 0
     for (league_key, season), grp in fot.groupby(["league_key", "season"]):
         ids, names = pools.get((league_key, season), ([], []))
-        used = set()
+        used, leftover = set(), []
+        # --- phase 1: high-precision token_sort match (best per FotMob row) ---
         for r in grp.itertuples():
             target = _norm(getattr(r, "player_name", ""))
             if not target or not names:
@@ -121,19 +140,37 @@ def load_enrich() -> None:
                 continue
             best = process.extractOne(target, names, scorer=fuzz.token_sort_ratio)
             if not best or best[1] < MATCH_THRESHOLD:
-                unmatched += 1
+                leftover.append((r, target))
                 continue
             player_id = ids[best[2]]
             if player_id in used:   # avoid two FotMob rows mapping to one player
+                leftover.append((r, target))
                 continue
             used.add(player_id)
             matched += 1
-            vals = [_val(getattr(r, c, None), c) for c in ENRICH_COLS]
-            rows.append((
-                player_id, league_key, season,
-                int(r.fotmob_player_id) if pd.notna(r.fotmob_player_id) else None,
-                float(best[1]), *vals,
-            ))
+            rows.append(_mkrow(r, player_id, league_key, season, best[1]))
+
+        # --- phase 2: recover leftovers via token_set (handles longer/shorter
+        # name forms, e.g. 'Ezri Konsa' <-> 'Ezri Konsa Ngoyo'). Globally assign
+        # by descending score so the strongest pairing wins each contested id. ---
+        cands = []
+        for r, target in leftover:
+            for i, ut in enumerate(names):
+                if ids[i] in used:
+                    continue
+                score = fuzz.token_set_ratio(target, ut)
+                if score >= RECOVER_THRESHOLD and _name_compatible(target, ut):
+                    cands.append((score, id(r), r, ids[i]))
+        cands.sort(key=lambda c: -c[0])
+        claimed = set()
+        for score, rid, r, player_id in cands:
+            if rid in claimed or player_id in used:
+                continue
+            claimed.add(rid)
+            used.add(player_id)
+            recovered += 1
+            rows.append(_mkrow(r, player_id, league_key, season, score))
+        unmatched += len(leftover) - len(claimed)
 
     con.execute("DELETE FROM player_enrichment WHERE source='fotmob'")
     if rows:
@@ -144,8 +181,9 @@ def load_enrich() -> None:
             rows,
         )
     con.close()
-    print(f"player_enrichment: matched {matched}, unmatched {unmatched} "
-          f"(threshold {MATCH_THRESHOLD}, {len(fot)} FotMob rows across {fot['season'].nunique()} seasons).")
+    print(f"player_enrichment: matched {matched} (token_sort>={MATCH_THRESHOLD}) "
+          f"+ {recovered} recovered (token_set>={RECOVER_THRESHOLD}), unmatched {unmatched} "
+          f"({len(fot)} FotMob rows across {fot['season'].nunique()} seasons).")
 
 
 if __name__ == "__main__":
