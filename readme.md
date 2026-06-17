@@ -6,7 +6,7 @@ This web app will focus on tracking, analyzing, and comparing soccer statistics 
 These are Phase One use cases, more will be added on with later phases. 
 1. Player Statistics (Games, G/A, duels percentage, dribbles completed/percentage, chances created, big chances created, xG, xA, big chances missed, tackles, interceptions, passes completed)
 2. Player Classfication (Best In Their Position, World-Class, Elite, Above Average, Average, Below Average)
-3. Player Profile (Career, Market Value, Main Position)
+3. Player Profile (Career, Market Value, Main Position, Strengths, Weaknesses, Areas of Improvement)
 4. Player Cross Year Progression (Same Player compared across seasons), compared based on custom user-chosen stats or these default stats: 
 (attackers - g/a, dribbles, chances created
 midfielders - g/a, big chances created, passes completed, duels won,

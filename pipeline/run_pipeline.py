@@ -24,6 +24,9 @@ from pipeline import scrape_sofa_domestic as sofadom_scrape_mod
 from pipeline import load_sofa_domestic as sofadom_load_mod
 from pipeline import rate as rate_mod
 from pipeline import build_views as views_mod
+from pipeline import scrape_transfermarkt as tm_scrape_mod
+from pipeline import load_transfermarkt as tm_load_mod
+from pipeline import profile as profile_mod
 
 
 def main():
@@ -61,6 +64,11 @@ def main():
             sofadom_scrape_mod.scrape()
         except Exception as e:
             print(f"SofaScore domestic-defense scrape failed ({repr(e)[:80]}); continuing without it.")
+        print("\n### 1g. SCRAPE (Transfermarkt market values) ###")
+        try:
+            tm_scrape_mod.scrape()
+        except Exception as e:
+            print(f"Transfermarkt scrape failed ({repr(e)[:80]}); continuing without it.")
 
     print("\n### 2. INIT DB ###")
     init_mod.init_db(reset=True)
@@ -88,8 +96,17 @@ def main():
         print(f"rating engine skipped ({repr(e)[:80]}); "
               f"run `python -m pipeline.rate` once datamb is loaded.")
 
-    print("\n### 8. BUILD STAT VIEWS (UCL / Top-5 / combined) ###")
+    print("\n### 8. LOAD Transfermarkt market values ###")
+    tm_load_mod.load_transfermarkt()
+
+    print("\n### 9. BUILD STAT VIEWS (UCL / Top-5 / combined / career) ###")
     views_mod.build_views()
+
+    print("\n### 10. PLAYER PROFILES (strengths / weaknesses / full profile) ###")
+    try:
+        profile_mod.build_profiles()
+    except Exception as e:
+        print(f"profile build skipped ({repr(e)[:80]}); run `python -m pipeline.profile`.")
 
     print("\nDone. Try:  python tests/test_use_cases.py")
 

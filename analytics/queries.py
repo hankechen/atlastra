@@ -136,22 +136,32 @@ class SoccerDB:
             "SELECT player_name, primary_position, position_group FROM players WHERE player_id=?",
             [pid],
         ).fetchone()
+        # Career timeline (domestic + UCL merged per season) from v_player_career.
         career = self.con.execute(
-            """
-            SELECT ps.season, l.league_name AS league, t.team_name AS team,
-                   ps.matches, ps.minutes, ps.goals, ps.assists
-            FROM player_season_stats ps
-            JOIN teams t USING(team_id)
-            JOIN leagues l ON l.league_key = ps.league_key
-            WHERE ps.player_id = ? ORDER BY ps.season
-            """,
+            "SELECT season, team, competitions, games, minutes, goals, assists "
+            "FROM v_player_career WHERE player_id = ? ORDER BY season",
             [pid],
         ).df()
+        # Market value (Transfermarkt) + strengths/weaknesses/areas (rating engine).
+        mv = self.con.execute(
+            "SELECT market_value_eur FROM player_market_value WHERE player_id=? AND season=?",
+            [pid, FOCUS_SEASON],
+        ).fetchone()
+        swot = self.con.execute(
+            "SELECT rating, classification, strengths, weaknesses, areas_of_improvement "
+            "FROM v_player_profile_full WHERE player_id=?",
+            [pid],
+        ).fetchone()
         return {
             "player_name": head[0],
             "main_position": head[1],
             "position_group": head[2],
-            "market_value_eur": None,   # not available from Understat (see NOTES.md)
+            "market_value_eur": mv[0] if mv else None,
+            "rating": swot[0] if swot else None,
+            "classification": swot[1] if swot else None,
+            "strengths": swot[2] if swot else None,
+            "weaknesses": swot[3] if swot else None,
+            "areas_of_improvement": swot[4] if swot else None,
             "career": career,           # seasons present in this warehouse
         }
 

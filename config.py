@@ -60,6 +60,16 @@ FOTMOB_LEAGUE_IDS = {
 def fotmob_season(code: str) -> str:
     return f"20{code[:2]}/20{code[2:]}"
 
+# Transfermarkt competition codes (for the market-value scraper). TM market
+# values are "current", so they are tagged with FOCUS_SEASON at load time.
+TRANSFERMARKT_LEAGUE_CODES = {
+    "ENG-Premier League": "GB1",
+    "ESP-La Liga":        "ES1",
+    "ITA-Serie A":        "IT1",
+    "GER-Bundesliga":     "L1",
+    "FRA-Ligue 1":        "FR1",
+}
+
 # ---------------------------------------------------------------------------
 # datamb.football enrichment -- Wyscout-grade per-player season stats.
 #

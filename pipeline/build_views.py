@@ -249,7 +249,16 @@ def build_views() -> None:
         "SELECT * FROM v_stats_ucl UNION ALL SELECT * FROM v_stats_top5"
     )
     con.execute(f"CREATE OR REPLACE VIEW v_stats_combined_player AS {COMBINED_PLAYER_SELECT}")
-    for v in ("v_stats_ucl", "v_stats_top5", "v_stats_combined", "v_stats_combined_player"):
+    # Career timeline (use case 3): one row per player+season, team & per-comp totals.
+    con.execute("""
+        CREATE OR REPLACE VIEW v_player_career AS
+        SELECT player_id, season, player, team, competitions,
+               games, minutes, goals, assists, xg, xa
+        FROM v_stats_combined_player
+        ORDER BY player_id, season
+    """)
+    for v in ("v_stats_ucl", "v_stats_top5", "v_stats_combined", "v_stats_combined_player",
+              "v_player_career"):
         n = con.execute(f"SELECT COUNT(*) FROM {v}").fetchone()[0]
         seasons = con.execute(f"SELECT COUNT(DISTINCT season) FROM {v}").fetchone()[0]
         print(f"{v}: {n} rows across {seasons} seasons")

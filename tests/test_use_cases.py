@@ -183,8 +183,14 @@ def demo():
 
         _h("USE CASE 3 — Player Profile: Erling Haaland")
         prof = d.player_profile("Haaland")
-        for k in ("player_name", "main_position", "position_group", "market_value_eur"):
-            print(f"  {k:18}: {prof[k]}")
+        mv = prof["market_value_eur"]
+        print(f"  {'player_name':20}: {prof['player_name']}")
+        print(f"  {'main_position':20}: {prof['main_position']}  ({prof['position_group']})")
+        print(f"  {'market_value':20}: " + (f"€{mv/1e6:.0f}m" if mv else "n/a"))
+        print(f"  {'rating':20}: {prof['rating']}  ({prof['classification']})")
+        print(f"  {'strengths':20}: {prof['strengths']}")
+        print(f"  {'weaknesses':20}: {prof['weaknesses']}")
+        print(f"  {'areas_to_improve':20}: {prof['areas_of_improvement']}")
         print("  career:")
         print(prof["career"].to_string(index=False))
 
