@@ -60,6 +60,88 @@ FOTMOB_LEAGUE_IDS = {
 def fotmob_season(code: str) -> str:
     return f"20{code[:2]}/20{code[2:]}"
 
+# ---------------------------------------------------------------------------
+# datamb.football enrichment -- Wyscout-grade per-player season stats.
+#
+# This is the source that finally carries the progressive / carrying / shot-
+# creation style metrics neither Understat nor FotMob expose: progressive
+# passes & carries per 90, touches in box, take-ons (+ success %), aerial %,
+# crosses into box, PSxG-GA ("prevented goals"), save %, etc. -- 143 columns.
+#
+# Served as static per-position .xlsx files (Wyscout export), current season
+# only, for the "TOP7" leagues (our Top-5 + Eredivisie + Primeira Liga):
+#   https://datamb.football/database/CURRENT/TOP7<season>/<POS>/<POS>.xlsx
+# Files carry no league column -- only "Team within selected timeframe" -- so
+# league is assigned at load time from the team name. Only the CURRENT season
+# is published (no historical archive), so this enrichment is 2025/26 only.
+DATAMB_BASE = "https://datamb.football/database/CURRENT"
+
+# datamb's six position buckets -> (file/code, human label as used in its index).
+# Note datamb collapses all central midfielders (defensive / central / attacking)
+# into one "CM" bucket, and treats wide forwards as "FW" (its "Winger" label).
+DATAMB_POSITIONS = {
+    "GK": "Goalkeeper",
+    "CB": "Centre-back",
+    "FB": "Full-back",
+    "CM": "Midfielder",
+    "FW": "Winger",
+    "ST": "Striker",
+}
+
+# datamb publishes the current season only.
+DATAMB_SEASONS = [FOCUS_SEASON]
+
+# datamb covers "TOP7" = our Top-5 PLUS the Eredivisie (NL) and Primeira Liga
+# (PT). The rating engine pools "within position group", and mixing in the two
+# weaker leagues inflates their players' per-90s, so we restrict the pool to the
+# Top-5 by EXCLUDING these two leagues' clubs. datamb carries no league column,
+# but TOP7 minus NL minus PT == Top-5 exactly (verified: 132 - 36 = 96 clubs).
+# Names are datamb's exact spellings; this set is season-specific (promotion/
+# relegation changes it) and datamb is current-season-only, so it tracks 2025/26.
+DATAMB_NON_TOP5_TEAMS = frozenset({
+    # Eredivisie
+    "AZ", "Ajax", "Excelsior", "Feyenoord", "Fortuna Sittard", "Go Ahead Eagles",
+    "Groningen", "Heerenveen", "Heracles", "NAC Breda", "NEC", "PEC Zwolle",
+    "PSV", "Sparta Rotterdam", "Telstar", "Twente", "Utrecht", "Volendam",
+    # Primeira Liga
+    "AVS", "Alverca", "Arouca", "Benfica", "Casa Pia AC", "Estoril",
+    "Estrela Amadora", "Famalicão", "Gil Vicente", "Moreirense", "Nacional",
+    "Porto", "Rio Ave", "Santa Clara", "Sporting Braga", "Sporting CP",
+    "Tondela", "Vitória Guimarães",
+})
+
+# ---------------------------------------------------------------------------
+# SofaScore -- UEFA Champions League player stats.
+#
+# The Top-5 domestic sources (Understat/FotMob/datamb) carry no continental
+# competition. SofaScore does, and with a rich per-player season-stats endpoint
+# (~77 fields: goals, xG, key passes, tackles, interceptions, dribbles, duels,
+# clearances, saves, ...) going all the way back to **2008/09** -- nearly the
+# full field set even in the oldest seasons (only xG and a couple of fields are
+# absent pre-~2020). So UCL gets "advanced" stats for every season, not just
+# recent ones.
+#
+# SofaScore is bot-protected: it 403s ("challenge") the moment you send the
+# usual CORS/sec-fetch headers, but a *bare* browser-TLS request (tls_requests
+# with no extra headers) passes. So the scraper deliberately sends no headers.
+#
+# UCL uniqueTournament id = 7. Season ids are looked up live from the seasons
+# endpoint and floored at 2008/09 (UCL_MIN_SEASON_CODE).
+SOFASCORE_BASE = "https://api.sofascore.com/api/v1"
+SOFASCORE_UCL_TOURNAMENT_ID = 7
+UCL_MIN_SEASON_CODE = "0809"  # earliest UCL season to collect (2008/09)
+
+# Top-5 domestic uniqueTournament ids on SofaScore -- used to backfill the two
+# defensive metrics datamb lacks (clearances, errors) so the rating engine's CB
+# and DM vectors don't have to drop them. league_key -> SofaScore tournament id.
+SOFASCORE_TOP5_TOURNAMENTS = {
+    "ENG-Premier League": 17,
+    "ESP-La Liga":        8,
+    "ITA-Serie A":        23,
+    "GER-Bundesliga":     35,
+    "FRA-Ligue 1":        34,
+}
+
 # Seasons to pull from Understat. Player stats, matches and team stats are all
 # collected for the full history so standings and cross-year progression work
 # across every season.

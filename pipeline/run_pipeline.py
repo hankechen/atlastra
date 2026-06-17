@@ -16,6 +16,13 @@ from pipeline import load as load_mod
 from pipeline import scrape_enrich as enrich_scrape_mod
 from pipeline import scrape_duels as duels_scrape_mod
 from pipeline import load_enrich as enrich_load_mod
+from pipeline import scrape_datamb as datamb_scrape_mod
+from pipeline import scrape_ucl as ucl_scrape_mod
+from pipeline import load_ucl as ucl_load_mod
+from pipeline import load_datamb as datamb_load_mod
+from pipeline import scrape_sofa_domestic as sofadom_scrape_mod
+from pipeline import load_sofa_domestic as sofadom_load_mod
+from pipeline import rate as rate_mod
 
 
 def main():
@@ -23,6 +30,7 @@ def main():
     ap.add_argument("--quick", action="store_true", help="focus season, players only")
     ap.add_argument("--no-scrape", action="store_true", help="reuse cached raw parquet")
     ap.add_argument("--no-enrich", action="store_true", help="skip FotMob enrichment")
+    ap.add_argument("--no-ucl", action="store_true", help="skip SofaScore UCL stats")
     args = ap.parse_args()
 
     if not args.no_scrape:
@@ -36,6 +44,22 @@ def main():
                 duels_scrape_mod.scrape()
             except Exception as e:
                 print(f"FotMob enrichment scrape failed ({repr(e)[:80]}); continuing without it.")
+            print("\n### 1d. SCRAPE (datamb.football Wyscout stats) ###")
+            try:
+                datamb_scrape_mod.scrape()
+            except Exception as e:
+                print(f"datamb scrape failed ({repr(e)[:80]}); continuing without it.")
+        if not args.no_ucl:
+            print("\n### 1e. SCRAPE (SofaScore Champions League) ###")
+            try:
+                ucl_scrape_mod.scrape()
+            except Exception as e:
+                print(f"SofaScore UCL scrape failed ({repr(e)[:80]}); continuing without it.")
+        print("\n### 1f. SCRAPE (SofaScore Top-5 defense: clearances/errors) ###")
+        try:
+            sofadom_scrape_mod.scrape()
+        except Exception as e:
+            print(f"SofaScore domestic-defense scrape failed ({repr(e)[:80]}); continuing without it.")
 
     print("\n### 2. INIT DB ###")
     init_mod.init_db(reset=True)
@@ -46,6 +70,22 @@ def main():
     if not args.no_enrich:
         print("\n### 4. LOAD FotMob ENRICHMENT ###")
         enrich_load_mod.load_enrich()
+
+    if not args.no_ucl:
+        print("\n### 5. LOAD SofaScore UCL ###")
+        ucl_load_mod.load_ucl()
+
+    print("\n### 6. LOAD datamb (Wyscout) ###")
+    datamb_load_mod.load_datamb()
+    print("\n### 6b. LOAD SofaScore Top-5 defense (clearances/errors) ###")
+    sofadom_load_mod.load_sofa_domestic()
+
+    print("\n### 7. PLAYER RATINGS (position-weighted engine) ###")
+    try:
+        rate_mod.rate()
+    except Exception as e:
+        print(f"rating engine skipped ({repr(e)[:80]}); "
+              f"run `python -m pipeline.rate` once datamb is loaded.")
 
     print("\nDone. Try:  python tests/test_use_cases.py")
 

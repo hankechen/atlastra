@@ -15,6 +15,7 @@ defenders - tackles, interceptions, aerial/ground duels, recoveries)
 6. Team Performance/League Standing
 7. Team Information (Squad, Manager, Venue)
 8. Search by Player, Team, or Match (Two Teams, Resulted sorted by recency)
+9. Player techniques (most commonly used techniques from a player)
 
 ## Please try the following APIs if available. Please try web scraping if none of the below works.  
 1. Football API

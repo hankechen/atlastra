@@ -10,5 +10,8 @@ data/
 # OS
 .DS_Store
 
+# Scraper/browser-automation lock artifacts (SeleniumBase UC, pyautogui)
+downloaded_files/
+
 # Generated reports (regenerable via analytics/story.py)
 reports/

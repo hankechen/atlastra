@@ -179,6 +179,57 @@ CREATE TABLE IF NOT EXISTS player_enrichment (
     PRIMARY KEY (player_id, league_key, season, source)
 );
 
+-- ---------- Continental competition: UEFA Champions League (SofaScore) -------
+-- The domestic sources carry no continental football. SofaScore does, with a
+-- rich per-player season-stats set (~77 fields: goals, xG, key passes, tackles,
+-- interceptions, dribbles, duels, clearances, saves, ...) back to 2008/09 --
+-- nearly the full field set even in the oldest seasons (xG only from 2022/23).
+--
+-- Kept standalone (SofaScore player/team ids, many clubs outside the Top-5, a
+-- different competition) so the Understat-keyed domestic facts stay clean. The
+-- field set is wide and grows over time, so the table is NOT declared column-by-
+-- column here: pipeline.load_ucl (re)creates it via CREATE TABLE AS SELECT from
+-- data/raw/sofascore/ucl_player_stats_all.parquet, snake-casing the SofaScore
+-- field names. Grain: 1 row per (sofascore_player_id, season). Stats are season
+-- totals (+ minutes_played); per-90 rates are derived downstream. Documented
+-- here for discoverability; see pipeline/load_ucl.py for the authoritative shape.
+--   ucl_player_stats(season, competition, sofascore_player_id, player_name,
+--                    sofascore_team_id, team_name, <~77 snake_cased stat cols>)
+
+-- ---------- Wyscout per-player stats + the player rating engine --------------
+-- All three tables below are materialised by their loaders (not declared column-
+-- by-column here) because the field sets are wide/derived. Documented for
+-- discoverability; see pipeline/load_datamb.py and pipeline/rate.py.
+--
+-- player_wyscout  -- datamb (Wyscout) per-player season stats, current season,
+--   "TOP7" leagues. The only source with progressive passes/carries, take-ons,
+--   shot/goal creation, etc. Built by pipeline.load_datamb (CREATE TABLE AS
+--   SELECT from data/raw/datamb/player_wyscout_<season>.parquet, slug-cased).
+--   Grain: 1 row per (player, team, datamb_position). main_position = the
+--   player's primary bucket from datamb's index; the rating engine keeps only
+--   rows where datamb_position = main_position.
+--     player_wyscout(season, datamb_position, position_label, main_position,
+--                    in_top5, player, team_within_selected_timeframe, age,
+--                    minutes_played, <~140 snake_cased Wyscout stat cols>,
+--                    clearances_per_90, errors_per_90)
+--   in_top5 excludes datamb's two non-Top-5 leagues (Eredivisie/Primeira).
+--   clearances_per_90 / errors_per_90 are backfilled from SofaScore domestic
+--   (pipeline.load_sofa_domestic) since datamb lacks them -- they complete the
+--   CB/DM/FB vectors. NULL where the SofaScore<->datamb name match missed (~4%).
+--
+-- rating_weights  -- the eight position weight vectors (renormalised to 1),
+--   with each metric's datamb column expression + invert flag. Built by
+--   pipeline.rate. (position_group, metric, datamb_expr, weight, invert)
+--
+-- player_ratings_v2  -- output of the 7-step position-weighted rating engine
+--   (pipeline.rate), one row per rated player at their main position. Pool is
+--   "within position group" across all TOP7 leagues (no league-strength term).
+--   datamb's merged "CM" bucket is split into DM/CM/AM by stat profile, so
+--   position_group is the spec's eight: ST/W/AM/CM/DM/FB/CB/GK.
+--     player_ratings_v2(season, player, team, position_group, minutes,
+--                       composite, composite_adj, standardized, rating,
+--                       rank_in_group, percentile, classification, rating_version)
+
 -- ---------- Historical match data (football-data.co.uk) ----------
 -- Fills the pre-Understat gap (2008/09-2013/14). Basic match stats only --
 -- NO xG, NO player-level data (see NOTES.md / scrape_history.py). Kept in its
