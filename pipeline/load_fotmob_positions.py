@@ -87,17 +87,19 @@ def load_fotmob_positions(season: str = FOCUS_SEASON) -> None:
     fm["side"] = [o[1] if isinstance(o, tuple) else s for o, s in zip(ov, fm["side"])]
     fm = fm.dropna(subset=["fotmob_group"]).drop_duplicates("player_id")
 
-    # datamb name -> player_id, so the (name-keyed) rating engine can join by name
+    # datamb (player, team) -> player_id, so the (name-keyed) rating engine can join
     datamb = con.execute(
-        "SELECT DISTINCT player FROM player_wyscout WHERE season=?", [season]).df()
-    xwalk = _datamb_to_understat(con, datamb["player"].tolist(), season)  # name -> player_id
-    pid_to_name = {}
-    for name, pid in xwalk.items():
-        pid_to_name.setdefault(pid, name)
-    fm["datamb_player"] = fm["player_id"].map(pid_to_name)
+        "SELECT DISTINCT player, team_within_selected_timeframe AS team "
+        "FROM player_wyscout WHERE season=?", [season]).df()
+    xwalk = _datamb_to_understat(con, list(zip(datamb["player"], datamb["team"])), season)
+    pid_to_pair = {}
+    for (name, team), pid in xwalk.items():
+        pid_to_pair.setdefault(pid, (name, team))
+    fm["datamb_player"] = fm["player_id"].map(lambda p: (pid_to_pair.get(p) or (None, None))[0])
+    fm["datamb_team"] = fm["player_id"].map(lambda p: (pid_to_pair.get(p) or (None, None))[1])
 
-    out = fm[["player_id", "datamb_player", "fotmob_group", "side", "position_ids"]].rename(
-        columns={"position_ids": "fotmob_position_ids"})
+    out = fm[["player_id", "datamb_player", "datamb_team", "fotmob_group", "side",
+              "position_ids"]].rename(columns={"position_ids": "fotmob_position_ids"})
     con.execute("DROP TABLE IF EXISTS player_position")
     con.execute("CREATE TABLE player_position AS SELECT * FROM out")
     con.execute("CREATE INDEX IF NOT EXISTS idx_pp ON player_position(player_id)")

@@ -41,6 +41,13 @@ warnings.filterwarnings("ignore")
 K = 600                       # shrinkage constant (step 4)
 RATING_VERSION = "v2-datamb"
 
+# Manual rating overrides (hacks), keyed by (player, team) -> rating. These pin a
+# player's final rating regardless of the formula -- use sparingly. Rank and
+# classification within the group are recomputed to stay consistent.
+RATING_OVERRIDES = {
+    ("J. Bellingham", "Real Madrid"): 83,   # reputation override (down statistical season)
+}
+
 # --- metric -> datamb column expression -------------------------------------
 # Each metric is sum(sign * column). Proxies and (inv) noted in METRIC_NOTES.
 NPXG   = [("npxg_per_90", 1)]
@@ -272,22 +279,24 @@ def rate(season: str = FOCUS_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) 
     # See positions-use-fotmob: FotMob is authoritative for GK/CB/FB/ST/AM/W; the
     # central-mid band ('CMID') falls back to datamb's DM/CM split (AM -> CM).
     try:
-        pp = con.execute("SELECT datamb_player, fotmob_group, side FROM player_position "
-                         "WHERE datamb_player IS NOT NULL").df()
-        fmg = dict(zip(pp.datamb_player, pp.fotmob_group))
-        side = dict(zip(pp.datamb_player, pp.side))
+        pp = con.execute("SELECT datamb_player, datamb_team, fotmob_group, side "
+                         "FROM player_position WHERE datamb_player IS NOT NULL").df()
+        fmg = {(r.datamb_player, r.datamb_team): r.fotmob_group for r in pp.itertuples()}
+        side = {(r.datamb_player, r.datamb_team): r.side for r in pp.itertuples()}
     except Exception:
         fmg, side = {}, {}
 
-    def _final(player, dg):
-        fm = fmg.get(player)
+    def _final(player, team, dg):
+        fm = fmg.get((player, team))                 # keyed by (name, team)
         if fm in ("GK", "CB", "ST", "AM", "W", "FB"):
             return fm
         if fm == "CMID":
             return "DM" if dg == "DM" else "CM"
         return dg                                    # no FotMob position -> datamb
-    df["position_group"] = [_final(p, dg) for p, dg in zip(df["player"], df["datamb_group"])]
-    df["pos_side"] = df["player"].map(side)
+    teams = df["team_within_selected_timeframe"]
+    df["position_group"] = [_final(p, t, dg) for p, t, dg
+                            in zip(df["player"], teams, df["datamb_group"])]
+    df["pos_side"] = [side.get((p, t)) for p, t in zip(df["player"], teams)]
     print("  position groups:", df["position_group"].value_counts().sort_index().to_dict())
 
     results = [_rate_group(g, grp) for grp, g in df.groupby("position_group")]
@@ -295,16 +304,32 @@ def rate(season: str = FOCUS_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) 
     out["season"] = season
     out["rating_version"] = RATING_VERSION
     # detailed position for display: W/FB get a side (LW/RW, LB/RB)
-    side_map = dict(zip(df["player"], df["pos_side"]))
+    side_map = {(p, t): s for p, t, s in
+                zip(df["player"], df["team_within_selected_timeframe"], df["pos_side"])}
 
-    def _detail(grp, player):
-        s = side_map.get(player)
+    def _detail(grp, player, team):
+        s = side_map.get((player, team))
         if grp == "W":
             return {"R": "RW", "L": "LW"}.get(s, "W")
         if grp == "FB":
             return {"R": "RB", "L": "LB"}.get(s, "FB")
         return grp
-    out["detailed_position"] = [_detail(g, p) for g, p in zip(out["position_group"], out["player"])]
+    out["detailed_position"] = [_detail(g, p, t) for g, p, t
+                                in zip(out["position_group"], out["player"], out["team"])]
+
+    # apply manual rating overrides, then recompute rank + classification per group
+    if RATING_OVERRIDES:
+        for (pl, tm), rv in RATING_OVERRIDES.items():
+            mask = (out["player"] == pl) & (out["team"] == tm)
+            if mask.any():
+                out.loc[mask, "rating"] = rv
+            else:
+                print(f"  override: no match for {pl} / {tm}")
+        out = out.sort_values(["position_group", "rating", "composite_adj"],
+                              ascending=[True, False, False]).reset_index(drop=True)
+        out["rank_in_group"] = out.groupby("position_group").cumcount() + 1
+        out["classification"] = [_classify(r, k) for r, k in
+                                 zip(out["rating"], out["rank_in_group"])]
 
     # weights table (renormalised, with mapping) for transparency
     wrows = []

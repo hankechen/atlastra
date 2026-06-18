@@ -85,55 +85,66 @@ def _tokens2(name: str):
     return "".join(c if c.isalnum() else " " for c in s).split()
 
 
-def _datamb_to_understat(con: duckdb.DuckDBPyConnection, names, season: str) -> dict:
-    """Map datamb player names -> Understat player_id for one season. Phase A:
-    unique (initial, surname). Phase B: fuzzy full-name fallback on the rest."""
+def _datamb_to_understat(con: duckdb.DuckDBPyConnection, pairs, season: str) -> dict:
+    """Map (datamb_player, datamb_team) -> Understat player_id for one season.
+    Team disambiguates same-named players (e.g. the two 'J. Bellingham' brothers).
+    Phases: A unique (initial, surname), B shared surname token, C fuzzy."""
     us = con.execute(
-        "SELECT DISTINCT p.player_id, p.player_name FROM player_season_stats ps "
-        f"JOIN players p USING (player_id) WHERE ps.season = '{season}'"
-    ).df()
+        "SELECT ps.player_id, any_value(p.player_name) AS player_name, "
+        "arg_max(t.team_name, ps.minutes) AS team_name "
+        "FROM player_season_stats ps JOIN players p USING (player_id) "
+        "JOIN teams t USING (team_id) WHERE ps.season = ? GROUP BY ps.player_id",
+        [season]).df()
     by_key = defaultdict(list)
     tok_idx = defaultdict(list)        # surname token -> [(player_id, first_initial)]
+    us_team = {}
     for r in us.itertuples():
-        by_key[_ikey(r.player_name)].append(int(r.player_id))
+        pid = int(r.player_id)
+        us_team[pid] = _norm(str(r.team_name))
+        by_key[_ikey(r.player_name)].append(pid)
         toks = _tokens2(r.player_name)
         if toks:
             init = toks[0][0]
             for tk in set(toks[1:] or toks):
                 if len(tk) >= 4:
-                    tok_idx[tk].append((int(r.player_id), init))
+                    tok_idx[tk].append((pid, init))
     us_ids = [int(i) for i in us.player_id]
     us_norm = [_norm(n) for n in us.player_name]
 
-    mapping, used, leftover = {}, set(), []
-    for nm in names:                                   # phase A: unique initial+surname
-        cand = [i for i in by_key.get(_ikey(nm), []) if i not in used]
-        if len(cand) == 1:
-            mapping[nm] = cand[0]
-            used.add(cand[0])
-        else:
-            leftover.append(nm)
+    def _by_team(cands, dteam):
+        """Pick the candidate whose Understat team best matches the datamb team."""
+        cands = [c for c in cands if c not in used]
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        dt = _norm(str(dteam))
+        score, pid = max((fuzz.token_set_ratio(dt, us_team.get(c, "")), c) for c in cands)
+        return pid if score >= 60 else None
 
-    # phase B: unique (first-initial, shared surname token) -- catches compound /
-    # appended surnames datamb shortens ('K. Mbappé' <-> 'Kylian Mbappe-Lottin',
-    # 'P. Kalulu' <-> 'Pierre Kalulu Kyatengwa').
-    still = []
-    for nm in leftover:
-        toks = _tokens2(nm)
-        if not toks:
-            continue
-        init = toks[0][0]
-        cand = {pid for tk in (toks[1:] or toks) if len(tk) >= 4
-                for pid, ui in tok_idx.get(tk, []) if ui == init and pid not in used}
-        if len(cand) == 1:
-            pid = cand.pop()
-            mapping[nm] = pid
-            used.add(pid)
+    mapping, used, leftover = {}, set(), []
+    for nm, tm in pairs:                               # phase A: unique initial+surname
+        cands = [i for i in by_key.get(_ikey(nm), []) if i not in used]
+        pick = cands[0] if len(cands) == 1 else (_by_team(cands, tm) if cands else None)
+        if pick is not None:
+            mapping[(nm, tm)] = pick
+            used.add(pick)
         else:
-            still.append(nm)
+            leftover.append((nm, tm))
+
+    still = []                                         # phase B: shared surname token
+    for nm, tm in leftover:
+        toks = _tokens2(nm)
+        cands = list({pid for tk in (toks[1:] or toks) if len(tk) >= 4
+                      for pid, ui in tok_idx.get(tk, []) if ui == toks[0][0] and pid not in used}) \
+            if toks else []
+        pick = cands[0] if len(cands) == 1 else (_by_team(cands, tm) if cands else None)
+        if pick is not None:
+            mapping[(nm, tm)] = pick
+            used.add(pick)
+        else:
+            still.append((nm, tm))
     leftover = still
 
-    for nm in leftover:                                # phase C: fuzzy fallback
+    for nm, tm in leftover:                            # phase C: fuzzy fallback
         target = _norm(nm)
         avail = [(i, n) for i, n in zip(us_ids, us_norm) if i not in used]
         if not target or not avail:
@@ -141,7 +152,7 @@ def _datamb_to_understat(con: duckdb.DuckDBPyConnection, names, season: str) -> 
         ids_a, names_a = [a[0] for a in avail], [a[1] for a in avail]
         best = process.extractOne(target, names_a, scorer=fuzz.token_sort_ratio)
         if best and best[1] >= MATCH_THRESHOLD:
-            mapping[nm] = ids_a[best[2]]
+            mapping[(nm, tm)] = ids_a[best[2]]
             used.add(ids_a[best[2]])
             continue
         cand = [(fuzz.token_set_ratio(target, n), i) for i, n in avail
@@ -149,7 +160,7 @@ def _datamb_to_understat(con: duckdb.DuckDBPyConnection, names, season: str) -> 
                 and _name_compatible(target, n)]
         if cand:
             score, pid = max(cand)
-            mapping[nm] = pid
+            mapping[(nm, tm)] = pid
             used.add(pid)
     return mapping
 
@@ -174,13 +185,14 @@ def build_profiles(season: str = FOCUS_SEASON,
           AND minutes_played >= {min_minutes} AND in_top5
     """).df()
     df = _assign_groups(df)                  # df["position_group"] = datamb group
-    xwalk = _datamb_to_understat(con, df["player"].unique(), season)
-    print(f"  datamb->understat: {len(xwalk)}/{df['player'].nunique()} players linked to player_id")
+    tcol = "team_within_selected_timeframe"
+    xwalk = _datamb_to_understat(con, list(zip(df["player"], df[tcol])), season)
+    df["player_id"] = [xwalk.get((p, t)) for p, t in zip(df["player"], df[tcol])]
+    print(f"  datamb->understat: {df['player_id'].notna().sum()}/{len(df)} players linked to player_id")
 
     # overlay FotMob position (same rule as rate.py) so SWOT pools match the
     # ratings; datamb only decides DM vs CM. See positions-use-fotmob.
     df["datamb_group"] = df["position_group"]
-    df["player_id"] = df["player"].map(xwalk)
     try:
         pp = con.execute("SELECT player_id, fotmob_group FROM player_position").df()
         fmg = dict(zip(pp.player_id, pp.fotmob_group))
@@ -209,7 +221,7 @@ def build_profiles(season: str = FOCUS_SEASON,
                                           vals.round(3), pct):
                 label = ("strength" if p >= STRONG_PCT else
                          "weakness" if p <= WEAK_PCT else "neutral")
-                rows.append((xwalk.get(player), season, player, team, grp, metric,
+                rows.append((xwalk.get((player, team)), season, player, team, grp, metric,
                              PRETTY.get(metric, metric), float(v), float(p),
                              round(weight, 4), invert, label))
 
@@ -245,7 +257,7 @@ def build_profiles(season: str = FOCUS_SEASON,
         FROM s
         JOIN player_ratings_v2 r
           ON r.season = s.season AND r.player = s.player
-         AND r.position_group = s.position_group
+         AND r.position_group = s.position_group AND r.team = s.team
         GROUP BY s.player_id, r.season, r.player, r.team, r.position_group,
                  r.detailed_position, r.rating, r.rank_in_group, r.classification
     """)
