@@ -855,35 +855,38 @@ class SoccerDB:
     # cumulative stats we expose per scope (frontend derives per-90 from these)
     _SCOPE_COUNTS = ["games", "minutes", "goals", "assists", "xg", "xa", "shots",
                      "chances_created", "big_chances_created", "dribbles_completed",
-                     "tackles", "interceptions", "passes_completed"]
+                     "duels_won", "tackles", "interceptions", "passes_completed"]
+    _SCOPE_RATES = ["pass_accuracy_pct", "duels_won_pct"]   # minutes-weighted %
 
     def _player_stat_scopes(self, pid: int, season: str = FOCUS_SEASON) -> dict:
         """Cumulative totals split into league / ucl / combined, from the canonical
         v_stats_combined (row-stacked by competition). Combined = league + ucl
-        (counts summed, pass accuracy minutes-weighted). Scopes with no minutes
-        are omitted so the UI can disable them."""
+        (counts summed, % rates minutes-weighted). Scopes with no minutes are
+        omitted so the UI can disable them."""
+        rate_sql = ", ".join(
+            f"SUM({c} * minutes) FILTER (WHERE {c} IS NOT NULL) "
+            f"/ NULLIF(SUM(minutes) FILTER (WHERE {c} IS NOT NULL), 0) AS {c}"
+            for c in self._SCOPE_RATES)
         df = self.con.execute(f"""
             SELECT CASE WHEN competition = 'UCL' THEN 'ucl' ELSE 'league' END AS scp,
-                   {', '.join(f'SUM({c}) AS {c}' for c in self._SCOPE_COUNTS)},
-                   SUM(pass_accuracy_pct * minutes) FILTER (WHERE pass_accuracy_pct IS NOT NULL)
-                     / NULLIF(SUM(minutes) FILTER (WHERE pass_accuracy_pct IS NOT NULL), 0)
-                     AS pass_accuracy_pct
+                   {', '.join(f'SUM({c}) AS {c}' for c in self._SCOPE_COUNTS)}, {rate_sql}
             FROM v_stats_combined WHERE player_id = ? AND season = ?
             GROUP BY scp
         """, [pid, season]).df()
         scopes = {}
         for r in df.itertuples():
             d = {c: _r(getattr(r, c), 2) for c in self._SCOPE_COUNTS}
-            d["pass_accuracy_pct"] = _i(r.pass_accuracy_pct)
+            for c in self._SCOPE_RATES:
+                d[c] = _i(getattr(r, c))
             if d["minutes"]:
                 scopes[r.scp] = d
         lg, ucl = scopes.get("league"), scopes.get("ucl")
         if lg and ucl:
             comb = {c: round((lg[c] or 0) + (ucl[c] or 0), 2) for c in self._SCOPE_COUNTS}
             tm = (lg["minutes"] or 0) + (ucl["minutes"] or 0)
-            comb["pass_accuracy_pct"] = round(
-                ((lg["pass_accuracy_pct"] or 0) * (lg["minutes"] or 0)
-                 + (ucl["pass_accuracy_pct"] or 0) * (ucl["minutes"] or 0)) / tm) if tm else None
+            for c in self._SCOPE_RATES:
+                comb[c] = round(((lg[c] or 0) * (lg["minutes"] or 0)
+                                 + (ucl[c] or 0) * (ucl["minutes"] or 0)) / tm) if tm else None
             scopes["combined"] = comb
         elif lg or ucl:
             scopes["combined"] = dict(lg or ucl)

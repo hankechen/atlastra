@@ -8,13 +8,16 @@ let radarChart, careerChart;
 const TOTAL_DEFS = [
   ['👕', 'games', 'Apps', 'count'], ['⚽', 'goals', 'Goals', 'count'], ['🅰', 'assists', 'Assists', 'count'],
   ['◎', 'xg', 'xG', 'dec'], ['⚲', 'xa', 'xA', 'dec'], ['💡', 'chances_created', 'Chances', 'count'],
-  ['⚡', 'dribbles_completed', 'Dribbles', 'count'], ['🛡', 'tackles', 'Tackles', 'count'],
-  ['✋', 'interceptions', 'Interceptions', 'count'], ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
+  ['★', 'big_chances_created', 'Big Chances', 'count'], ['⚡', 'dribbles_completed', 'Dribbles', 'count'],
+  ['💪', 'duels_won', 'Duels Won', 'count'], ['％', 'duels_won_pct', 'Duels %', 'pct'],
+  ['🛡', 'tackles', 'Tackles', 'count'], ['✋', 'interceptions', 'Interceptions', 'count'],
+  ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
 ];
 const PER90_DEFS = [
   ['👕', 'games', 'Apps', 'count'], ['⚽', 'goals', 'Goals / 90', 'per90'], ['🅰', 'assists', 'Assists / 90', 'per90'],
   ['◎', 'xg', 'xG / 90', 'per90'], ['⚲', 'xa', 'xA / 90', 'per90'], ['💡', 'chances_created', 'Chances / 90', 'per90'],
   ['★', 'big_chances_created', 'Big Ch. / 90', 'per90'], ['⚡', 'dribbles_completed', 'Dribbles / 90', 'per90'],
+  ['💪', 'duels_won', 'Duels / 90', 'per90'], ['％', 'duels_won_pct', 'Duels %', 'pct'],
   ['🛡', 'tackles', 'Tackles / 90', 'per90'], ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
 ];
 const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined']];

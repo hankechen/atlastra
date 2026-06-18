@@ -181,7 +181,7 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
 .rgauge .cls{color:var(--accent);font-weight:700;font-size:12px;margin-top:4px;text-align:center}
 
 /* stat tiles */
-.tiles{display:grid;grid-template-columns:repeat(10,1fr);gap:12px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(94px,1fr));gap:12px}
 .tile{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 10px;text-align:center}
 .tile .ic{color:var(--muted);font-size:16px;margin-bottom:8px}
 .tile b{font-size:20px;font-weight:800;display:block}
