@@ -772,6 +772,16 @@ class SoccerDB:
                     return grp, a
         return None, None
 
+    def _player_tendencies(self, pid: int, top: int = 5, min_pct: int = 55) -> list:
+        """Use case 9: the on-ball actions this player does most relative to position
+        peers (highest-percentile TENDENCIES), as name + per-90 value + percentile."""
+        df = self.con.execute(
+            "SELECT tendency, value, percentile FROM player_tendencies "
+            "WHERE player_id = ? AND percentile >= ? ORDER BY percentile DESC LIMIT ?",
+            [pid, min_pct, top]).df()
+        return [{"name": r.tendency, "value": _r(r.value, 2), "percentile": _i(r.percentile)}
+                for r in df.itertuples()]
+
     def _player_archetype(self, pid: int) -> dict:
         """Archetype label + fit + signature traits + similar players for a player."""
         a = self.con.execute(
@@ -968,6 +978,7 @@ class SoccerDB:
             "tiles": tiles, "radar": radar,
             "stats_scopes": self._player_stat_scopes(pid, season),  # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
+            "signature_actions": self._player_tendencies(pid),  # use case 9
             "career_stat": career_stat, "career": career,
             "strengths": _split(prof["strengths"]),
             "weaknesses": _split(prof["weaknesses"]),

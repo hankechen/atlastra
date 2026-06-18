@@ -112,9 +112,12 @@ async function load(name, careerStat = 'xa') {
   // archetype + similar players (use case 10)
   renderArchetype(p.archetype);
 
-  // technique placeholder (use case 9 — no event data)
-  document.getElementById('tech').innerHTML = TECH.map(([n, pc], i) =>
-    `<div class="t"><span class="rk">${i + 1}</span><span style="width:140px">${n}</span><span class="bar"><i style="width:${pc * 4}%"></i></span><b>${pc}%</b></div>`).join('');
+  // signature actions (use case 9): real, from the player's standout per-90 actions
+  document.getElementById('tech').innerHTML = (p.signature_actions || []).map((a, i) =>
+    `<div class="t"><span class="rk">${i + 1}</span><span class="tn" style="width:150px">${a.name}</span>
+      <span class="bar" title="${a.percentile}th percentile"><i style="width:${a.percentile}%"></i></span>
+      <b>${a.value}<span class="per90">/90</span></b></div>`).join('')
+    || '<div class="muted">Not enough on-ball data.</div>';
 
   drawRadar(p.radar);
   drawCareer(p.career, careerStat);

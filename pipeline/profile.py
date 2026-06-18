@@ -67,6 +67,31 @@ RADAR_METRICS = [
     "take_ons", "take_on_pct", "aerial_pct",                           # Dribbling
 ]
 
+# Signature actions (use case 9): on-ball ACTIONS a player does often, surfaced as
+# the ones where they rank highest vs position peers. Friendly name -> datamb
+# (player_wyscout) per-90 column. NOT literal "techniques" (those need event/video
+# data we don't have) -- this is action FREQUENCY relative to peers.
+TENDENCIES = {
+    "Take-ons": "successful_dribbles_per_90",
+    "Ball carrying": "progressive_carries_per_90",
+    "Accelerations": "accelerations_per_90",
+    "Crossing": "crosses_to_box_per_90",
+    "Through balls": "through_passes_per_90",
+    "Smart passes": "smart_passes_per_90",
+    "Key passes": "key_passes_per_90",
+    "Line-breaking passes": "progressive_passes_completed_per_90",
+    "Long passing": "long_passes_completed_per_90",
+    "Deep completions": "deep_completions_per_90",
+    "Shot creation": "shot_assists_per_90",
+    "Box presence": "touches_in_box_per_90",
+    "Shooting": "shots_per_90",
+    "Aerial duels": "aerial_duels_won_per_90",
+    "Tackling": "defensive_duels_won_per_90",
+    "Interceptions": "interceptions_per_90",
+    "Blocks": "shots_blocked_per_90",
+    "Clearances": "clearances_per_90",
+}
+
 # Human-readable metric labels (the VECTORS use terse keys).
 PRETTY = {
     "npxG": "non-penalty xG", "npGoals": "non-penalty goals", "finishing": "finishing",
@@ -269,6 +294,24 @@ def build_profiles(season: str = FOCUS_SEASON,
                                              "metric", "metric_label", "percentile"])
     con.execute("DROP TABLE IF EXISTS player_radar_metrics")
     con.execute("CREATE TABLE player_radar_metrics AS SELECT * FROM rout")
+
+    # Signature actions (use case 9): percentile each TENDENCIES per-90 action
+    # within position group; the profile surfaces a player's highest-ranked ones.
+    tend_rows = []
+    for grp, g in df.groupby("position_group"):
+        for tname, col in TENDENCIES.items():
+            if col not in g.columns:
+                continue
+            vals = pd.to_numeric(g[col], errors="coerce")
+            pct = (vals.rank(pct=True) * 100).round(1)
+            for pid, v, p in zip(g["player_id"], vals, pct):
+                if pd.notna(pid) and pd.notna(v) and pd.notna(p):
+                    tend_rows.append((int(pid), season, grp, tname, round(float(v), 2), float(p)))
+    tout = pd.DataFrame(tend_rows, columns=["player_id", "season", "position_group",
+                                            "tendency", "value", "percentile"])
+    con.execute("DROP TABLE IF EXISTS player_tendencies")
+    con.execute("CREATE TABLE player_tendencies AS SELECT * FROM tout")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_tend ON player_tendencies(player_id)")
 
     # Summary view: top strengths (by percentile), weaknesses & improvements
     # (improvements = weaknesses ordered by metric weight) per player.

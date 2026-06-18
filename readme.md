@@ -15,7 +15,7 @@ defenders - tackles, interceptions, aerial/ground duels, recoveries)
 6. Team Performance/League Standing
 7. Team Information (Squad, Manager, Venue)
 8. Search by Player, Team, or Match (Two Teams, Resulted sorted by recency)
-9. Player techniques (most commonly used techniques from a player)
+9. Player techniques (most commonly used techniques from a player) — implemented as **Signature Actions**: the on-ball actions a player performs most relative to position peers (take-ons, through balls, crosses, carries, key passes, aerials…), since literal move-recognition needs event/video data the warehouse doesn't have
 10. Player Archetypes (rule-based scouting roles per position — e.g. Poacher, Deep-Lying Playmaker, Ball-Playing Defender — with a fit %, signature traits, and most-similar players)
 
 ## Please try the following APIs if available. Please try web scraping if none of the below works.  

@@ -445,3 +445,8 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .ad-grid-h{font-size:12px;letter-spacing:1px;color:var(--muted);font-weight:700;text-transform:uppercase;margin:20px 0 12px}
 .fitbar{height:5px;background:var(--card2);border-radius:4px;overflow:hidden;margin-top:10px}
 .fitbar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+
+/* signature actions (use case 9) */
+.tech .t .tn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tech .t b{font-weight:700;white-space:nowrap;min-width:52px;text-align:right}
+.tech .per90{color:var(--muted);font-weight:500;font-size:11px}
