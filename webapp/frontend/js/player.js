@@ -127,10 +127,14 @@ async function load(name, careerStat = 'xa') {
   drawHeatmap(p.heatmap);
 }
 
-// SofaScore season heatmap: blurred density over a pitch (attacks left -> right)
+// SofaScore season heatmap: blurred density over a pitch (attacks left -> right).
+// Conventional football scale: faint green (low) -> yellow -> orange -> red (high),
+// transparent at the very low end so the pitch shows through (no blue wash).
 function heatColor(v) {
   v = Math.min(1, v);
-  return `hsla(${(1 - v) * 235}, 85%, 52%, ${Math.min(0.92, 0.12 + v * 0.85)})`;
+  const hue = 145 - 145 * Math.min(1, v * 1.15);     // 145 green -> 0 red
+  const alpha = Math.max(0, Math.min(0.82, (v - 0.04) * 1.15));
+  return `hsla(${hue}, 85%, 50%, ${alpha})`;
 }
 function drawPitch(ctx, W, H) {
   ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5;
