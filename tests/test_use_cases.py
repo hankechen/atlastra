@@ -196,9 +196,19 @@ def demo():
 
         _h("USE CASE 4 — Cross-Year Progression: Erling Haaland (default FWD stats)")
         print(d.player_progression("Haaland").to_string(index=False))
+        print("\nSame player, custom stats [xg_per90, big_chances_missed, pass_accuracy_pct]:")
+        print(d.player_progression(
+            "Haaland", stats=["xg_per90", "big_chances_missed", "pass_accuracy_pct"]
+        ).to_string(index=False))
 
-        _h("USE CASE 5 — Comparison: Haaland vs Mbappé vs Kane (2025/26)")
+        _h("USE CASE 5 — Comparison: Haaland vs Mbappé vs Kane (2025/26, FWD defaults)")
         print(d.compare_players(["Haaland", "Mbappé", "Kane"]).to_string())
+        print("\nDefenders on defender defaults — Saliba vs van Dijk vs Rüdiger:")
+        print(d.compare_players(["Saliba", "van Dijk", "Rúdiger"]).to_string())
+        print("\nCustom stats — Saka vs Vinícius [xg_per90, xa_per90, dribbles_completed]:")
+        print(d.compare_players(
+            ["Saka", "Vinícius Júnior"], stats=["xg_per90", "xa_per90", "dribbles_completed"]
+        ).to_string())
 
         _h("USE CASE 6 — League Standing: Premier League 2025/26 (top 8)")
         print(d.league_standings(PL).head(8).to_string(index=False))

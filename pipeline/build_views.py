@@ -257,8 +257,58 @@ def build_views() -> None:
         FROM v_stats_combined_player
         ORDER BY player_id, season
     """)
+    # Per-season domestic stat spine (use case 4: cross-year progression).
+    # Understat (all seasons) + FotMob enrichment (2020/21+ only) aggregated per
+    # (player_id, season); counts SUMmed across leagues, rates minutes-weighted.
+    con.execute("""
+        CREATE OR REPLACE VIEW v_player_season_stats AS
+        WITH us AS (
+            SELECT player_id, season, arg_max(team_id, minutes) AS team_id,
+                   SUM(matches) AS games, SUM(minutes) AS minutes,
+                   SUM(goals) AS goals, SUM(assists) AS assists,
+                   SUM(xg) AS xg, SUM(xa) AS xa, SUM(shots) AS shots,
+                   SUM(key_passes) AS key_passes
+            FROM player_season_stats GROUP BY player_id, season
+        ), en AS (
+            SELECT player_id, season,
+                   SUM(chances_created) AS chances_created,
+                   SUM(big_chances_created) AS big_chances_created,
+                   SUM(big_chances_missed) AS big_chances_missed,
+                   SUM(dribbles_completed) AS dribbles_completed,
+                   SUM(tackles) AS tackles, SUM(interceptions) AS interceptions,
+                   SUM(recoveries) AS recoveries, SUM(passes_completed) AS passes_completed,
+                   SUM(duels_won) AS duels_won,
+                   SUM(duels_won_pct * minutes_played)
+                       / NULLIF(SUM(minutes_played), 0) AS duels_won_pct,
+                   SUM(dribble_success_pct * minutes_played)
+                       / NULLIF(SUM(minutes_played), 0) AS dribble_success_pct,
+                   SUM(pass_accuracy_pct * minutes_played)
+                       / NULLIF(SUM(minutes_played), 0) AS pass_accuracy_pct,
+                   SUM(fotmob_rating * minutes_played)
+                       / NULLIF(SUM(minutes_played), 0) AS fotmob_rating
+            FROM player_enrichment WHERE source = 'fotmob' GROUP BY player_id, season
+        )
+        SELECT us.player_id, us.season, t.team_name AS team,
+               us.games, us.minutes, us.goals, us.assists,
+               us.goals + us.assists AS ga, us.xg, us.xa, us.shots, us.key_passes,
+               ROUND(us.goals    / NULLIF(us.minutes, 0) * 90, 3) AS goals_per90,
+               ROUND(us.assists  / NULLIF(us.minutes, 0) * 90, 3) AS assists_per90,
+               ROUND((us.goals + us.assists) / NULLIF(us.minutes, 0) * 90, 3) AS ga_per90,
+               ROUND(us.xg / NULLIF(us.minutes, 0) * 90, 3) AS xg_per90,
+               ROUND(us.xa / NULLIF(us.minutes, 0) * 90, 3) AS xa_per90,
+               en.chances_created, en.big_chances_created, en.big_chances_missed,
+               en.dribbles_completed, en.tackles, en.interceptions, en.recoveries,
+               en.passes_completed, en.duels_won,
+               ROUND(en.duels_won_pct, 1) AS duels_won_pct,
+               ROUND(en.dribble_success_pct, 1) AS dribble_success_pct,
+               ROUND(en.pass_accuracy_pct, 1) AS pass_accuracy_pct,
+               ROUND(en.fotmob_rating, 2) AS fotmob_rating
+        FROM us
+        LEFT JOIN en USING (player_id, season)
+        LEFT JOIN teams t ON t.team_id = us.team_id
+    """)
     for v in ("v_stats_ucl", "v_stats_top5", "v_stats_combined", "v_stats_combined_player",
-              "v_player_career"):
+              "v_player_career", "v_player_season_stats"):
         n = con.execute(f"SELECT COUNT(*) FROM {v}").fetchone()[0]
         seasons = con.execute(f"SELECT COUNT(DISTINCT season) FROM {v}").fetchone()[0]
         print(f"{v}: {n} rows across {seasons} seasons")

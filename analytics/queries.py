@@ -37,15 +37,26 @@ class SoccerDB:
 
     # ----- small lookup helpers ------------------------------------------- #
     def find_player_id(self, name: str, season: str = FOCUS_SEASON) -> int | None:
-        """Case-insensitive partial match; prefers the player with most minutes."""
+        """Case-insensitive partial match. Ranks exact, then whole-word (so
+        'Saka' -> Bukayo Saka, not Wan-Bis*saka*), then substring; ties by
+        minutes."""
         df = self.con.execute(
             """
             SELECT p.player_id, p.player_name, sum(ps.minutes) AS mins
             FROM players p JOIN player_season_stats ps USING(player_id)
-            WHERE strip_accents(lower(p.player_name)) LIKE strip_accents(lower('%' || ? || '%'))
-            GROUP BY 1, 2 ORDER BY mins DESC LIMIT 1
+            WHERE strip_accents(lower(p.player_name)) LIKE '%' || strip_accents(lower(?)) || '%'
+            GROUP BY 1, 2
+            ORDER BY
+              (strip_accents(lower(p.player_name)) = strip_accents(lower(?))) DESC,
+              -- whole-word match: pad with spaces and treat '-' as a boundary, so
+              -- 'Mbappe' matches both 'Ethan Mbappe' and 'Kylian Mbappe-Lottin'
+              -- (then minutes break the tie -> Kylian), not Wan-Bis*saka*.
+              ((' ' || replace(strip_accents(lower(p.player_name)), '-', ' ') || ' ')
+                 LIKE '% ' || strip_accents(lower(?)) || ' %') DESC,
+              mins DESC
+            LIMIT 1
             """,
-            [name],
+            [name, name, name],
         ).fetchone()
         return None if df is None else int(df[0])
 
@@ -166,12 +177,16 @@ class SoccerDB:
         }
 
     # ----- use case 4: cross-year progression ----------------------------- #
+    # README default comparison stats per position group. FotMob-sourced stats
+    # (dribbles/big-chances/passes/duels/tackles/interceptions/recoveries) are
+    # only populated from 2020/21 on; earlier seasons show goals/assists only.
     DEFAULT_PROGRESSION_STATS = {
-        "FWD": ["ga_per90", "goals_per90", "key_passes_per90", "xg_per90"],
-        "MID": ["ga_per90", "key_passes_per90", "xa_per90", "assists_per90"],
-        "DEF": ["xg_buildup", "key_passes_per90", "assists_per90"],
-        "GK":  ["minutes", "matches"],
+        "FWD": ["ga_per90", "dribbles_completed", "chances_created"],
+        "MID": ["ga_per90", "big_chances_created", "passes_completed", "duels_won"],
+        "DEF": ["tackles", "interceptions", "duels_won", "recoveries"],
+        "GK":  ["ga_per90", "pass_accuracy_pct"],
     }
+    _PROGRESSION_BASE = ["season", "team", "games", "minutes", "goals", "assists"]
 
     def player_progression(self, player: str, stats: list[str] | None = None) -> pd.DataFrame:
         pid = self.find_player_id(player)
@@ -180,20 +195,20 @@ class SoccerDB:
         grp = self.con.execute(
             "SELECT position_group FROM players WHERE player_id=?", [pid]
         ).fetchone()[0]
+        # only allow real columns of the season-stats view (guards custom input)
+        allowed = {r[1] for r in self.con.execute(
+            "PRAGMA table_info('v_player_season_stats')").fetchall()}
         cols = stats or self.DEFAULT_PROGRESSION_STATS.get(grp, ["ga_per90", "goals", "assists"])
-        select_cols = ", ".join(cols)
+        cols = [c for c in cols if c in allowed and c not in self._PROGRESSION_BASE]
+        select_cols = ", ".join(self._PROGRESSION_BASE + cols)
         return self.con.execute(
-            f"""
-            SELECT ps.season, t.team_name AS team, ps.matches, ps.minutes,
-                   ps.goals, ps.assists, {select_cols}
-            FROM player_season_stats ps JOIN teams t USING(team_id)
-            WHERE ps.player_id = ? ORDER BY ps.season
-            """,
+            f"SELECT {select_cols} FROM v_player_season_stats "
+            "WHERE player_id = ? ORDER BY season",
             [pid],
         ).df()
 
     # ----- use case 5: player comparison ---------------------------------- #
-    # columns that live on the FotMob enrichment table rather than Understat
+    # FotMob-enrichment stat columns (used by stat_leaders to validate input).
     ENRICH_STATS = {
         "big_chances_created", "big_chances_missed", "dribbles_completed",
         "dribble_success_pct", "tackles", "interceptions", "recoveries",
@@ -203,33 +218,37 @@ class SoccerDB:
 
     def compare_players(self, players: list[str], season: str = FOCUS_SEASON,
                         stats: list[str] | None = None) -> pd.DataFrame:
-        cols = stats or ["matches", "minutes", "goals", "assists", "xg", "xa",
-                         "key_passes", "goals_per90", "xg_per90",
-                         "dribbles_completed", "tackles", "interceptions",
-                         "pass_accuracy_pct", "fotmob_rating"]
-        ids = [self.find_player_id(p, season) for p in players]
-        ids = [i for i in ids if i is not None]
+        """Compare players side-by-side for one season on custom stats, or the
+        same position-based default stats as cross-year progression (use case 4).
+        Pulls from v_player_season_stats so both sources are already merged."""
+        ids = [i for i in (self.find_player_id(p, season) for p in players) if i is not None]
         if not ids:
             return pd.DataFrame()
-        select_cols = ", ".join(
-            f"{'e' if c in self.ENRICH_STATS else 'ps'}.{c}" for c in cols
-        )
+        groups = [r[0] for r in self.con.execute(
+            f"SELECT position_group FROM players WHERE player_id IN ({','.join(['?']*len(ids))})",
+            ids).fetchall()]
+        allowed = {r[1] for r in self.con.execute(
+            "PRAGMA table_info('v_player_season_stats')").fetchall()}
+        if stats:
+            cols = [c for c in stats if c in allowed]
+        elif len(set(groups)) == 1:                      # all same position -> its defaults
+            cols = self.DEFAULT_PROGRESSION_STATS.get(groups[0], [])
+        else:                                            # mixed positions -> generic set
+            cols = ["ga_per90", "goals", "assists", "chances_created"]
+        base = ["games", "minutes", "goals", "assists"]
+        statcols = base + [c for c in cols if c in allowed and c not in base]
+        select_cols = ", ".join(f"v.{c}" for c in statcols)
         placeholders = ",".join(["?"] * len(ids))
         df = self.con.execute(
             f"""
-            SELECT pl.player_name, t.team_name AS team, ps.position_group, {select_cols}
-            FROM player_season_stats ps
-            JOIN players pl USING(player_id)
-            JOIN teams t USING(team_id)
-            LEFT JOIN player_enrichment e
-                   ON e.player_id = ps.player_id AND e.season = ps.season
-                  AND e.league_key = ps.league_key
-            WHERE ps.player_id IN ({placeholders}) AND ps.season = ?
-            ORDER BY ps.minutes DESC
+            SELECT pl.player_name, v.team, pl.position_group, {select_cols}
+            FROM v_player_season_stats v JOIN players pl USING(player_id)
+            WHERE v.player_id IN ({placeholders}) AND v.season = ?
+            ORDER BY v.minutes DESC
             """,
             ids + [season],
         ).df()
-        # collapse to one row per player (most-played team) and transpose for side-by-side
+        # one row per player, transposed so stats are rows and players are columns
         df = df.drop_duplicates("player_name", keep="first").set_index("player_name")
         return df.T
 
