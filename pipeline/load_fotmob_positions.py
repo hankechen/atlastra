@@ -30,14 +30,20 @@ except ModuleNotFoundError:  # pragma: no cover
 FOTMOB_RAW = RAW_DIR.parent / "fotmob"
 
 # FotMob primary positionId -> (rating group, side). Side only for W / FB.
+# Note 71=RWB and 79=LWB are WING-BACKS -> FB (not central mid); e.g. Dimarco's
+# primary 79 was mis-read as CM before this.
 GK = {11}
 CB = {31, 34, 35, 36, 39}
-RB, LB = {32, 33}, {37, 38}
-CMID = {64, 65, 66, 71, 72, 73, 74, 75, 76, 77, 78, 79}   # central mid (DM vs CM -> datamb)
+RB, LB = {32, 33, 71}, {37, 38, 79}
+CMID = {64, 65, 66, 72, 73, 74, 75, 76, 77, 78}          # central mid (DM vs CM -> datamb)
 AM = {82, 84, 85, 86, 103}
 RW, LW = {83, 88, 92}, {96, 105, 106, 107}
 GENERIC_W = {87}
 ST = {104, 114, 115}
+
+# Manual overrides for any remaining obvious FotMob mis-tags, keyed by Understat
+# player name -> (group, side). Empty unless a clear case is found.
+OVERRIDES: dict = {}
 
 
 def _fm_group_side(posids):
@@ -74,6 +80,11 @@ def load_fotmob_positions(season: str = FOCUS_SEASON) -> None:
         lambda s: _fm_group_side([int(x) for x in str(s).split(",") if x]))
     fm["fotmob_group"] = [g for g, _ in gs]
     fm["side"] = [s for _, s in gs]
+    # apply manual overrides (keyed by FotMob player name)
+    ov = fm["player_name"].map(OVERRIDES)
+    fm["fotmob_group"] = [o[0] if isinstance(o, tuple) else g
+                          for o, g in zip(ov, fm["fotmob_group"])]
+    fm["side"] = [o[1] if isinstance(o, tuple) else s for o, s in zip(ov, fm["side"])]
     fm = fm.dropna(subset=["fotmob_group"]).drop_duplicates("player_id")
 
     # datamb name -> player_id, so the (name-keyed) rating engine can join by name
