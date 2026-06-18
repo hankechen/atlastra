@@ -173,9 +173,29 @@ def build_profiles(season: str = FOCUS_SEASON,
         WHERE season = '{season}' AND datamb_position = main_position
           AND minutes_played >= {min_minutes} AND in_top5
     """).df()
-    df = _assign_groups(df)
+    df = _assign_groups(df)                  # df["position_group"] = datamb group
     xwalk = _datamb_to_understat(con, df["player"].unique(), season)
     print(f"  datamb->understat: {len(xwalk)}/{df['player'].nunique()} players linked to player_id")
+
+    # overlay FotMob position (same rule as rate.py) so SWOT pools match the
+    # ratings; datamb only decides DM vs CM. See positions-use-fotmob.
+    df["datamb_group"] = df["position_group"]
+    df["player_id"] = df["player"].map(xwalk)
+    try:
+        pp = con.execute("SELECT player_id, fotmob_group FROM player_position").df()
+        fmg = dict(zip(pp.player_id, pp.fotmob_group))
+    except Exception:
+        fmg = {}
+
+    def _final(player_id, dg):
+        fm = fmg.get(player_id)
+        if fm in ("GK", "CB", "ST", "AM", "W", "FB"):
+            return fm
+        if fm == "CMID":
+            return "DM" if dg == "DM" else "CM"
+        return dg
+    df["position_group"] = [_final(pid, dg)
+                            for pid, dg in zip(df["player_id"], df["datamb_group"])]
 
     rows = []
     for grp, g in df.groupby("position_group"):
@@ -214,8 +234,8 @@ def build_profiles(season: str = FOCUS_SEASON,
             FROM player_profile_metrics
         )
         SELECT
-            s.player_id, r.season, r.player, r.team, r.position_group, r.rating,
-            r.rank_in_group, r.classification,
+            s.player_id, r.season, r.player, r.team, r.position_group,
+            r.detailed_position, r.rating, r.rank_in_group, r.classification,
             string_agg(CASE WHEN s.strong_rk <= {TOP_N} AND s.label='strength'
                        THEN s.metric_label END, ', ' ORDER BY s.strong_rk) AS strengths,
             string_agg(CASE WHEN s.weak_rk <= {TOP_N} AND s.label='weakness'
@@ -226,8 +246,8 @@ def build_profiles(season: str = FOCUS_SEASON,
         JOIN player_ratings_v2 r
           ON r.season = s.season AND r.player = s.player
          AND r.position_group = s.position_group
-        GROUP BY s.player_id, r.season, r.player, r.team, r.position_group, r.rating,
-                 r.rank_in_group, r.classification
+        GROUP BY s.player_id, r.season, r.player, r.team, r.position_group,
+                 r.detailed_position, r.rating, r.rank_in_group, r.classification
     """)
 
     # Unified profile (use case 3): position + market value + career + SWOT,
@@ -236,7 +256,7 @@ def build_profiles(season: str = FOCUS_SEASON,
         CREATE OR REPLACE VIEW v_player_profile_full AS
         SELECT
             pp.player_id, pp.player, pp.team, pp.position_group AS main_position,
-            pp.rating, pp.rank_in_group, pp.classification,
+            pp.detailed_position, pp.rating, pp.rank_in_group, pp.classification,
             mv.market_value_eur,
             car.seasons AS career_seasons, car.career_games,
             car.career_goals, car.career_assists,

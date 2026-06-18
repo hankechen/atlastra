@@ -97,6 +97,12 @@ def main():
     print("\n### 6b. LOAD SofaScore Top-5 defense (clearances/errors) ###")
     sofadom_load_mod.load_sofa_domestic()
 
+    print("\n### 6c. RESOLVE POSITIONS (FotMob LW/RW/LB/RB/...) ###")
+    try:
+        fmpos_load_mod.load_fotmob_positions()
+    except Exception as e:
+        print(f"position resolve skipped ({repr(e)[:80]}); run `python -m pipeline.load_fotmob_positions`.")
+
     print("\n### 7. PLAYER RATINGS (position-weighted engine) ###")
     try:
         rate_mod.rate()
@@ -115,12 +121,6 @@ def main():
         profile_mod.build_profiles()
     except Exception as e:
         print(f"profile build skipped ({repr(e)[:80]}); run `python -m pipeline.profile`.")
-
-    print("\n### 10b. DETAILED POSITIONS (FotMob LW/RW/LB/RB) ###")
-    try:
-        fmpos_load_mod.load_fotmob_positions()
-    except Exception as e:
-        print(f"detailed positions skipped ({repr(e)[:80]}); run `python -m pipeline.load_fotmob_positions`.")
 
     print("\n### 11. COMBINED RATINGS (League + UCL, common-metric) ###")
     try:

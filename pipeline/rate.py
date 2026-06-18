@@ -255,19 +255,51 @@ def rate(season: str = FOCUS_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) 
     """).df()
     print(f"rating {len(df)} Top-5 players (>= {min_minutes} min) for {season}")
 
-    # assign each player a spec position group
-    df["position_group"] = None
+    # datamb-derived group (kept only for the DM-vs-CM decision)
+    df["datamb_group"] = None
     cm_mask = df["datamb_position"] == "CM"
-    df.loc[~cm_mask, "position_group"] = df.loc[~cm_mask, "datamb_position"].map(
+    df.loc[~cm_mask, "datamb_group"] = df.loc[~cm_mask, "datamb_position"].map(
         lambda b: BUCKET_TO_GROUPS[b][0])
     if cm_mask.any():
-        df.loc[cm_mask, "position_group"] = _split_cm(df[cm_mask]).values
+        df.loc[cm_mask, "datamb_group"] = _split_cm(df[cm_mask]).values
+
+    # position comes from FotMob (player_position); datamb only decides DM vs CM.
+    # See positions-use-fotmob: FotMob is authoritative for GK/CB/FB/ST/AM/W; the
+    # central-mid band ('CMID') falls back to datamb's DM/CM split (AM -> CM).
+    try:
+        pp = con.execute("SELECT datamb_player, fotmob_group, side FROM player_position "
+                         "WHERE datamb_player IS NOT NULL").df()
+        fmg = dict(zip(pp.datamb_player, pp.fotmob_group))
+        side = dict(zip(pp.datamb_player, pp.side))
+    except Exception:
+        fmg, side = {}, {}
+
+    def _final(player, dg):
+        fm = fmg.get(player)
+        if fm in ("GK", "CB", "ST", "AM", "W", "FB"):
+            return fm
+        if fm == "CMID":
+            return "DM" if dg == "DM" else "CM"
+        return dg                                    # no FotMob position -> datamb
+    df["position_group"] = [_final(p, dg) for p, dg in zip(df["player"], df["datamb_group"])]
+    df["pos_side"] = df["player"].map(side)
     print("  position groups:", df["position_group"].value_counts().sort_index().to_dict())
 
     results = [_rate_group(g, grp) for grp, g in df.groupby("position_group")]
     out = pd.concat(results, ignore_index=True)
     out["season"] = season
     out["rating_version"] = RATING_VERSION
+    # detailed position for display: W/FB get a side (LW/RW, LB/RB)
+    side_map = dict(zip(df["player"], df["pos_side"]))
+
+    def _detail(grp, player):
+        s = side_map.get(player)
+        if grp == "W":
+            return {"R": "RW", "L": "LW"}.get(s, "W")
+        if grp == "FB":
+            return {"R": "RB", "L": "LB"}.get(s, "FB")
+        return grp
+    out["detailed_position"] = [_detail(g, p) for g, p in zip(out["position_group"], out["player"])]
 
     # weights table (renormalised, with mapping) for transparency
     wrows = []
@@ -280,9 +312,9 @@ def rate(season: str = FOCUS_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) 
 
     con.execute("DROP TABLE IF EXISTS player_ratings_v2")
     con.execute("""CREATE TABLE player_ratings_v2 AS SELECT
-        season, player, team, position_group, minutes, composite, composite_adj,
-        standardized, rating, rank_in_group, percentile, classification, rating_version
-        FROM out""")
+        season, player, team, position_group, detailed_position, minutes, composite,
+        composite_adj, standardized, rating, rank_in_group, percentile, classification,
+        rating_version FROM out""")
     con.execute("DROP TABLE IF EXISTS rating_weights")
     con.execute("CREATE TABLE rating_weights AS SELECT * FROM weights")
     con.execute("CREATE INDEX IF NOT EXISTS idx_pr2_grp ON player_ratings_v2(position_group, rating)")

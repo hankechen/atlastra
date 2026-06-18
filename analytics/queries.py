@@ -176,14 +176,15 @@ class SoccerDB:
             [pid, FOCUS_SEASON],
         ).fetchone()
         swot = self.con.execute(
-            "SELECT rating, classification, strengths, weaknesses, areas_of_improvement "
-            "FROM v_player_profile_full WHERE player_id=?",
+            "SELECT rating, classification, strengths, weaknesses, areas_of_improvement, "
+            "detailed_position FROM v_player_profile_full WHERE player_id=?",
             [pid],
         ).fetchone()
         return {
             "player_name": head[0],
             "main_position": head[1],
             "position_group": head[2],
+            "detailed_position": swot[5] if swot else None,  # FotMob LW/RW/LB/RB/CAM/...
             "market_value_eur": mv[0] if mv else None,
             "rating": swot[0] if swot else None,
             "classification": swot[1] if swot else None,
@@ -469,7 +470,8 @@ class SoccerDB:
         # use the Understat full name (pl.player_name) -- f.player is datamb's
         # abbreviated form ('K. Mbappé') which find_player_id can't resolve.
         df = self.con.execute(f"""
-            SELECT pl.player_name AS player, f.team, f.main_position AS position, f.rating,
+            SELECT pl.player_name AS player, f.team,
+                   COALESCE(f.detailed_position, f.main_position) AS position, f.rating,
                    f.classification, f.market_value_eur, v.goals, v.assists
             FROM v_player_profile_full f
             JOIN players pl ON pl.player_id = f.player_id
@@ -568,13 +570,10 @@ class SoccerDB:
                  SELECT position_group FROM player_profile_metrics WHERE player_id = ? LIMIT 1)
             WHERE m.player_id = ? LIMIT 1
         """, [pid, pid]).fetchone()
-        dp = self.con.execute(
-            "SELECT detailed_position FROM player_position_detail WHERE player_id=?",
-            [pid]).fetchone()
         return {
             "name": prof["player_name"], "team": team,
             "position_group": prof["position_group"],
-            "detailed_position": dp[0] if dp else None,  # LW/RW/LB/RB/... (FotMob)
+            "detailed_position": prof.get("detailed_position"),  # LW/RW/LB/RB/CAM/... (FotMob)
             "age": self._player_age(prof["player_name"]),
             "market_value_eur": prof["market_value_eur"],
             "rating": prof["rating"], "classification": prof["classification"],
