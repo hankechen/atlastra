@@ -98,10 +98,15 @@ VECTORS = {
            ("take_ons", TAKEON, .12, False), ("take_on_pct", TAKEPC, .06, False),
            ("PrgCarries", PRGC, .12, False), ("key_passes", KEYP, .10, False),
            ("npGoals", NPG, .10, False), ("dispossessed", DISP, .08, True)],
-    "AM": [("xA", XA, .18, False), ("key_passes", KEYP, .14, False), ("SCA", SCA, .12, False),
-           ("npxG", NPXG, .12, False), ("PrgPasses", PRGP, .12, False),
-           ("PrgRecv", PRGR, .08, False), ("take_ons", TAKEON, .08, False),
-           ("pass_pct", PASSPC, .08, False), ("GCA", GCA, .08, False)],
+    # Rebalanced 2026-06 into three ~equal pillars (was ~0.52 on creativity):
+    #   creativity 0.34 (xA/key_passes/SCA/GCA) + scoring 0.33 (npxG/npGoals/
+    #   touches_in_box) + ball-carrying 0.33 (PrgCarries/take_ons/PrgPasses/PrgRecv).
+    "AM": [("xA", XA, .14, False), ("key_passes", KEYP, .10, False),
+           ("SCA", SCA, .05, False), ("GCA", GCA, .05, False),
+           ("npxG", NPXG, .15, False), ("npGoals", NPG, .12, False),
+           ("touches_in_box", TIB, .06, False),
+           ("PrgCarries", PRGC, .13, False), ("take_ons", TAKEON, .10, False),
+           ("PrgPasses", PRGP, .06, False), ("PrgRecv", PRGR, .04, False)],
     "CM": [("PrgPasses", PRGP, .16, False), ("Tkl_Int", TKLINT, .14, False),
            ("xA", XA, .12, False), ("key_passes", KEYP, .10, False),
            ("pass_pct", PASSPC, .10, False), ("PrgCarries", PRGC, .10, False),
