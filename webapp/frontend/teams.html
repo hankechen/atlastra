@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Teams</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=3">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search teams… (try: Arsenal, Real Madrid)"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Teams</h2><p>League standings and team performance across Europe's big five. Click any team for the full performance breakdown.</p></div>
+    </div>
+
+    <div class="tabs" id="leagueTabs"></div>
+    <section class="card">
+      <div class="ltbl-wrap">
+        <table class="ltbl">
+          <thead><tr>
+            <th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th>
+            <th>GF</th><th>GA</th><th>GD</th><th>xG</th><th>xGA</th><th>xPts</th><th>Pts</th><th>Form</th>
+          </tr></thead>
+          <tbody id="table"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=3"></script>
+<script src="/js/teams.js?v=3"></script>
+</body>
+</html>

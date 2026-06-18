@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Search</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=3">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players or teams…  (try: Saka, Madrid, Inter)" autofocus><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Search</h2><p>Find any player or team, or look up the head-to-head record between two clubs.</p></div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr">
+      <section class="card"><div class="card-h"><h3>Players</h3><span class="muted" id="pcount" style="font-size:12px"></span></div>
+        <div id="players"><div class="empty">Start typing above…</div></div></section>
+      <section class="card"><div class="card-h"><h3>Teams</h3><span class="muted" id="tcount" style="font-size:12px"></span></div>
+        <div id="teams"><div class="empty">Start typing above…</div></div></section>
+    </div>
+
+    <section class="card" style="margin-top:18px">
+      <div class="card-h"><h3>Head-to-Head</h3><span class="muted" style="font-size:12px">Fixtures between two teams, most recent first</span></div>
+      <div class="h2h-form">
+        <input id="teamA" placeholder="Team A  (e.g. Arsenal)" list="teamlist">
+        <span class="vs">vs</span>
+        <input id="teamB" placeholder="Team B  (e.g. Chelsea)" list="teamlist">
+        <button class="btn btn-primary" id="h2hBtn">Find fixtures</button>
+        <datalist id="teamlist"></datalist>
+      </div>
+      <div id="h2h"></div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=3"></script>
+<script src="/js/search.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Compare</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Add a player to compare — type a name and press Enter…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Compare Players</h2><p>Add 2–3 players and compare them on the default stats for their position, or pick your own. <span id="seasonNote" class="muted"></span></p></div>
+    </div>
+
+    <div id="chips" class="cmp-chips"></div>
+
+    <div id="empty" class="empty">Search for a player above (e.g. Pedri, Jude Bellingham) to start a comparison.</div>
+
+    <div id="board" class="cmp-board" style="display:none">
+      <section class="card">
+        <div class="card-h"><h3>Stat-by-stat</h3>
+          <select id="statPicker" class="cmp-select" title="Add a stat on top of the position defaults"></select>
+        </div>
+        <div id="table" class="cmp-table"></div>
+      </section>
+      <section class="card">
+        <div class="card-h"><h3>Profile radar</h3><span class="muted" style="font-size:12px">Percentile vs same position</span></div>
+        <canvas id="radar" height="300"></canvas>
+        <div id="legend" class="cmp-legend"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/compare.js"></script>
+</body>
+</html>

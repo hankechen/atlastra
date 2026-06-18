@@ -1,4 +1,5 @@
 renderSidebar('Home');
+attachSearchDropdown(document.getElementById('searchBox'));
 
 // ---- placeholders (no live/predictor/ToTS data in the warehouse) ----
 const LIVE = [
@@ -15,7 +16,7 @@ document.getElementById('liveMatches').innerHTML = LIVE.map(([m, h, hg, ag, a, s
 
 const BALLON = [['Kylian Mbappé', 34], ['Lamine Yamal', 29], ['Jude Bellingham', 16], ['Pedri', 8], ['Florian Wirtz', 7]];
 document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `
-  <div class="prow"><span class="rk">${i + 1}</span><span class="pic"></span>
+  <div class="prow" onclick="location.href='${pHref(n)}'"><span class="rk">${i + 1}</span><span class="pic"></span>
     <span class="nm">${n}</span><span class="bo-bar"><i style="width:${p * 2.5}%"></i></span><b>${p}%</b></div>`).join('');
 
 const TOTS = [['Donnarumma'], ['Mendes', 'Saliba', 'Rüdiger', 'Frimpong'], ['Pedri', 'Bellingham', 'Wirtz'], ['Raphinha', 'Mbappé', 'Salah']];
@@ -42,7 +43,8 @@ document.getElementById('tof').innerHTML = TOTS.map(line =>
     ['Most Dribbles', spot.most_dribbles, 'Dribbles'],
   ];
   document.getElementById('spotlight').innerHTML = cards.map(([lab, s, unit]) => `
-    <div class="s"><div class="lab">${lab}</div><div class="pic"></div>
+    <div class="s"${s ? ` onclick="location.href='${pHref(s.player)}'" style="cursor:pointer"` : ''}>
+      <div class="lab">${lab}</div><div class="pic"></div>
       <div class="nm">${s ? s.player : '—'}</div><div class="v">${s ? s.value + ' ' + unit : ''}</div></div>`).join('');
 
   // standings with league tabs
@@ -51,7 +53,8 @@ document.getElementById('tof').innerHTML = TOTS.map(line =>
   const tabsEl = document.getElementById('leagueTabs');
   async function loadStandings(key) {
     const rows = await api('/api/standings?league=' + encodeURIComponent(key));
-    document.getElementById('standings').innerHTML = rows.map(r => `<tr>
+    document.getElementById('standings').innerHTML = rows.map(r => `<tr class="ltbl-row"
+      onclick="location.href='${tHref(r.team)}'">
       <td>${r.pos}</td><td>${r.team}</td><td>${r.p}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td>
       <td>${r.gd}</td><td><b>${r.pts}</b></td>
       <td>${r.form.map(f => `<span class="form-pill form-${f}">${f}</span>`).join('')}</td></tr>`).join('');

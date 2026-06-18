@@ -14,11 +14,11 @@ filtersEl.querySelectorAll('.pill').forEach(p => p.onclick = () => {
 const card = (p) => `
   <div class="pcard" onclick="location.href='/player.html?name=${encodeURIComponent(p.player)}'">
     <div class="top">
-      <div class="photo">${initials(p.player)}</div>
+      <div class="photo">${avatarHTML(p.photo, p.player)}</div>
       <div class="rt">${p.rating ?? '—'}</div>
     </div>
     <div class="nm">${p.player}</div>
-    <div class="sub">${p.team} · ${p.position}</div>
+    <div class="sub">${crestHTML(p.team_logo, 'crest-sm')}${p.team} · ${p.position}</div>
     <span class="cls">${p.classification ?? ''}</span>
     <div class="row">
       <div class="x"><span>Goals</span><b>${p.goals ?? '—'}</b></div>

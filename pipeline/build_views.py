@@ -59,29 +59,47 @@ def _name_compatible(a: str, b: str) -> bool:
     return sa <= sb or sb <= sa or ta[-1] == tb[-1]
 
 
+TEAM_THRESHOLD = 60   # min team-name similarity to accept a name match
+
+
+def _team_ok(ucl_team: str, us_team: str) -> bool:
+    """A player plays the UCL for their own club, so a name match is only trusted
+    when the clubs line up too. This rejects mononym/subset collisions like
+    'Bruno' (Pafos, not in Top-5) -> 'Bruno Fernandes' (Man United). Missing team
+    on either side -> don't block (fall back to the name match)."""
+    a, b = _norm(ucl_team), _norm(us_team)
+    if not a or not b:
+        return True
+    return fuzz.token_set_ratio(a, b) >= TEAM_THRESHOLD
+
+
 def _build_xwalk(con: duckdb.DuckDBPyConnection) -> int:
     """Map UCL sofascore_player_id -> Understat player_id per season (two-phase
-    fuzzy name match) into table `ucl_understat_xwalk`."""
+    fuzzy name match, team-verified) into table `ucl_understat_xwalk`."""
     ucl = con.execute(
-        "SELECT sofascore_player_id AS pid, player_name, season FROM ucl_player_stats"
+        "SELECT sofascore_player_id AS pid, player_name, team_name, season "
+        "FROM ucl_player_stats"
     ).df()
     us = con.execute(
-        "SELECT DISTINCT ps.player_id, p.player_name, ps.season "
-        "FROM player_season_stats ps JOIN players p USING (player_id)"
+        "SELECT ps.player_id, any_value(p.player_name) AS player_name, "
+        "arg_max(t.team_name, ps.minutes) AS team_name, ps.season "
+        "FROM player_season_stats ps JOIN players p USING (player_id) "
+        "JOIN teams t USING (team_id) GROUP BY ps.player_id, ps.season"
     ).df()
     pools = {
         se: ([int(r.player_id) for r in g.itertuples()],
-             [_norm(r.player_name) for r in g.itertuples()])
+             [_norm(r.player_name) for r in g.itertuples()],
+             [r.team_name for r in g.itertuples()])
         for se, g in us.groupby("season")
     }
 
     rows = []
     for se, grp in ucl.groupby("season"):
-        ids, names = pools.get(se, ([], []))
+        ids, names, teams = pools.get(se, ([], [], []))
         if not names:
             continue
         used, leftover = set(), []
-        # phase 1: high-precision token_sort
+        # phase 1: high-precision token_sort (team-verified)
         for r in grp.itertuples():
             target = _norm(r.player_name)
             if not target:
@@ -91,19 +109,20 @@ def _build_xwalk(con: duckdb.DuckDBPyConnection) -> int:
                 leftover.append((r, target))
                 continue
             pid = ids[best[2]]
-            if pid in used:
+            if pid in used or not _team_ok(r.team_name, teams[best[2]]):
                 leftover.append((r, target))
                 continue
             used.add(pid)
             rows.append((int(r.pid), se, pid, float(best[1])))
-        # phase 2: token_set recovery on leftovers, globally assigned
+        # phase 2: token_set recovery on leftovers, globally assigned (team-verified)
         cands = []
         for r, target in leftover:
             for i, ut in enumerate(names):
                 if ids[i] in used:
                     continue
                 score = fuzz.token_set_ratio(target, ut)
-                if score >= RECOVER_THRESHOLD and _name_compatible(target, ut):
+                if (score >= RECOVER_THRESHOLD and _name_compatible(target, ut)
+                        and _team_ok(r.team_name, teams[i])):
                     cands.append((score, id(r), r, ids[i]))
         cands.sort(key=lambda c: -c[0])
         claimed = set()

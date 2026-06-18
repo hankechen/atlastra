@@ -64,14 +64,17 @@ def scrape(season: str = FOCUS_SEASON) -> None:
                     pids = m.get("positionIds")
                     if isinstance(pids, (list, tuple)):
                         pids = ",".join(str(x) for x in pids)
+                    # positionIdsDesc is FotMob's own text, primary-first (e.g.
+                    # "ST,RW,CAM") -- authoritative, unlike parsing the numeric ids.
                     rows.append((int(pid), m.get("name"), str(pids or ""),
+                                 m.get("positionIdsDesc"),
                                  m.get("cname"), m.get("ccode"), m.get("age"),
                                  m.get("dateOfBirth"), lk, season))
             time.sleep(RATE_LIMIT_SEC)
         print(f"  {lk}: {len(teams)} squads")
     df = pd.DataFrame(rows, columns=["fotmob_player_id", "player_name", "position_ids",
-                                     "nationality", "country_code", "age",
-                                     "date_of_birth", "league_key", "season"])
+                                     "position_ids_desc", "nationality", "country_code",
+                                     "age", "date_of_birth", "league_key", "season"])
     df = df.drop_duplicates("fotmob_player_id")
     FOTMOB_RAW.mkdir(parents=True, exist_ok=True)
     path = FOTMOB_RAW / f"positions_{season}.parquet"

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Team</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=3">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search teams…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span>🔔</span><span>🌙</span><div class="avatar"></div></div>
+    </div>
+    <div class="breadcrumb"><a href="/teams.html">Teams</a> › <b id="crumb">—</b></div>
+
+    <!-- header + performance tiles -->
+    <section class="card">
+      <div class="thead">
+        <div class="tcrest" id="tcrest"></div>
+        <div class="tmeta">
+          <h1 id="tname">—</h1>
+          <div class="tsub"><span id="tleague"></span> · <span id="tcountry"></span></div>
+          <div class="trank"><span class="pill-rank" id="trank">—</span><span class="tform" id="tform"></span></div>
+          <div class="tinfo" id="tinfo"></div>
+        </div>
+      </div>
+      <div class="tiles" id="perfTiles"></div>
+    </section>
+
+    <!-- recent results + top scorers -->
+    <div class="grid" style="grid-template-columns:1.4fr 1fr; margin-top:18px">
+      <section class="card"><div class="card-h"><h3>Recent Results</h3></div>
+        <div id="results"></div></section>
+      <section class="card"><div class="card-h"><h3>Top Scorers</h3></div>
+        <div id="scorers"></div></section>
+    </div>
+
+    <!-- squad -->
+    <section class="card" style="margin-top:18px">
+      <div class="card-h"><h3>Squad</h3><span class="muted" id="squadCount" style="font-size:12px"></span></div>
+      <div id="squad"></div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=3"></script>
+<script src="/js/team.js?v=3"></script>
+</body>
+</html>

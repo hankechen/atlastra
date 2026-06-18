@@ -45,6 +45,20 @@ ST = {104, 114, 115}
 # player name -> (group, side). Empty unless a clear case is found.
 OVERRIDES: dict = {}
 
+# FotMob positionIdsDesc text token -> (rating group, side). PRIMARY (first) token
+# is the main position. This is FotMob's own labelling, so it's authoritative --
+# the numeric-id map above was wrong for several ids (e.g. 105 is ST not LW, 103
+# is RW not AM), which mis-tagged Dembélé/Diomande etc. CM/DM both -> CMID so the
+# rating engine keeps deferring that split to datamb. See [[positions-use-fotmob]].
+DESC_TO_GROUP = {
+    "GK": ("GK", None), "CB": ("CB", None),
+    "RB": ("FB", "R"), "LB": ("FB", "L"), "RWB": ("FB", "R"), "LWB": ("FB", "L"),
+    "DM": ("CMID", None), "CM": ("CMID", None),
+    "RM": ("W", "R"), "LM": ("W", "L"), "RW": ("W", "R"), "LW": ("W", "L"),
+    "CAM": ("AM", None), "AM": ("AM", None),
+    "ST": ("ST", None), "CF": ("ST", None),
+}
+
 
 def _fm_group_side(posids):
     if not posids:
@@ -63,6 +77,15 @@ def _fm_group_side(posids):
     return None, None
 
 
+def _desc_group_side(desc, posids):
+    """Prefer FotMob's primary positionIdsDesc token; fall back to the numeric map."""
+    if desc:
+        first = str(desc).split(",")[0].strip().upper()
+        if first in DESC_TO_GROUP:
+            return DESC_TO_GROUP[first]
+    return _fm_group_side(posids)
+
+
 def load_fotmob_positions(season: str = FOCUS_SEASON) -> None:
     path = FOTMOB_RAW / f"positions_{season}.parquet"
     if not path.exists():
@@ -76,8 +99,10 @@ def load_fotmob_positions(season: str = FOCUS_SEASON) -> None:
         "SELECT DISTINCT fotmob_player_id, player_id FROM player_enrichment "
         "WHERE source='fotmob' AND season=? AND fotmob_player_id IS NOT NULL", [season]).df()
     fm = pos.merge(emap, on="fotmob_player_id")
-    gs = fm["position_ids"].apply(
-        lambda s: _fm_group_side([int(x) for x in str(s).split(",") if x]))
+    desc_col = fm["position_ids_desc"] if "position_ids_desc" in fm.columns \
+        else pd.Series([None] * len(fm), index=fm.index)
+    gs = [_desc_group_side(desc, [int(x) for x in str(s).split(",") if x])
+          for desc, s in zip(desc_col, fm["position_ids"])]
     fm["fotmob_group"] = [g for g, _ in gs]
     fm["side"] = [s for _, s in gs]
     # apply manual overrides (keyed by FotMob player name)

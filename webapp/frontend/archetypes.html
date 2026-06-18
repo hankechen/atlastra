@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Archetypes</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=3">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players or teams…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Player Archetypes</h2><p>Scouting roles derived from each player's statistical fingerprint (percentiles within position). Pick a role to see who fits it best.</p></div>
+    </div>
+
+    <div class="arch-explorer">
+      <aside class="arch-nav" id="archNav"></aside>
+      <section class="card arch-detail" id="archDetail"></section>
+    </div>
+  </main>
+</div>
+<script src="/js/api.js?v=3"></script>
+<script src="/js/archetypes.js?v=3"></script>
+</body>
+</html>

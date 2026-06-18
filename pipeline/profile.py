@@ -49,6 +49,24 @@ STRONG_PCT = 75   # percentile at/above which a metric is a strength
 WEAK_PCT = 25     # percentile at/below which a metric is a weakness
 TOP_N = 4         # how many of each to surface in the summary view
 
+# metric -> (expr, invert), deduped across all position vectors -> lets us score
+# any player on any metric, not just the ones weighted for their position.
+ALL_METRIC_EXPR = {}
+for _grp, _vec in VECTORS.items():
+    for _m, _expr, _w, _inv in _vec:
+        ALL_METRIC_EXPR.setdefault(_m, (_expr, _inv))
+
+# the metrics behind the profile radar's 6 axes (see queries.RADAR_AXES) -- scored
+# for EVERY player into player_radar_metrics so no axis falls back to a fake 50.
+RADAR_METRICS = [
+    "SCA", "key_passes", "GCA", "xA", "crosses_to_box",                 # Chance Creation
+    "PrgPasses", "PrgCarries", "PrgRecv", "prg_pass_acc",               # Progression
+    "pass_pct", "fwd_pass_pct", "acc_passes_f3",                        # Passing
+    "npxG", "npGoals", "finishing", "SoT", "touches_in_box",            # Finishing
+    "Tkl_Int", "def_duel_pct", "recoveries", "Int_padj", "blocks_clearances",  # Defending
+    "take_ons", "take_on_pct", "aerial_pct",                           # Dribbling
+]
+
 # Human-readable metric labels (the VECTORS use terse keys).
 PRETTY = {
     "npxG": "non-penalty xG", "npGoals": "non-penalty goals", "finishing": "finishing",
@@ -230,6 +248,27 @@ def build_profiles(season: str = FOCUS_SEASON,
     out = pd.DataFrame(rows, columns=cols)
     con.execute("DROP TABLE IF EXISTS player_profile_metrics")
     con.execute("CREATE TABLE player_profile_metrics AS SELECT * FROM out")
+
+    # Radar metrics: percentile every player on the FULL radar metric set (not just
+    # their position vector), still ranked within their position group -- so the
+    # profile radar shows a real number on every axis (e.g. a striker's Defending
+    # vs other strikers) instead of a fake neutral 50 for unmeasured axes.
+    radar_rows = []
+    for grp, g in df.groupby("position_group"):
+        for metric in RADAR_METRICS:
+            expr, invert = ALL_METRIC_EXPR[metric]
+            vals = _metric_series(g, expr)
+            pr = vals.rank(pct=True)
+            pct = (((1 - pr) if invert else pr) * 100).round(1)
+            for player, team, p in zip(g["player"], g["team_within_selected_timeframe"], pct):
+                if pd.isna(p):
+                    continue
+                radar_rows.append((xwalk.get((player, team)), season, grp, metric,
+                                   PRETTY.get(metric, metric), float(p)))
+    rout = pd.DataFrame(radar_rows, columns=["player_id", "season", "position_group",
+                                             "metric", "metric_label", "percentile"])
+    con.execute("DROP TABLE IF EXISTS player_radar_metrics")
+    con.execute("CREATE TABLE player_radar_metrics AS SELECT * FROM rout")
 
     # Summary view: top strengths (by percentile), weaknesses & improvements
     # (improvements = weaknesses ordered by metric weight) per player.

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Atlastra — Player Profile</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css">
+<link rel="stylesheet" href="/css/styles.css?v=3">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -32,8 +32,12 @@
               <div class="m"><span>Market Value</span><b id="pmv">—</b></div>
               <div class="m"><span>Contract</span><b><span class="placeholder-note">n/a</span></b></div>
             </div>
-            <div class="cta"><button class="btn btn-primary">★ Follow</button><button class="btn btn-ghost">⇄ Compare</button></div>
+            <div class="cta"><button class="btn btn-primary">★ Follow</button><a id="compareLink" class="btn btn-ghost" href="/compare.html">⇄ Compare</a></div>
           </div>
+        </div>
+        <div class="totals">
+          <div class="card-h"><h3>Total Statistics</h3><div class="scopetog" id="togTotals"></div></div>
+          <div class="tiles compact" id="totalTiles"></div>
         </div>
       </section>
       <section class="card">
@@ -55,7 +59,7 @@
 
     <!-- stat tiles -->
     <section class="card" style="margin-top:18px">
-      <div class="card-h"><h3>Per-90 Statistics · Combined (League + UCL)</h3></div>
+      <div class="card-h"><h3>Per-90 Statistics</h3><div class="scopetog" id="togPer90"></div></div>
       <div class="tiles" id="tiles"></div></section>
 
     <!-- row: radar + career + strengths -->
@@ -73,19 +77,24 @@
         <h5 class="bad" style="margin-top:12px">WEAKNESSES</h5><ul id="weaknesses"></ul></section>
     </div>
 
-    <!-- row: technique + heatmap + play style (placeholders) -->
-    <div class="grid" style="grid-template-columns:1fr 1fr 1fr; margin-top:18px">
-      <section class="card tech"><div class="card-h"><h3>Technique Analysis</h3><a class="see">See all</a></div>
-        <div class="muted" style="font-size:12px;margin-bottom:8px">Most used techniques <span class="placeholder-note">· placeholder</span></div><div id="tech"></div></section>
+    <!-- row: archetype + similar players (use case 10) -->
+    <div class="grid" style="grid-template-columns:1.05fr 1fr; margin-top:18px">
+      <section class="card"><div class="card-h"><h3>Player Archetype</h3><a class="see" id="archMore">See role →</a></div>
+        <div id="archetype"></div></section>
+      <section class="card"><div class="card-h"><h3>Similar Players</h3><span class="muted" style="font-size:12px">By statistical profile · this season</span></div>
+        <div id="similar"></div></section>
+    </div>
+
+    <!-- row: technique + heatmap (placeholders — use case 9 / no event data) -->
+    <div class="grid" style="grid-template-columns:1fr 1fr; margin-top:18px">
+      <section class="card tech"><div class="card-h"><h3>Technique Analysis</h3></div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px">Most used techniques <span class="placeholder-note">· placeholder (use case 9)</span></div><div id="tech"></div></section>
       <section class="card"><div class="card-h"><h3>Season Heatmap</h3></div><div class="heat"></div>
         <div class="placeholder-note" style="margin-top:6px">Heatmap — placeholder (no event data)</div></section>
-      <section class="card"><div class="card-h"><h3>Play Style</h3></div><div class="chips" id="playstyle"></div>
-        <div class="muted" style="font-size:12px;margin:14px 0 8px">Similar Players <span class="placeholder-note">· placeholder</span></div>
-        <div class="chips"><span class="chip">Xavi</span><span class="chip">Iniesta</span><span class="chip">Verratti</span></div></section>
     </div>
   </main>
 </div>
-<script src="/js/api.js"></script>
-<script src="/js/player.js"></script>
+<script src="/js/api.js?v=3"></script>
+<script src="/js/player.js?v=3"></script>
 </body>
 </html>

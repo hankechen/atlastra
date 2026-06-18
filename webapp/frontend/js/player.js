@@ -3,12 +3,54 @@ Chart.defaults.color = '#7f8aa3';
 Chart.defaults.font.family = 'Inter';
 let radarChart, careerChart;
 
-const TILE_DEFS = [
-  ['👕', 'apps', 'Apps'], ['⚽', 'goals', 'Goals / 90'], ['🅰', 'assists', 'Assists / 90'],
-  ['◎', 'xg', 'xG / 90'], ['⚲', 'xa', 'xA / 90'], ['💡', 'chances_created', 'Chances / 90'],
-  ['★', 'big_chances_created', 'Big Chances / 90'], ['⚡', 'dribbles_per90', 'Dribbles / 90'],
-  ['◉', 'pass_accuracy', 'Pass Accuracy'],
+// stat tiles read from a scope object {games,minutes,goals,...,pass_accuracy_pct}.
+// kind: 'count' shown as-is, 'per90' = v/min*90, 'pct' = v%, 'dec' = 1 decimal total.
+const TOTAL_DEFS = [
+  ['👕', 'games', 'Apps', 'count'], ['⚽', 'goals', 'Goals', 'count'], ['🅰', 'assists', 'Assists', 'count'],
+  ['◎', 'xg', 'xG', 'dec'], ['⚲', 'xa', 'xA', 'dec'], ['💡', 'chances_created', 'Chances', 'count'],
+  ['⚡', 'dribbles_completed', 'Dribbles', 'count'], ['🛡', 'tackles', 'Tackles', 'count'],
+  ['✋', 'interceptions', 'Interceptions', 'count'], ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
 ];
+const PER90_DEFS = [
+  ['👕', 'games', 'Apps', 'count'], ['⚽', 'goals', 'Goals / 90', 'per90'], ['🅰', 'assists', 'Assists / 90', 'per90'],
+  ['◎', 'xg', 'xG / 90', 'per90'], ['⚲', 'xa', 'xA / 90', 'per90'], ['💡', 'chances_created', 'Chances / 90', 'per90'],
+  ['★', 'big_chances_created', 'Big Ch. / 90', 'per90'], ['⚡', 'dribbles_completed', 'Dribbles / 90', 'per90'],
+  ['🛡', 'tackles', 'Tackles / 90', 'per90'], ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
+];
+const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined']];
+let statScopes = {}, scopeTotals = 'combined', scopePer90 = 'combined';
+
+function fmtTile(def, s) {
+  const [, key, , kind] = def, v = s ? s[key] : null;
+  if (v == null) return '—';
+  if (kind === 'count') return Math.round(v).toLocaleString();
+  if (kind === 'dec') return v.toFixed(1);
+  if (kind === 'pct') return Math.round(v) + '%';
+  const m = s.minutes || 0;                       // per90
+  return m ? (v / m * 90).toFixed(2) : '—';
+}
+function renderTiles(elId, defs, scope) {
+  const s = statScopes[scope];
+  document.getElementById(elId).innerHTML = defs.map(d =>
+    `<div class="tile"><div class="ic">${d[0]}</div><b>${fmtTile(d, s)}</b><span>${d[2]}</span></div>`).join('');
+}
+// Build a League/UCL/Combined toggle once; a delegated listener on the container
+// survives tile re-renders, and we only flip the .active class + redraw on click.
+function setupScopeTog(togId, tilesId, defs, getScope, setScope) {
+  const tog = document.getElementById(togId);
+  tog.innerHTML = SCOPES.map(([k, lab]) =>
+    `<button class="sct" data-k="${k}"${statScopes[k] ? '' : ' disabled title="no minutes"'}>${lab}</button>`).join('');
+  const update = () => {
+    const sc = getScope();
+    tog.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.k === sc));
+    renderTiles(tilesId, defs, sc);
+  };
+  tog.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (b && !b.disabled) { setScope(b.dataset.k); update(); }
+  };
+  update();
+}
 const PLAYSTYLE = { MID: ['Deep-Lying Playmaker', 'Progressive Passer', 'Press Resistant', 'Tempo Controller', 'Space Creator'],
   FWD: ['Advanced Forward', 'Poacher', 'Pressing Forward', 'Box Threat'],
   DEF: ['Ball-Playing Defender', 'Stopper', 'Aerial Dominator', 'Progressive Carrier'], GK: ['Sweeper Keeper', 'Shot Stopper'] };
@@ -33,12 +75,15 @@ async function load(name, careerStat = 'xa') {
   if (!p.name) { document.getElementById('crumb').textContent = 'not found'; return; }
   document.getElementById('crumb').textContent = p.name;
   document.getElementById('pname').innerHTML = p.name + ' <span class="verified">✔</span>';
-  document.getElementById('pteam').textContent = p.team || '';
+  const photoEl = document.querySelector('.ph .photo');
+  if (photoEl) photoEl.innerHTML = avatarHTML(p.photo, p.name);
+  document.getElementById('pteam').innerHTML = crestHTML(p.team_logo, 'crest-sm') + (p.team || '');
   document.getElementById('ppos').textContent = p.detailed_position || p.position_group;
   document.getElementById('page').textContent = p.age ?? '—';
   document.getElementById('pnat').textContent =
     (p.country_code ? flagEmoji(p.country_code) + ' ' : '') + (p.nationality || '—');
   document.getElementById('pmv').textContent = eurM(p.market_value_eur);
+  document.getElementById('compareLink').href = '/compare.html?name=' + encodeURIComponent(p.name);
 
   // dual ratings (League + UCL, common-metric)
   const lg = p.ratings?.league, ucl = p.ratings?.ucl;
@@ -49,23 +94,49 @@ async function load(name, careerStat = 'xa') {
   document.getElementById('cUcl').textContent = ucl ? ucl.classification : 'no UCL minutes';
   drawGauge('gaugeUcl', ucl?.rating);
 
-  // stat tiles (combined: domestic + UCL)
-  document.getElementById('tiles').innerHTML = TILE_DEFS.map(([ic, k, lab]) => {
-    let v = p.tiles[k]; v = v == null ? '—' : (k === 'pass_accuracy' ? v + '%' : v);
-    return `<div class="tile"><div class="ic">${ic}</div><b>${v}</b><span>${lab}</span></div>`;
-  }).join('');
+  // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
+  statScopes = p.stats_scopes || {};
+  const dflt = statScopes.combined ? 'combined' : Object.keys(statScopes)[0];
+  if (!statScopes[scopeTotals]) scopeTotals = dflt;
+  if (!statScopes[scopePer90]) scopePer90 = dflt;
+  setupScopeTog('togTotals', 'totalTiles', TOTAL_DEFS, () => scopeTotals, k => { scopeTotals = k; });
+  setupScopeTog('togPer90', 'tiles', PER90_DEFS, () => scopePer90, k => { scopePer90 = k; });
 
   // strengths / weaknesses
   document.getElementById('strengths').innerHTML = p.strengths.map(s => `<li class="ok">✔ ${s}</li>`).join('') || '<li class="muted">—</li>';
   document.getElementById('weaknesses').innerHTML = p.weaknesses.map(s => `<li class="bad">✘ ${s}</li>`).join('') || '<li class="muted">—</li>';
 
-  // play style + technique placeholders by position
-  document.getElementById('playstyle').innerHTML = (PLAYSTYLE[p.position_group] || []).map(s => `<span class="chip">${s}</span>`).join('');
+  // archetype + similar players (use case 10)
+  renderArchetype(p.archetype);
+
+  // technique placeholder (use case 9 — no event data)
   document.getElementById('tech').innerHTML = TECH.map(([n, pc], i) =>
     `<div class="t"><span class="rk">${i + 1}</span><span style="width:140px">${n}</span><span class="bar"><i style="width:${pc * 4}%"></i></span><b>${pc}%</b></div>`).join('');
 
   drawRadar(p.radar);
   drawCareer(p.career, careerStat);
+}
+
+function renderArchetype(a) {
+  const el = document.getElementById('archetype'), sim = document.getElementById('similar');
+  if (!a || !a.archetype) {
+    el.innerHTML = '<div class="muted">Not enough data to classify.</div>';
+    sim.innerHTML = ''; document.getElementById('archMore').style.display = 'none';
+    return;
+  }
+  document.getElementById('archMore').href = '/archetypes.html?role=' + encodeURIComponent(a.archetype);
+  el.innerHTML = `
+    <div class="arch-head"><div class="arch-name">${a.archetype}<span class="arch-fit">${a.fit ?? '—'}% fit</span></div>
+      <div class="arch-grp">${a.group_label}${a.archetype2 ? ` · also ${a.archetype2} (${a.fit2 ?? '—'}%)` : ''}</div></div>
+    <p class="arch-blurb">${a.blurb || ''}</p>
+    <div class="arch-traits">${(a.traits || []).map(t =>
+      `<span class="trait">${t.label}<b>${t.pct}</b></span>`).join('') || '<span class="muted">—</span>'}</div>`;
+  sim.innerHTML = (a.similar || []).map(s => `
+    <div class="prow" onclick="location.href='${pHref(s.player)}'" style="cursor:pointer">
+      <span class="pic">${avatarHTML(s.photo, s.player)}</span>
+      <span style="flex:1"><div class="nm">${s.player}</div><div class="sub">${s.team || ''} · ${s.position || ''}</div></span>
+      <span class="end"><span class="simpct">${s.similarity ?? ''}%</span>${s.rating != null ? `<b class="ratingchip sm">${s.rating}</b>` : ''}</span>
+    </div>`).join('') || '<div class="muted">—</div>';
 }
 
 function drawRadar(radar) {
@@ -108,7 +179,8 @@ document.getElementById('searchBox').addEventListener('keydown', (e) => {
 // Atlastra Top 10 rail
 (async () => {
   const ranks = await api('/api/rankings?limit=10');
-  document.getElementById('top10').innerHTML = ranks.map(p => `<div class="prow">
-    <span class="rk">${p.rank}</span><span class="nm" style="flex:1">${p.player}</span>
-    <span class="flag"></span><b style="color:var(--accent2)">${p.rating}</b></div>`).join('');
+  document.getElementById('top10').innerHTML = ranks.map(p => `<div class="prow" onclick="location.href='${pHref(p.player)}'">
+    <span class="rk">${p.rank}</span><span class="pic">${avatarHTML(p.photo, p.player)}</span>
+    <span class="nm" style="flex:1">${p.player}</span>
+    <b style="color:var(--accent2)">${p.rating}</b></div>`).join('');
 })();

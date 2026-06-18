@@ -42,6 +42,24 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/player":
             return d.web_player(q.get("name", ["Pedri"])[0],
                                 q.get("career_stat", ["xa"])[0])
+        if path == "/api/compare":
+            names = q.get("name", [])
+            stats = q.get("stat") or None
+            return d.web_compare(names, stats)
+        if path == "/api/leagues":
+            return d.web_leagues()
+        if path == "/api/league_table":
+            return d.web_league_table(q.get("league", ["ENG-Premier League"])[0])
+        if path == "/api/team":
+            return d.web_team(q.get("name", ["Arsenal"])[0])
+        if path == "/api/search":
+            return d.web_search(q.get("q", [""])[0])
+        if path == "/api/match_search":
+            return d.web_match_search(q.get("a", [""])[0], q.get("b", [""])[0])
+        if path == "/api/archetypes":
+            return d.web_archetypes()
+        if path == "/api/archetype":
+            return d.web_archetype(q.get("name", ["Poacher"])[0])
         raise KeyError(path)
 
 
@@ -53,6 +71,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        # dev server: never let the browser serve a stale JS/CSS/HTML asset
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 

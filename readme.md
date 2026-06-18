@@ -16,6 +16,7 @@ defenders - tackles, interceptions, aerial/ground duels, recoveries)
 7. Team Information (Squad, Manager, Venue)
 8. Search by Player, Team, or Match (Two Teams, Resulted sorted by recency)
 9. Player techniques (most commonly used techniques from a player)
+10. Player Archetypes (rule-based scouting roles per position — e.g. Poacher, Deep-Lying Playmaker, Ball-Playing Defender — with a fit %, signature traits, and most-similar players)
 
 ## Please try the following APIs if available. Please try web scraping if none of the below works.  
 1. Football API

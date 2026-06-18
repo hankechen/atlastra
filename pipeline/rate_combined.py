@@ -15,8 +15,10 @@ Scope:
   league = the 5 domestic competitions (summed per player), min 600 min
   ucl    = the UEFA Champions League,                      min 270 min
 Position groups are the FINE groups (ST/W/AM/CM/DM/FB/CB) from datamb's position,
-falling back to a coarse->fine guess if datamb has no position; GK is skipped
-(the canonical schema carries no GK-specific stats).
+falling back to a coarse->fine guess if datamb has no position. GKs are rated on
+a separate keeper vector (save% / goals conceded / clean sheets / saves) sourced
+outside v_stats_combined -- league from datamb player_wyscout, UCL derived from
+ucl_player_stats -- since the canonical outfield metric set has no GK stats.
 
 Writes `player_ratings_combined` (player_id, season, scope, ...). Run after
 pipeline.build_views:
@@ -71,9 +73,81 @@ WEIGHTS = {
     "FB": {"tackles": .14, "interceptions": .12, "chances_created": .12, "assists": .12,
            "dribbles_completed": .12, "duels_won_pct": .10, "passes_completed": .10,
            "pass_accuracy_pct": .08, "big_chances_created": .06, "goals": .04},
-    "CB": {"tackles": .20, "interceptions": .20, "duels_won_pct": .18, "passes_completed": .16,
-           "pass_accuracy_pct": .16, "goals": .04, "assists": .03, "chances_created": .03},
+    # Rebalanced 2026-06-18: raw tackles/interceptions VOLUME (was .40 combined)
+    # buried CBs on possession-dominant teams (Saliba/Gabriel/van Dijk make few
+    # defensive actions because their team concedes little) and inflated weak-team
+    # CBs (Eric García). Now leans on the duel-WIN RATE and build-up passing; raw
+    # defensive volume cut to .20. Mirrors the same fix made to the datamb CB vector.
+    "CB": {"duels_won_pct": .26, "pass_accuracy_pct": .22, "passes_completed": .18,
+           "tackles": .10, "interceptions": .10, "chances_created": .06,
+           "goals": .04, "assists": .04},
 }
+
+# GKs can't be rated on the outfield common metrics, so they get their own vector
+# over keeper stats that exist in BOTH sources: save% / goals conceded / clean
+# sheets / saves (league from player_wyscout, UCL derived from ucl_player_stats).
+# These columns are pre-computed as rates in _gk_league_df / _gk_ucl_df, so the
+# only per-90 (rate+volume blend) metric here is clean_sheets.
+GK_METRICS = {
+    "save_percentage_pct": (False, False), "goals_conceded_per_90": (False, True),
+    "clean_sheets": (True, False), "saves_per_90": (False, False),
+}
+GK_WEIGHTS = {"save_percentage_pct": .35, "goals_conceded_per_90": .30,
+              "clean_sheets": .20, "saves_per_90": .15}
+
+# --- rating scale (recalibrated 2026-06-18) -----------------------------------
+# Map the within-group z-score S -> 0..99 via a soft-knee curve: linear in the
+# body (so the 80s fill out), then hyperbolically compressed above the knee so
+# 95+ is scarce and 99 is reserved for a singular season. Replaces the old flat
+# `50 + 15*S` which clipped a pile of players at 99 and left the 80s near-empty.
+CURVE_CENTER, CURVE_SLOPE, CURVE_KNEE, CURVE_COMP = 55.0, 14.0, 82.0, 0.033
+
+# Per-position calibration: the common metrics measure attackers well (goals/xG/
+# assists) but defenders crudely (tackles/passes/duels), so defensive leaders
+# pile up at the top. These BASE gains scale each group's S so a rating means
+# roughly the same across positions (gain<1 dampens an over-rewarded group's
+# spread, >1 widens an under-spread one). Hand-tuned so the 95+ tier is elite
+# attackers only and the best FB/CB/DM/GK top out ~88-92 instead of 95-99. At
+# runtime these are then LIGHTLY nudged by market value (see _market_gain_mult).
+BASE_GAIN = {"ST": 1.00, "W": 1.00, "AM": 0.98, "CM": 0.94,
+             "DM": 0.86, "FB": 0.80, "CB": 0.80, "GK": 1.10}
+
+# Market-value calibration: multiply each group's gain by (its elite market value
+# / the cross-position geomean) ^ MV_CALIB_ALPHA, so positions the market prizes
+# (W/AM/ST) rate a touch higher and cheap ones (GK/DM) a touch lower -- anchored
+# to an external reference, not pure judgment. ALPHA is small on purpose: this
+# shifts ratings a little, it doesn't redraw them. The signal is the median value
+# of each group's top-N most valuable players (top-by-VALUE, so it's independent
+# of our own ratings); a group with too few priced players is left at mult 1.0.
+MV_CALIB_ALPHA = 0.15
+MV_CALIB_TOPN = 15
+MV_CALIB_MIN_SAMPLES = 5
+
+
+def _market_gain_mult(con, season: str, pid2fine: dict) -> dict:
+    mv = con.execute(
+        "SELECT player_id, market_value_eur AS mv FROM player_market_value "
+        "WHERE season = ? AND market_value_eur IS NOT NULL", [season]).df()
+    mv["grp"] = [pid2fine.get(int(p)) for p in mv["player_id"]]
+    mv = mv.dropna(subset=["grp"])
+    meds = {}
+    for g in BASE_GAIN:
+        top = mv.loc[mv["grp"] == g, "mv"].sort_values(ascending=False).head(MV_CALIB_TOPN)
+        if len(top) >= MV_CALIB_MIN_SAMPLES:
+            meds[g] = float(top.median())
+    if len(meds) < 2:                                    # not enough data -> no-op
+        return {g: 1.0 for g in BASE_GAIN}
+    geo = float(np.exp(np.mean(np.log(list(meds.values())))))
+    return {g: (meds[g] / geo) ** MV_CALIB_ALPHA if g in meds else 1.0 for g in BASE_GAIN}
+
+
+def _curve(S):
+    """Soft-knee map from standardized score S to a 1-99 rating."""
+    base = CURVE_CENTER + CURVE_SLOPE * S
+    out = np.where(base > CURVE_KNEE,
+                   CURVE_KNEE + (base - CURVE_KNEE) / (1 + CURVE_COMP * (base - CURVE_KNEE)),
+                   base)
+    return np.clip(np.round(out), 1, 99)
 
 AGG = """
 WITH base AS (
@@ -107,12 +181,63 @@ GROUP BY b.player_id, b.scope, p.player_name, p.position_group, f.fine
 COARSE_FALLBACK = {"FWD": "ST", "MID": "CM", "DEF": "CB"}
 
 
-def _rate_scope_group(g: pd.DataFrame, group: str, K: int) -> pd.DataFrame:
-    w = WEIGHTS[group]
+def _gk_league_df(con, season: str, min_min: int) -> pd.DataFrame:
+    """League keepers from datamb player_wyscout (the only domestic source with
+    GK stats), name+team crosswalked to Understat player_id. Returns one row per
+    player_id with the GK_METRICS columns already as rates."""
+    from pipeline.profile import _datamb_to_understat  # reuse the datamb->id matcher
+    df = con.execute("""
+        SELECT player, team_within_selected_timeframe AS team,
+               minutes_played AS minutes, save_percentage_pct,
+               goals_conceded_per_90, clean_sheets, saves_per_90
+        FROM player_wyscout
+        WHERE season = ? AND main_position = 'GK' AND datamb_position = main_position
+          AND in_top5 AND minutes_played >= ? AND save_percentage_pct IS NOT NULL
+    """, [season, min_min]).df()
+    if df.empty:
+        return df
+    xwalk = _datamb_to_understat(con, list(zip(df["player"], df["team"])), season)
+    df["player_id"] = [xwalk.get((p, t)) for p, t in zip(df["player"], df["team"])]
+    df = df[df["player_id"].notna()].copy()
+    df["player_id"] = df["player_id"].astype("int64")
+    # one row per id (keepers who switched clubs): keep the max-minutes spell
+    return df.sort_values("minutes", ascending=False).drop_duplicates("player_id")
+
+
+def _gk_ucl_df(con, season: str, min_min: int) -> pd.DataFrame:
+    """UCL keepers from ucl_player_stats. saves/clean_sheet/goals_conceded exist
+    for every player there (team stats for outfielders), so restrict to GKs via
+    the crosswalk -> players.position_group, and derive the rate metrics."""
+    df = con.execute("""
+        SELECT x.player_id,
+               CAST(u.minutes_played AS DOUBLE) AS minutes,
+               CAST(u.saves AS DOUBLE) AS saves,
+               CAST(u.clean_sheet AS DOUBLE) AS clean_sheets,
+               CAST(COALESCE(u.goals_conceded_inside_the_box, 0)
+                  + COALESCE(u.goals_conceded_outside_the_box, 0) AS DOUBLE) AS goals_conceded
+        FROM ucl_player_stats u
+        JOIN ucl_understat_xwalk x
+          ON x.sofascore_player_id = u.sofascore_player_id AND x.season = u.season
+        JOIN players p ON p.player_id = x.player_id AND p.position_group = 'GK'
+        WHERE u.season = ? AND u.minutes_played >= ? AND u.saves IS NOT NULL
+    """, [season, min_min]).df()
+    if df.empty:
+        return df
+    mins = df["minutes"].replace(0, np.nan)
+    faced = df["saves"] + df["goals_conceded"]
+    df["save_percentage_pct"] = (df["saves"] / faced.replace(0, np.nan) * 100).fillna(0)
+    df["saves_per_90"] = df["saves"] / mins * 90
+    df["goals_conceded_per_90"] = df["goals_conceded"] / mins * 90
+    return df
+
+
+def _rate_group(g: pd.DataFrame, group_label: str, weights: dict,
+                metrics: dict, K: int, gain: float = 1.0) -> pd.DataFrame:
+    w = weights
     total = sum(w.values())
     C = pd.Series(0.0, index=g.index)
     mins = pd.to_numeric(g["minutes"], errors="coerce").fillna(0)
-    for m, (per90, inv) in METRICS.items():
+    for m, (per90, inv) in metrics.items():
         if m not in w:
             continue
         x = pd.to_numeric(g[m], errors="coerce")     # totals for counts, % for rates
@@ -124,11 +249,12 @@ def _rate_scope_group(g: pd.DataFrame, group: str, K: int) -> pd.DataFrame:
         C = C + (w[m] / total) * (-z if inv else z)
     C_adj = mins / (mins + K) * C
     mu, sigma = C_adj.mean(), C_adj.std(ddof=0)
-    S = (C_adj - mu) / sigma if sigma else C_adj * 0
-    rating = (50 + 15 * S).round().clip(1, 99)
+    # per-position gain scales the spread (calibration); soft-knee curve maps to 1-99
+    S = ((C_adj - mu) / sigma if sigma else C_adj * 0) * gain
+    rating = pd.Series(_curve(S.values), index=g.index)
     out = pd.DataFrame({
         "player_id": g["player_id"].values, "player": g["player_name"].values,
-        "position_group": group, "minutes": mins.astype(int).values,
+        "position_group": group_label, "minutes": mins.astype(int).values,
         "rating": rating.astype(int).values, "composite_adj": C_adj.round(4).values,
     }).sort_values("rating", ascending=False).reset_index(drop=True)
     out["rank_in_group"] = np.arange(1, len(out) + 1)
@@ -139,22 +265,58 @@ def _rate_scope_group(g: pd.DataFrame, group: str, K: int) -> pd.DataFrame:
     return out.drop(columns="composite_adj")
 
 
+# Manual overrides for the DISPLAYED (combined-League) rating, keyed by Understat
+# player_id -> rating. Reputation boosts the common-metric engine can't capture
+# (e.g. elite defenders on possession-dominant teams). Classification is recomputed.
+LEAGUE_RATING_OVERRIDES = {
+    6888: 83,   # William Saliba
+    8824: 83,   # Jude Bellingham
+}
+
+
 def rate_combined(season: str = FOCUS_SEASON) -> None:
     con = duckdb.connect(str(DB_PATH))
     df = con.execute(AGG, [season]).df()
     # prefer datamb's fine position; fall back to a coarse->fine guess if missing
     df["position_group"] = [fine if fine in WEIGHTS else COARSE_FALLBACK.get(ug)
                             for fine, ug in zip(df["datamb_fine"], df["understat_group"])]
+    # player_id -> fine group (outfield from datamb; GKs straight from players),
+    # used to attach a position to each priced player for the market calibration.
+    pid2fine = {int(p): g for p, g in zip(df["player_id"], df["position_group"]) if g}
+    for (pid,) in con.execute(
+            "SELECT player_id FROM players WHERE position_group = 'GK'").fetchall():
+        pid2fine[int(pid)] = "GK"
+    mv_mult = _market_gain_mult(con, season, pid2fine)
+    gain = {g: BASE_GAIN[g] * mv_mult[g] for g in BASE_GAIN}
+    print("  gains (base x market):", {g: round(gain[g], 3) for g in BASE_GAIN})
+
     frames = []
     for scope, (K, min_min) in SCOPES.items():
         s = df[(df["scope"] == scope) & (pd.to_numeric(df["minutes"]) >= min_min)
                & df["position_group"].isin(WEIGHTS.keys())]
         for grp, g in s.groupby("position_group"):
-            r = _rate_scope_group(g, grp, K)
+            r = _rate_group(g, grp, WEIGHTS[grp], METRICS, K, gain.get(grp, 1.0))
+            r["scope"] = scope
+            frames.append(r)
+        # GKs: own vector over keeper stats, sourced per scope (see _gk_*_df)
+        gk = (_gk_league_df(con, season, min_min) if scope == "league"
+              else _gk_ucl_df(con, season, min_min))
+        if len(gk) >= 2:
+            names = dict(con.execute(
+                "SELECT player_id, player_name FROM players").fetchall())
+            gk = gk.copy()
+            gk["player_name"] = [names.get(int(p)) for p in gk["player_id"]]
+            r = _rate_group(gk, "GK", GK_WEIGHTS, GK_METRICS, K, gain["GK"])
             r["scope"] = scope
             frames.append(r)
     out = pd.concat(frames, ignore_index=True)
     out["season"] = season
+
+    if LEAGUE_RATING_OVERRIDES:                       # force specific league ratings
+        m = (out["scope"] == "league") & out["player_id"].isin(LEAGUE_RATING_OVERRIDES)
+        out.loc[m, "rating"] = out.loc[m, "player_id"].map(LEAGUE_RATING_OVERRIDES).astype(int)
+        out.loc[m, "classification"] = [_classify(r, k) for r, k in
+                                        zip(out.loc[m, "rating"], out.loc[m, "rank_in_group"])]
 
     con.execute("DROP TABLE IF EXISTS player_ratings_combined")
     con.execute("""CREATE TABLE player_ratings_combined AS SELECT
@@ -164,8 +326,9 @@ def rate_combined(season: str = FOCUS_SEASON) -> None:
     n_l = (out["scope"] == "league").sum()
     n_u = (out["scope"] == "ucl").sum()
     con.close()
+    n_gk = (out["position_group"] == "GK").sum()
     print(f"player_ratings_combined: {n_l} league + {n_u} UCL ratings "
-          f"(common-metric, fine ST/W/AM/CM/DM/FB/CB, GK skipped).")
+          f"(common-metric, fine ST/W/AM/CM/DM/FB/CB + GK; {n_gk} GK rows).")
 
 
 if __name__ == "__main__":
