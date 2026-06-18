@@ -27,6 +27,9 @@ from pipeline import build_views as views_mod
 from pipeline import scrape_transfermarkt as tm_scrape_mod
 from pipeline import load_transfermarkt as tm_load_mod
 from pipeline import profile as profile_mod
+from pipeline import rate_combined as rate_combined_mod
+from pipeline import scrape_fotmob_positions as fmpos_scrape_mod
+from pipeline import load_fotmob_positions as fmpos_load_mod
 
 
 def main():
@@ -69,6 +72,11 @@ def main():
             tm_scrape_mod.scrape()
         except Exception as e:
             print(f"Transfermarkt scrape failed ({repr(e)[:80]}); continuing without it.")
+        print("\n### 1h. SCRAPE (FotMob detailed positions: LW/RW/LB/RB) ###")
+        try:
+            fmpos_scrape_mod.scrape()
+        except Exception as e:
+            print(f"FotMob positions scrape failed ({repr(e)[:80]}); continuing without it.")
 
     print("\n### 2. INIT DB ###")
     init_mod.init_db(reset=True)
@@ -107,6 +115,18 @@ def main():
         profile_mod.build_profiles()
     except Exception as e:
         print(f"profile build skipped ({repr(e)[:80]}); run `python -m pipeline.profile`.")
+
+    print("\n### 10b. DETAILED POSITIONS (FotMob LW/RW/LB/RB) ###")
+    try:
+        fmpos_load_mod.load_fotmob_positions()
+    except Exception as e:
+        print(f"detailed positions skipped ({repr(e)[:80]}); run `python -m pipeline.load_fotmob_positions`.")
+
+    print("\n### 11. COMBINED RATINGS (League + UCL, common-metric) ###")
+    try:
+        rate_combined_mod.rate_combined()
+    except Exception as e:
+        print(f"combined ratings skipped ({repr(e)[:80]}); run `python -m pipeline.rate_combined`.")
 
     print("\nDone. Try:  python tests/test_use_cases.py")
 

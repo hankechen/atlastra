@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Player Profile</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…  (try: Mbappe, Saliba, Vinicius)"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span>🔔</span><span>🌙</span><div class="avatar"></div></div>
+    </div>
+    <div class="breadcrumb"><a href="/players.html">Players</a> › <b id="crumb">—</b></div>
+
+    <!-- row 1: header + gauge + top10 -->
+    <div class="grid" style="grid-template-columns:1fr 320px 320px">
+      <section class="card">
+        <div class="ph">
+          <div class="photo"></div>
+          <div>
+            <h1 id="pname">—<span class="verified">✔</span></h1>
+            <div class="team"><span id="pteam"></span> · <span class="pos" id="ppos"></span></div>
+            <div class="meta">
+              <div class="m"><span>Age</span><b id="page">—</b></div>
+              <div class="m"><span>Nationality</span><b>🏳 <span class="placeholder-note">n/a</span></b></div>
+              <div class="m"><span>Market Value</span><b id="pmv">—</b></div>
+              <div class="m"><span>Contract</span><b><span class="placeholder-note">n/a</span></b></div>
+            </div>
+            <div class="cta"><button class="btn btn-primary">★ Follow</button><button class="btn btn-ghost">⇄ Compare</button></div>
+          </div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-h"><h3 style="margin:0 auto">Atlastra Ratings ⓘ</h3></div>
+        <div class="dual">
+          <div class="rgauge"><div class="lbl">League</div>
+            <div class="gauge sm"><canvas id="gaugeLeague" width="150" height="92"></canvas>
+              <div class="val"><b id="rLeague">—</b></div></div>
+            <div class="cls" id="cLeague"></div></div>
+          <div class="rgauge"><div class="lbl">UCL</div>
+            <div class="gauge sm"><canvas id="gaugeUcl" width="150" height="92"></canvas>
+              <div class="val"><b id="rUcl">—</b></div></div>
+            <div class="cls" id="cUcl"></div></div>
+        </div>
+        <div class="placeholder-note" style="text-align:center;margin-top:8px">Common-metric rating · combined stats below</div>
+      </section>
+      <section class="card"><div class="card-h"><h3>Atlastra Top 10</h3><a class="see" href="/players.html">See all</a></div><div id="top10"></div></section>
+    </div>
+
+    <!-- stat tiles -->
+    <section class="card" style="margin-top:18px">
+      <div class="card-h"><h3>Per-90 Statistics · Combined (League + UCL)</h3></div>
+      <div class="tiles" id="tiles"></div></section>
+
+    <!-- row: radar + career + strengths -->
+    <div class="grid" style="grid-template-columns:1fr 1fr 1fr; margin-top:18px">
+      <section class="card"><div class="card-h"><h3>Percentile Radar ⓘ</h3></div>
+        <canvas id="radar" height="260"></canvas>
+        <div class="muted" style="font-size:12px;margin-top:6px">Compared to same position in Top-5 leagues · This season</div></section>
+      <section class="card"><div class="card-h"><h3>Career Progression ⓘ</h3>
+        <select id="careerStat"><option value="xa">xA</option><option value="ga_per90">G/A per 90</option>
+          <option value="goals">Goals</option><option value="assists">Assists</option>
+          <option value="chances_created">Chances Created</option><option value="dribbles_completed">Dribbles</option></select></div>
+        <canvas id="career" height="220"></canvas></section>
+      <section class="card sw"><div class="card-h"><h3>Strengths &amp; Weaknesses ⓘ</h3></div>
+        <h5 class="ok">STRENGTHS</h5><ul id="strengths"></ul>
+        <h5 class="bad" style="margin-top:12px">WEAKNESSES</h5><ul id="weaknesses"></ul></section>
+    </div>
+
+    <!-- row: technique + heatmap + play style (placeholders) -->
+    <div class="grid" style="grid-template-columns:1fr 1fr 1fr; margin-top:18px">
+      <section class="card tech"><div class="card-h"><h3>Technique Analysis</h3><a class="see">See all</a></div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px">Most used techniques <span class="placeholder-note">· placeholder</span></div><div id="tech"></div></section>
+      <section class="card"><div class="card-h"><h3>Season Heatmap</h3></div><div class="heat"></div>
+        <div class="placeholder-note" style="margin-top:6px">Heatmap — placeholder (no event data)</div></section>
+      <section class="card"><div class="card-h"><h3>Play Style</h3></div><div class="chips" id="playstyle"></div>
+        <div class="muted" style="font-size:12px;margin:14px 0 8px">Similar Players <span class="placeholder-note">· placeholder</span></div>
+        <div class="chips"><span class="chip">Xavi</span><span class="chip">Iniesta</span><span class="chip">Verratti</span></div></section>
+    </div>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/player.js"></script>
+</body>
+</html>

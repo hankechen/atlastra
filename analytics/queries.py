@@ -22,6 +22,23 @@ except ModuleNotFoundError:  # pragma: no cover
     from config import DB_PATH, FOCUS_SEASON, season_label
 
 
+# small coercion helpers for the web bundles (JSON-friendly, NaN-safe)
+def _i(v):
+    return None if v is None or pd.isna(v) else int(round(float(v)))
+
+
+def _r(v, nd=1):
+    return None if v is None or pd.isna(v) else round(float(v), nd)
+
+
+def _split(s):
+    return [x.strip() for x in s.split(",")] if s else []
+
+
+def _fmt_season(code):
+    return season_label(code) if code else code
+
+
 class SoccerDB:
     def __init__(self, db_path=None, read_only=True):
         self.con = duckdb.connect(str(db_path or DB_PATH), read_only=read_only)
@@ -395,3 +412,184 @@ class SoccerDB:
             """,
             [season, ta, tb, tb, ta],
         ).df()
+
+    # ----- web UI bundles (Atlastra frontend) ----------------------------- #
+    # Group the rating-engine metric_labels into the 6 radar axes the UI shows.
+    RADAR_AXES = {
+        "Chance Creation": ["shot creation", "key passes", "goal creation",
+                            "expected assists", "chances", "crosses to box"],
+        "Progression": ["progressive passes", "progressive carries",
+                        "progressive receptions", "progressive pass accuracy"],
+        "Passing": ["pass completion %", "forward pass %", "passes into final third"],
+        "Finishing": ["non-penalty xG", "non-penalty goals", "finishing",
+                      "shots on target", "touches in box"],
+        "Defending": ["tackles + interceptions", "tackle win %", "recoveries",
+                      "interceptions (adj)", "tackles (adj)", "blocks", "clearances"],
+        "Dribbling": ["take-ons", "take-on %", "aerial duels %"],
+    }
+
+    def web_overview(self) -> dict:
+        row = self.con.execute("""
+            SELECT (SELECT COUNT(*) FROM leagues),
+                   (SELECT COUNT(*) FROM teams),
+                   (SELECT COUNT(DISTINCT player_id) FROM player_season_stats),
+                   (SELECT COUNT(*) FROM matches)
+        """).fetchone()
+        return {"leagues": row[0], "teams": row[1], "players": row[2],
+                "matches": row[3], "stats_tracked": 250}
+
+    def web_rankings(self, limit: int = 10, season: str = FOCUS_SEASON) -> list[dict]:
+        df = self.con.execute("""
+            SELECT player, team, position_group, rating
+            FROM player_ratings_v2 WHERE season = ?
+            ORDER BY rating DESC, percentile DESC LIMIT ?
+        """, [season, limit]).df()
+        return [{"rank": i + 1, "player": r.player, "team": r.team,
+                 "position": r.position_group, "rating": int(r.rating)}
+                for i, r in enumerate(df.itertuples())]
+
+    # tab groups for the Players directory -> rating position_groups
+    PLAYER_GROUPS = {"FWD": ["ST", "W"], "MID": ["AM", "CM", "DM"],
+                     "DEF": ["FB", "CB"], "GK": ["GK"]}
+
+    def web_players(self, group: str = "all", search: str | None = None,
+                    limit: int = 24, season: str = FOCUS_SEASON) -> list[dict]:
+        """Top-rated players for the directory grid: full name, team, position,
+        rating/classification, market value and this season's G/A. Uses
+        v_player_profile_full (player_id-keyed, full names)."""
+        where, params = ["f.player_id IS NOT NULL"], [season]
+        if group and group != "all" and group in self.PLAYER_GROUPS:
+            gs = self.PLAYER_GROUPS[group]
+            where.append(f"f.main_position IN ({','.join(['?'] * len(gs))})")
+            params += gs
+        if search:
+            where.append("strip_accents(lower(f.player)) LIKE strip_accents(lower('%'||?||'%'))")
+            params.append(search)
+        params.append(limit)
+        # use the Understat full name (pl.player_name) -- f.player is datamb's
+        # abbreviated form ('K. Mbappé') which find_player_id can't resolve.
+        df = self.con.execute(f"""
+            SELECT pl.player_name AS player, f.team, f.main_position AS position, f.rating,
+                   f.classification, f.market_value_eur, v.goals, v.assists
+            FROM v_player_profile_full f
+            JOIN players pl ON pl.player_id = f.player_id
+            LEFT JOIN v_player_season_stats v
+                   ON v.player_id = f.player_id AND v.season = ?
+            WHERE {' AND '.join(where)}
+            ORDER BY f.rating DESC, f.market_value_eur DESC NULLS LAST
+            LIMIT ?
+        """, params).df()
+        return [{"player": r.player, "team": r.team, "position": r.position,
+                 "rating": _i(r.rating), "classification": r.classification,
+                 "market_value_eur": None if pd.isna(r.market_value_eur) else float(r.market_value_eur),
+                 "goals": _i(r.goals), "assists": _i(r.assists)}
+                for r in df.itertuples()]
+
+    def web_spotlight(self, season: str = FOCUS_SEASON) -> dict:
+        def top(col, tbl="v_player_season_stats", rnd=0):
+            r = self.con.execute(
+                f"SELECT pl.player_name, v.{col} AS val FROM {tbl} v "
+                "JOIN players pl USING(player_id) "
+                f"WHERE v.season = ? AND v.{col} IS NOT NULL ORDER BY v.{col} DESC LIMIT 1",
+                [season]).fetchone()
+            return {"player": r[0], "value": round(float(r[1]), rnd) if rnd else int(r[1])} if r else None
+        return {
+            "top_scorer": top("goals"), "top_assists": top("assists"),
+            "most_xg": top("xg", rnd=1), "most_chances": top("chances_created"),
+            "most_dribbles": top("dribbles_completed"),
+        }
+
+    def web_standings(self, league_key: str, season: str = FOCUS_SEASON, limit: int = 6) -> list[dict]:
+        df = self.league_standings(league_key, season).head(limit)
+        out = []
+        for r in df.itertuples():
+            form = self.con.execute("""
+                SELECT CASE WHEN points=3 THEN 'W' WHEN points=1 THEN 'D' ELSE 'L' END
+                FROM team_match_stats tms JOIN teams t USING(team_id)
+                WHERE t.team_name = ? AND tms.season = ? AND tms.goals_for IS NOT NULL
+                ORDER BY tms.match_date DESC LIMIT 5
+            """, [r.team, season]).df().iloc[:, 0].tolist()
+            out.append({"pos": int(r.pos), "team": r.team, "p": int(r.mp),
+                        "w": int(r.w), "d": int(r.d), "l": int(r.l),
+                        "gd": int(r.gd), "pts": int(r.pts), "form": list(reversed(form))})
+        return out
+
+    def web_player(self, name: str, career_stat: str = "xa") -> dict:
+        prof = self.player_profile(name)
+        if not prof:
+            return {}
+        pid = self.find_player_id(name)
+        season = FOCUS_SEASON
+        # current-season tiles from the COMBINED (domestic + UCL) per-player view
+        t = self.con.execute("""
+            SELECT games, goals, assists, xg, xa, chances_created, big_chances_created,
+                   dribbles_completed, minutes, pass_accuracy_pct
+            FROM v_stats_combined_player WHERE player_id = ? AND season = ?
+        """, [pid, season]).fetchone()
+        # League + UCL ratings (common-metric, comparable; see rate_combined.py)
+        cr = self.con.execute("""
+            SELECT scope, rating, classification, percentile, minutes
+            FROM player_ratings_combined WHERE player_id = ? AND season = ?
+        """, [pid, season]).df()
+        ratings = {r.scope: {"rating": _i(r.rating), "classification": r.classification,
+                             "percentile": _i(r.percentile), "minutes": _i(r.minutes)}
+                   for r in cr.itertuples()}
+        tiles = {}
+        if t:
+            mins = t[8] or 0
+            p90 = lambda v: _r((v or 0) / mins * 90, 2) if mins else None  # noqa: E731
+            tiles = {"apps": _i(t[0]),            # Apps stays a count
+                     "goals": p90(t[1]), "assists": p90(t[2]),
+                     "xg": p90(t[3]), "xa": p90(t[4]),
+                     "chances_created": p90(t[5]), "big_chances_created": p90(t[6]),
+                     "dribbles_per90": p90(t[7]),
+                     "pass_accuracy": _i(t[9])}    # already a %
+        # percentile radar from the profile metrics
+        pm = self.con.execute(
+            "SELECT metric_label, percentile FROM player_profile_metrics WHERE player_id = ?",
+            [pid]).df()
+        pcts = dict(zip(pm.metric_label, pm.percentile))
+        radar = []
+        for axis, keys in self.RADAR_AXES.items():
+            vals = [pcts[k] for k in keys if k in pcts]
+            radar.append({"axis": axis, "value": round(sum(vals) / len(vals)) if vals else None})
+        # career progression of one stat (+ current team = latest season's team)
+        prog = self.player_progression(name, stats=[career_stat])
+        career_stat = career_stat if career_stat in prog.columns else "ga_per90"
+        career = [{"season": _fmt_season(r.season), "value": _r(getattr(r, career_stat))}
+                  for r in prog.itertuples() if pd.notna(getattr(r, career_stat))]
+        team = prog.iloc[-1]["team"] if len(prog) else None
+        # rank-in-group + percentile (player_ratings_v2 is datamb-name keyed; bridge
+        # via player_profile_metrics which carries both datamb name and player_id)
+        ctx = self.con.execute("""
+            SELECT r.rank_in_group, r.percentile FROM player_ratings_v2 r
+            JOIN (SELECT DISTINCT player, player_id FROM player_profile_metrics) m
+              ON m.player = r.player AND r.position_group = (
+                 SELECT position_group FROM player_profile_metrics WHERE player_id = ? LIMIT 1)
+            WHERE m.player_id = ? LIMIT 1
+        """, [pid, pid]).fetchone()
+        dp = self.con.execute(
+            "SELECT detailed_position FROM player_position_detail WHERE player_id=?",
+            [pid]).fetchone()
+        return {
+            "name": prof["player_name"], "team": team,
+            "position_group": prof["position_group"],
+            "detailed_position": dp[0] if dp else None,  # LW/RW/LB/RB/... (FotMob)
+            "age": self._player_age(prof["player_name"]),
+            "market_value_eur": prof["market_value_eur"],
+            "rating": prof["rating"], "classification": prof["classification"],
+            "rank_in_group": ctx[0] if ctx else None,
+            "percentile": round(ctx[1]) if ctx and ctx[1] is not None else None,
+            "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
+            "tiles": tiles, "radar": radar,
+            "career_stat": career_stat, "career": career,
+            "strengths": _split(prof["strengths"]),
+            "weaknesses": _split(prof["weaknesses"]),
+            "areas_of_improvement": _split(prof["areas_of_improvement"]),
+        }
+
+    def _player_age(self, datamb_name: str) -> int | None:
+        r = self.con.execute(
+            "SELECT age FROM player_wyscout WHERE player = ? AND age IS NOT NULL LIMIT 1",
+            [datamb_name]).fetchone()
+        return int(r[0]) if r else None

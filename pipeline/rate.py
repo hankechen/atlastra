@@ -198,15 +198,26 @@ def _split_cm(cm: pd.DataFrame) -> pd.Series:
     return diff.apply(lambda d: "AM" if d >= hi else ("DM" if d <= lo else "CM"))
 
 
+def _is_rate(expr) -> bool:
+    """A %/rate metric (e.g. pass_completion_pct) -- has no cumulative version."""
+    return all(c.endswith("_pct") for c, _ in expr)
+
+
 def _rate_group(df: pd.DataFrame, group: str) -> pd.DataFrame:
     vec = _norm_weights(VECTORS[group])
-    # step 2-3: composite from weighted, clipped, signed z-scores
+    mins = pd.to_numeric(df["minutes_played"], errors="coerce").fillna(0)
+    # step 2-3: composite. Counting metrics blend 50% per-90 + 50% cumulative
+    # (season total = per90 * minutes/90), so the rating rewards both rate and
+    # volume; rate/% metrics have no cumulative form and use the per-90 z alone.
     C = pd.Series(0.0, index=df.index)
     for _, expr, w, inv in vec:
-        z = _zscore(_metric_series(df, expr))
+        s90 = _metric_series(df, expr)
+        if _is_rate(expr):
+            z = _zscore(s90)
+        else:
+            z = 0.5 * _zscore(s90) + 0.5 * _zscore(s90 * mins / 90.0)
         C = C + w * (-z if inv else z)
     # step 4: minutes shrinkage
-    mins = pd.to_numeric(df["minutes_played"], errors="coerce").fillna(0)
     lam = mins / (mins + K)
     C_adj = lam * C
     # step 5-6: standardise within group -> rating

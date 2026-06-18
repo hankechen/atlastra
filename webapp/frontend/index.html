@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Soccer Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input placeholder="Search players, teams, matches…"><span class="kbd">⌘ K</span></div>
+      <div class="tb-icons">
+        <span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div>
+      </div>
+    </div>
+
+    <!-- row 1: hero + live matches -->
+    <div class="grid" style="grid-template-columns:1fr 380px">
+      <section class="hero">
+        <h1>Soccer Intelligence,<br><span class="accent">Elevated.</span></h1>
+        <p>Track. Analyze. Compare. Win.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="/players.html">Explore Players</a>
+          <a class="btn btn-ghost" href="#">⇄ Compare Players</a>
+        </div>
+        <div class="hero-stats" id="heroStats"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-h"><h3>Live Matches</h3><a class="see">See all</a></div>
+        <div id="liveMatches"></div>
+        <a class="btn btn-ghost btn-block" style="margin-top:12px" href="#">▷ View All Live Matches</a>
+        <div class="placeholder-note" style="margin-top:8px">Live scores — placeholder (no live feed wired)</div>
+      </section>
+    </div>
+
+    <!-- row 2: trending / top5 / ballon / team of season -->
+    <div class="grid" style="grid-template-columns:repeat(4,1fr); margin-top:18px">
+      <section class="card"><div class="card-h"><h3>Trending Players</h3><a class="see" href="/players.html">See all</a></div><div id="trending"></div></section>
+      <section class="card"><div class="card-h"><h3>Atlastra Top 5</h3><a class="see" href="/players.html">See all</a></div><div id="top5"></div></section>
+      <section class="card">
+        <div class="card-h"><h3>Ballon d'Or Predictor</h3><a class="see">See all</a></div>
+        <div id="ballon"></div>
+        <div class="placeholder-note" style="margin-top:6px">Predictor — placeholder model</div>
+      </section>
+      <section class="card">
+        <div class="card-h"><h3>Team of the Season (25/26)</h3><a class="see">See all</a></div>
+        <div class="pitch" id="tof"></div>
+        <div class="placeholder-note" style="margin-top:6px">Formation — placeholder</div>
+      </section>
+    </div>
+
+    <!-- row 3: standings + spotlight -->
+    <div class="grid" style="grid-template-columns:1fr 1fr; margin-top:18px">
+      <section class="card">
+        <div class="card-h"><h3>League Standings</h3><a class="see">See full table</a></div>
+        <div class="tabs" id="leagueTabs"></div>
+        <table><thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GD</th><th>PTS</th><th>Form</th></tr></thead>
+        <tbody id="standings"></tbody></table>
+      </section>
+      <section class="card">
+        <div class="card-h"><h3>Stats Spotlight</h3><a class="see">See all</a></div>
+        <div class="spot" id="spotlight"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="/js/api.js"></script>
+<script src="/js/home.js"></script>
+</body>
+</html>
