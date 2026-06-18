@@ -8,6 +8,28 @@ const el = (html) => { const t = document.createElement('template'); t.innerHTML
 const initials = (n) => n.replace(/[^A-Za-z .'-]/g, '').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 const eurM = (v) => v == null ? '—' : '€' + (v / 1e6).toFixed(0) + 'M';
 
+// FotMob 3-letter (FIFA) nationality code -> flag emoji.
+const FIFA2ISO = {
+  ESP: 'ES', FRA: 'FR', ITA: 'IT', POR: 'PT', NED: 'NL', BEL: 'BE', GER: 'DE',
+  IRL: 'IE', BRA: 'BR', ARG: 'AR', URU: 'UY', COL: 'CO', CHI: 'CL', ECU: 'EC',
+  PER: 'PE', PAR: 'PY', VEN: 'VE', MEX: 'MX', USA: 'US', CAN: 'CA', CRO: 'HR',
+  SRB: 'RS', SVN: 'SI', SVK: 'SK', CZE: 'CZ', POL: 'PL', UKR: 'UA', SUI: 'CH',
+  AUT: 'AT', DEN: 'DK', SWE: 'SE', NOR: 'NO', FIN: 'FI', ISL: 'IS', TUR: 'TR',
+  GRE: 'GR', HUN: 'HU', ROU: 'RO', BUL: 'BG', ALB: 'AL', KOS: 'XK', BIH: 'BA',
+  MKD: 'MK', MNE: 'ME', SEN: 'SN', CIV: 'CI', GHA: 'GH', NGA: 'NG', CMR: 'CM',
+  MAR: 'MA', ALG: 'DZ', TUN: 'TN', EGY: 'EG', MLI: 'ML', GUI: 'GN', COD: 'CD',
+  GAB: 'GA', ANG: 'AO', RSA: 'ZA', JPN: 'JP', KOR: 'KR', AUS: 'AU', IRN: 'IR',
+  KSA: 'SA', UZB: 'UZ', GEO: 'GE', ARM: 'AM', ISR: 'IL', JAM: 'JM', PAN: 'PA',
+};
+function flagEmoji(ccode) {
+  const special = { ENG: '🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+    SCO: '🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}',
+    WAL: '🏴\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}' };
+  if (special[ccode]) return special[ccode];
+  const iso = FIFA2ISO[ccode];
+  return iso ? iso.replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt())) : '';
+}
+
 const NAV = [
   ['Home', '🏠', '/index.html'], ['Players', '👤', '/players.html'], ['Teams', '🛡️', '#'],
   ['Compare', '⇄', '#'], ['Rankings', '📊', '#'], ['Awards', '🏆', '#'],

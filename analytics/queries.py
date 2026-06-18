@@ -570,11 +570,17 @@ class SoccerDB:
                  SELECT position_group FROM player_profile_metrics WHERE player_id = ? LIMIT 1)
             WHERE m.player_id = ? LIMIT 1
         """, [pid, pid]).fetchone()
+        bio = self.con.execute(
+            "SELECT nationality, country_code, date_of_birth, fotmob_age "
+            "FROM player_bio WHERE player_id=?", [pid]).fetchone()
         return {
             "name": prof["player_name"], "team": team,
             "position_group": prof["position_group"],
             "detailed_position": prof.get("detailed_position"),  # LW/RW/LB/RB/CAM/... (FotMob)
-            "age": self._player_age(prof["player_name"]),
+            "age": self._player_age(prof["player_name"]) or (bio[3] if bio else None),
+            "nationality": bio[0] if bio else None,
+            "country_code": bio[1] if bio else None,
+            "date_of_birth": bio[2] if bio else None,
             "market_value_eur": prof["market_value_eur"],
             "rating": prof["rating"], "classification": prof["classification"],
             "rank_in_group": ctx[0] if ctx else None,

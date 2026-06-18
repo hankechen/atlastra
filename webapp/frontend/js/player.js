@@ -36,6 +36,8 @@ async function load(name, careerStat = 'xa') {
   document.getElementById('pteam').textContent = p.team || '';
   document.getElementById('ppos').textContent = p.detailed_position || p.position_group;
   document.getElementById('page').textContent = p.age ?? '—';
+  document.getElementById('pnat').textContent =
+    (p.country_code ? flagEmoji(p.country_code) + ' ' : '') + (p.nationality || '—');
   document.getElementById('pmv').textContent = eurM(p.market_value_eur);
 
   // dual ratings (League + UCL, common-metric)

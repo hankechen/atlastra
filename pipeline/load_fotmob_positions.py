@@ -104,6 +104,16 @@ def load_fotmob_positions(season: str = FOCUS_SEASON) -> None:
     con.execute("CREATE TABLE player_position AS SELECT * FROM out")
     con.execute("CREATE INDEX IF NOT EXISTS idx_pp ON player_position(player_id)")
     matched_names = out["datamb_player"].notna().sum()
+
+    # bio: nationality + birthdate (FotMob), keyed by Understat player_id
+    if {"nationality", "country_code", "date_of_birth", "age"} <= set(fm.columns):
+        bio = (fm[["player_id", "nationality", "country_code", "date_of_birth", "age"]]
+               .rename(columns={"age": "fotmob_age"}).drop_duplicates("player_id"))
+        con.execute("DROP TABLE IF EXISTS player_bio")
+        con.execute("CREATE TABLE player_bio AS SELECT * FROM bio")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_bio ON player_bio(player_id)")
+        n_nat = bio["nationality"].notna().sum()
+        print(f"player_bio: {len(bio)} players ({n_nat} with nationality).")
     con.close()
     print(f"player_position: {len(out)} players ({matched_names} linked to a datamb name). "
           f"groups: {out['fotmob_group'].value_counts().to_dict()}")
