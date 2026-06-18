@@ -30,6 +30,7 @@
               <div class="m"><span>Age</span><b id="page">—</b></div>
               <div class="m"><span>Nationality</span><b id="pnat">—</b></div>
               <div class="m"><span>Market Value</span><b id="pmv">—</b></div>
+              <div class="m"><span>Avg Rating</span><b id="pavg">—</b></div>
               <div class="m"><span>Contract</span><b><span class="placeholder-note">n/a</span></b></div>
             </div>
             <div class="cta"><button class="btn btn-primary">★ Follow</button><a id="compareLink" class="btn btn-ghost" href="/compare.html">⇄ Compare</a></div>
@@ -89,8 +90,8 @@
     <div class="grid" style="grid-template-columns:1fr 1fr; margin-top:18px">
       <section class="card tech"><div class="card-h"><h3>Signature Actions</h3></div>
         <div class="muted" style="font-size:12px;margin-bottom:10px">On-ball actions this player does most, ranked vs position peers</div><div id="tech"></div></section>
-      <section class="card"><div class="card-h"><h3>Season Heatmap</h3></div><div class="heat"></div>
-        <div class="placeholder-note" style="margin-top:6px">Heatmap — placeholder (no event data)</div></section>
+      <section class="card"><div class="card-h"><h3>Season Heatmap</h3><span class="muted" id="heatNote" style="font-size:12px"></span></div>
+        <canvas id="heat" width="380" height="246"></canvas></section>
     </div>
   </main>
 </div>

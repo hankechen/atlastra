@@ -782,6 +782,22 @@ class SoccerDB:
         return [{"name": r.tendency, "value": _r(r.value, 2), "percentile": _i(r.percentile)}
                 for r in df.itertuples()]
 
+    def _player_heatmap(self, pid: int, season: str = FOCUS_SEASON):
+        """Binned SofaScore season heatmap grid (rows×cols of 0-1 density), or None."""
+        try:
+            r = self.con.execute(
+                "SELECT grid FROM player_heatmap WHERE player_id = ? AND season = ?",
+                [pid, season]).fetchone()
+        except Exception:  # noqa: BLE001 -- table not built yet
+            return None
+        if not r or not r[0]:
+            return None
+        import json
+        try:
+            return json.loads(r[0])
+        except Exception:  # noqa: BLE001
+            return None
+
     def _player_archetype(self, pid: int) -> dict:
         """Archetype label + fit + signature traits + similar players for a player."""
         a = self.con.execute(
@@ -831,6 +847,50 @@ class SoccerDB:
                                  "signature": a["high"], "count": cmap.get(a["name"], 0)}
                                 for a in archs]}
                 for grp, archs in ARCHETYPES.items()]
+
+    def web_team_of_season(self, season: str = FOCUS_SEASON, min_minutes: int = 1500) -> dict:
+        """Best XI in a 4-3-3 by average match rating (FotMob/SofaScore, minutes-
+        weighted across competitions), one player per detailed-position slot."""
+        df = self.con.execute("""
+            SELECT pl.player_name AS name,
+                   COALESCE(f.detailed_position, f.main_position) AS pos,
+                   cp.rating AS avg_rating, f.team, cp.minutes, pe.fpid,
+                   COALESCE(c.rating, f.rating) AS atlastra
+            FROM v_stats_combined_player cp JOIN players pl USING(player_id)
+            JOIN v_player_profile_full f ON f.player_id = cp.player_id
+            LEFT JOIN player_ratings_combined c
+                   ON c.player_id = cp.player_id AND c.scope='league' AND c.season = cp.season
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = cp.player_id
+            WHERE cp.season = ? AND cp.rating IS NOT NULL AND cp.minutes >= ?
+            ORDER BY cp.rating DESC, cp.minutes DESC
+        """, [season, min_minutes]).df()
+        used = set()
+
+        def pick(positions, n):
+            out = []
+            for r in df.itertuples():
+                if len(out) >= n:
+                    break
+                if r.name not in used and r.pos in positions:
+                    used.add(r.name)
+                    out.append(r)
+            return out
+
+        # left-to-right per line: LB-CB-CB-RB ; LW-ST-RW
+        lines = {"GK": pick({"GK"}, 1),
+                 "DEF": pick({"LB"}, 1) + pick({"CB"}, 2) + pick({"RB"}, 1),
+                 "MID": pick({"AM", "CM", "DM"}, 3),
+                 "FWD": pick({"LW"}, 1) + pick({"ST"}, 1) + pick({"RW"}, 1)}
+
+        def fmt(rows):
+            return [{"player": r.name, "position": r.pos, "avg_rating": _r(r.avg_rating, 2),
+                     "team": r.team, "team_logo": self.team_logo(r.team),
+                     "photo": self.player_photo(r.fpid), "rating": _i(r.atlastra)}
+                    for r in rows]
+        return {"formation": "4-3-3", "season": _fmt_season(season),
+                "lines": [{"label": k, "players": fmt(v)} for k, v in lines.items()]}
 
     def web_archetype(self, name: str, season: str = FOCUS_SEASON) -> dict:
         """One archetype: definition + its top players (by fit, then rating)."""
@@ -911,9 +971,10 @@ class SoccerDB:
         # current-season tiles from the COMBINED (domestic + UCL) per-player view
         t = self.con.execute("""
             SELECT games, goals, assists, xg, xa, chances_created, big_chances_created,
-                   dribbles_completed, minutes, pass_accuracy_pct
+                   dribbles_completed, minutes, pass_accuracy_pct, rating
             FROM v_stats_combined_player WHERE player_id = ? AND season = ?
         """, [pid, season]).fetchone()
+        avg_rating = _r(t[10], 2) if t and t[10] is not None else None   # FotMob/SofaScore
         # League + UCL ratings (common-metric, comparable; see rate_combined.py)
         cr = self.con.execute("""
             SELECT scope, rating, classification, percentile, minutes
@@ -975,10 +1036,12 @@ class SoccerDB:
             "rank_in_group": ctx[0] if ctx else None,
             "percentile": round(ctx[1]) if ctx and ctx[1] is not None else None,
             "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
+            "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
             "tiles": tiles, "radar": radar,
             "stats_scopes": self._player_stat_scopes(pid, season),  # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9
+            "heatmap": self._player_heatmap(pid, season),  # SofaScore season heatmap grid
             "career_stat": career_stat, "career": career,
             "strengths": _split(prof["strengths"]),
             "weaknesses": _split(prof["weaknesses"]),

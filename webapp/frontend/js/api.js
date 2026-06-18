@@ -11,6 +11,8 @@ const eurM = (v) => v == null ? '—' : '€' + (v / 1e6).toFixed(0) + 'M';
 // apostrophes that would break an onclick="" attribute (e.g. "Matt O'Riley").
 const pHref = (n) => `/player.html?name=${encodeURIComponent(n)}`;
 const tHref = (n) => `/team.html?name=${encodeURIComponent(n)}`;
+// FotMob-style colour for an average match rating (~6–9 scale)
+const ratingColor = (r) => r >= 7.5 ? '#34c46a' : r >= 7.0 ? '#9acd32' : r >= 6.7 ? '#e8b04b' : '#e5484d';
 
 // Player avatar: initials sit behind; the FotMob photo overlays and removes itself
 // on error (missing image) so we gracefully fall back. Container needs the avatar CSS.

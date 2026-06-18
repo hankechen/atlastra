@@ -19,9 +19,18 @@ document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `
   <div class="prow" onclick="location.href='${pHref(n)}'"><span class="rk">${i + 1}</span><span class="pic"></span>
     <span class="nm">${n}</span><span class="bo-bar"><i style="width:${p * 2.5}%"></i></span><b>${p}%</b></div>`).join('');
 
-const TOTS = [['Donnarumma'], ['Mendes', 'Saliba', 'Rüdiger', 'Frimpong'], ['Pedri', 'Bellingham', 'Wirtz'], ['Raphinha', 'Mbappé', 'Salah']];
-document.getElementById('tof').innerHTML = TOTS.map(line =>
-  `<div class="pline">${line.map(p => `<span class="pp"><span class="dot"></span>${p}</span>`).join('')}</div>`).join('');
+// Team of the Season — real best XI by average match rating (4-3-3)
+(async () => {
+  const tots = await api('/api/team_of_season');
+  document.getElementById('totsNote').textContent = `Best XI by average match rating · ${tots.formation}`;
+  const surname = (n) => n.split(' ').slice(-1)[0];
+  document.getElementById('tof').innerHTML = tots.lines.map(line =>
+    `<div class="pline">${line.players.map(p => `
+      <span class="pp" onclick="location.href='${pHref(p.player)}'" title="${p.player} · ${p.team} · ${p.position}">
+        <span class="dot">${avatarHTML(p.photo, p.player)}</span>
+        <span class="pp-rt" style="background:${ratingColor(p.avg_rating)}">${(+p.avg_rating).toFixed(1)}</span>
+        <span class="pp-n">${surname(p.player)}</span></span>`).join('')}</div>`).join('');
+})();
 
 // ---- real data ----
 (async () => {

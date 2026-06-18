@@ -86,6 +86,9 @@ async function load(name, careerStat = 'xa') {
   document.getElementById('pnat').textContent =
     (p.country_code ? flagEmoji(p.country_code) + ' ' : '') + (p.nationality || '—');
   document.getElementById('pmv').textContent = eurM(p.market_value_eur);
+  const av = document.getElementById('pavg');
+  av.textContent = p.avg_rating == null ? '—' : (+p.avg_rating).toFixed(1);
+  av.style.color = p.avg_rating == null ? '' : ratingColor(p.avg_rating);
   document.getElementById('compareLink').href = '/compare.html?name=' + encodeURIComponent(p.name);
 
   // dual ratings (League + UCL, common-metric)
@@ -121,6 +124,44 @@ async function load(name, careerStat = 'xa') {
 
   drawRadar(p.radar);
   drawCareer(p.career, careerStat);
+  drawHeatmap(p.heatmap);
+}
+
+// SofaScore season heatmap: blurred density over a pitch (attacks left -> right)
+function heatColor(v) {
+  v = Math.min(1, v);
+  return `hsla(${(1 - v) * 235}, 85%, 52%, ${Math.min(0.92, 0.12 + v * 0.85)})`;
+}
+function drawPitch(ctx, W, H) {
+  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5;
+  ctx.strokeRect(2, 2, W - 4, H - 4);
+  ctx.beginPath(); ctx.moveTo(W / 2, 2); ctx.lineTo(W / 2, H - 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.13, 0, 2 * Math.PI); ctx.stroke();
+  const bw = W * 0.15, bh = H * 0.55;
+  ctx.strokeRect(2, (H - bh) / 2, bw, bh); ctx.strokeRect(W - 2 - bw, (H - bh) / 2, bw, bh);
+}
+function drawHeatmap(grid) {
+  const c = document.getElementById('heat'); if (!c) return;
+  const ctx = c.getContext('2d'), W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0e1f17'; ctx.fillRect(0, 0, W, H);
+  const note = document.getElementById('heatNote');
+  if (!grid || !grid.length) {
+    if (note) note.textContent = '';
+    drawPitch(ctx, W, H);
+    ctx.fillStyle = '#7f8aa3'; ctx.font = '13px Inter'; ctx.textAlign = 'center';
+    ctx.fillText('No heatmap data', W / 2, H / 2 + 4); ctx.textAlign = 'left';
+    return;
+  }
+  if (note) note.textContent = 'Domestic league · this season';
+  const GH = grid.length, GW = grid[0].length, cw = W / GW, ch = H / GH;
+  ctx.save(); ctx.filter = 'blur(10px)';
+  for (let r = 0; r < GH; r++) for (let col = 0; col < GW; col++) {
+    const v = grid[r][col];
+    if (v > 0.02) { ctx.fillStyle = heatColor(v); ctx.fillRect(col * cw, r * ch, cw + 1.5, ch + 1.5); }
+  }
+  ctx.restore();
+  drawPitch(ctx, W, H);
 }
 
 function renderArchetype(a) {

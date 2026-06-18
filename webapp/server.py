@@ -60,6 +60,8 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_archetypes()
         if path == "/api/archetype":
             return d.web_archetype(q.get("name", ["Poacher"])[0])
+        if path == "/api/team_of_season":
+            return d.web_team_of_season()
         raise KeyError(path)
 
 
