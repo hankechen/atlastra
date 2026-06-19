@@ -100,7 +100,7 @@ GK_WEIGHTS = {"save_percentage_pct": .35, "goals_conceded_per_90": .30,
 # body (so the 80s fill out), then hyperbolically compressed above the knee so
 # 95+ is scarce and 99 is reserved for a singular season. Replaces the old flat
 # `50 + 15*S` which clipped a pile of players at 99 and left the 80s near-empty.
-CURVE_CENTER, CURVE_SLOPE, CURVE_KNEE, CURVE_COMP = 55.0, 14.0, 82.0, 0.033
+CURVE_CENTER, CURVE_SLOPE, CURVE_KNEE, CURVE_COMP = 55.0, 14.0, 78.0, 0.050
 
 # Per-position calibration: the common metrics measure attackers well (goals/xG/
 # assists) but defenders crudely (tackles/passes/duels), so defensive leaders

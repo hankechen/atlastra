@@ -1,7 +1,17 @@
 renderSidebar('Players');
 
 const GROUPS = [['all', 'All'], ['FWD', 'Forwards'], ['MID', 'Midfield'], ['DEF', 'Defenders'], ['GK', 'Goalkeepers']];
-let group = 'all', search = '';
+const SCOPES = [['league', 'Top 5 Leagues'], ['ucl', 'Champions League']];
+let group = 'all', search = '', scope = 'league';
+
+// Top-5-leagues vs UCL toggle — switches which players + which rating show
+const scopeEl = document.getElementById('dirScope');
+scopeEl.innerHTML = SCOPES.map(([s, n], i) =>
+  `<button class="ds-btn ${i ? '' : 'active'}" data-s="${s}">${n}</button>`).join('');
+scopeEl.querySelectorAll('.ds-btn').forEach(b => b.onclick = () => {
+  scopeEl.querySelectorAll('.ds-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); scope = b.dataset.s; render();
+});
 
 const filtersEl = document.getElementById('filters');
 filtersEl.innerHTML = GROUPS.map(([g, n], i) =>
@@ -29,7 +39,10 @@ const card = (p) => `
 
 let timer;
 async function render() {
-  const qs = `group=${group}&limit=30` + (search ? `&search=${encodeURIComponent(search)}` : '');
+  document.getElementById('dirNote').textContent = scope === 'ucl'
+    ? 'Champions League players ranked by their UCL rating, with their UCL goals & assists. Click any card for the full profile.'
+    : "Top-rated players across Europe's big five leagues. Click any card for the full profile.";
+  const qs = `group=${group}&scope=${scope}&limit=30` + (search ? `&search=${encodeURIComponent(search)}` : '');
   const players = await api('/api/players?' + qs);
   document.getElementById('grid').innerHTML =
     players.length ? players.map(card).join('') : `<div class="empty">No players found.</div>`;

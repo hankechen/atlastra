@@ -117,18 +117,7 @@ a{color:inherit;text-decoration:none}
 
 /* home hero */
 .hero{position:relative;overflow:hidden;border-radius:var(--radius);border:1px solid var(--border);
-  background:radial-gradient(120% 140% at 80% 20%,#1d2a55 0%,#0c1322 55%,#0a0e1a 100%);padding:34px;
-  min-height:330px}
-/* keep the copy above the figure */
-.hero h1,.hero p,.hero .cta,.hero-stats{position:relative;z-index:1}
-.hero-stats{max-width:480px}
-/* cut-out player filling the empty right side; left edge softly faded into the gradient */
-.hero-fig{position:absolute;right:14px;bottom:0;height:118%;width:auto;z-index:0;
-  pointer-events:none;user-select:none;filter:drop-shadow(0 8px 22px rgba(0,0,0,.45));
-  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 20%);
-          mask-image:linear-gradient(90deg,transparent 0,#000 20%)}
-@media(max-width:1180px){.hero-fig{opacity:.55;right:-10px}}
-@media(max-width:880px){.hero-fig{display:none}}
+  background:radial-gradient(120% 140% at 80% 20%,#1d2a55 0%,#0c1322 55%,#0a0e1a 100%);padding:34px}
 .hero h1{font-size:40px;line-height:1.05;font-weight:800;letter-spacing:-.5px}
 .hero h1 .accent{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero p{color:var(--muted);margin:14px 0 22px;font-size:15px}
@@ -174,13 +163,13 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
 .pp .dot{width:34px;height:34px;border-radius:50%;background:#1b2236;border:1px solid var(--border2)}
 
 /* player header */
-.ph{display:grid;grid-template-columns:150px 1fr;gap:22px}
-.ph .photo{width:150px;height:180px;border-radius:12px;background:linear-gradient(#1b2236,#101626);border:1px solid var(--border2)}
+.ph{display:grid;grid-template-columns:140px minmax(0,1fr);gap:20px}
+.ph .photo{width:140px;height:170px;border-radius:12px;background:linear-gradient(#1b2236,#101626);border:1px solid var(--border2)}
 .ph h1{font-size:34px;font-weight:800;display:flex;align-items:center;gap:10px}
 .verified{color:var(--accent)}
 .ph .team{color:var(--muted);margin:6px 0 16px;font-size:14px}
 .ph .team .pos{color:var(--accent);font-weight:600}
-.ph .meta{display:flex;gap:34px;margin-bottom:18px}
+.ph .meta{display:flex;flex-wrap:wrap;gap:14px 26px;margin-bottom:18px}
 .ph .meta .m span{color:var(--muted);font-size:12px;display:block;margin-bottom:3px}
 .ph .meta .m b{font-size:15px;font-weight:700}
 
@@ -237,6 +226,13 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .page-head{display:flex;align-items:center;justify-content:space-between;margin:6px 0 18px}
 .page-head h2{font-size:24px;font-weight:800}
 .page-head p{color:var(--muted);font-size:13px;margin-top:3px}
+/* directory scope toggle: Top 5 Leagues vs Champions League */
+.dir-scope{display:inline-flex;gap:3px;background:var(--card2);border:1px solid var(--border);
+  border-radius:11px;padding:4px;margin-bottom:16px}
+.dir-scope .ds-btn{background:none;border:none;color:var(--muted);font-family:inherit;font-weight:700;
+  font-size:13px;padding:8px 18px;border-radius:8px;cursor:pointer}
+.dir-scope .ds-btn:hover{color:var(--text)}
+.dir-scope .ds-btn.active{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
 .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
 .filters .pill{background:var(--card);border:1px solid var(--border2);border-radius:20px;padding:8px 16px;
   font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
@@ -294,10 +290,10 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .cmp-stat .rm:hover{color:var(--red)}
 
 /* ---- player photos + team crests ---- */
-.prow .pic,.pcard .photo,.ph .photo,.cmp-photo{position:relative;overflow:hidden}
-.prow .pic>img,.pcard .photo>img,.ph .photo>img,.cmp-photo>img{
+.prow .pic,.pcard .photo,.ph .photo,.cmp-photo,.spot .s .pic{position:relative;overflow:hidden}
+.prow .pic>img,.pcard .photo>img,.ph .photo>img,.cmp-photo>img,.spot .s .pic>img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:#0e1320}
-.prow .pic .ini,.pcard .photo .ini,.ph .photo .ini,.cmp-photo .ini{
+.prow .pic .ini,.pcard .photo .ini,.ph .photo .ini,.cmp-photo .ini,.spot .s .pic .ini{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   font-weight:700;color:var(--muted)}
 .ph .photo .ini{font-size:30px}

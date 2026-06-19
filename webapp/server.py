@@ -34,7 +34,8 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/players":
             return d.web_players(q.get("group", ["all"])[0],
                                  (q.get("search", [""])[0] or None),
-                                 int(q.get("limit", ["30"])[0]))
+                                 int(q.get("limit", ["30"])[0]),
+                                 scope=q.get("scope", ["league"])[0])
         if path == "/api/spotlight":
             return d.web_spotlight()
         if path == "/api/standings":

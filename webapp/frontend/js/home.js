@@ -53,7 +53,7 @@ document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `
   ];
   document.getElementById('spotlight').innerHTML = cards.map(([lab, s, unit]) => `
     <div class="s"${s ? ` onclick="location.href='${pHref(s.player)}'" style="cursor:pointer"` : ''}>
-      <div class="lab">${lab}</div><div class="pic"></div>
+      <div class="lab">${lab}</div><div class="pic">${s ? avatarHTML(s.photo, s.player) : ''}</div>
       <div class="nm">${s ? s.player : '—'}</div><div class="v">${s ? s.value + ' ' + unit : ''}</div></div>`).join('');
 
   // standings with league tabs

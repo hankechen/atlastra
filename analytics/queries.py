@@ -569,14 +569,19 @@ class SoccerDB:
                      "DEF": ["FB", "CB"], "GK": ["GK"]}
 
     def web_players(self, group: str = "all", search: str | None = None,
-                    limit: int = 24, season: str = FOCUS_SEASON) -> list[dict]:
+                    limit: int = 24, season: str = FOCUS_SEASON,
+                    scope: str = "league") -> list[dict]:
         """Top-rated players for the directory grid: full name, team, position,
         rating/classification, market value and this season's G/A. Uses
         v_player_profile_full (player_id-keyed, full names).
 
-        Rating shown = the combined-League rating (same number the profile page
-        leads with) so directory and profile agree; players the combined engine
-        doesn't cover (notably GKs) fall back to the datamb rating."""
+        scope='league' -> top-5-league players with the combined-League rating
+        (same number the profile page leads with) and domestic G/A; players the
+        combined engine doesn't cover (notably GKs) fall back to the datamb
+        rating. scope='ucl' -> only Champions League players, showing the
+        combined-UCL rating and their UCL G/A."""
+        if scope == "ucl":
+            return self._web_players_ucl(group, search, limit, season)
         # params order matches the ?-placeholders below: v.season, c.season, [group], [search], limit
         where, params = ["f.player_id IS NOT NULL"], [season, season]
         if group and group != "all" and group in self.PLAYER_GROUPS:
@@ -615,14 +620,53 @@ class SoccerDB:
                  "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
                 for r in df.itertuples()]
 
+    def _web_players_ucl(self, group, search, limit, season) -> list[dict]:
+        """UCL directory: players with a combined-UCL rating, showing that rating
+        and their Champions League G/A (from v_stats_ucl)."""
+        where = ["c.scope = 'ucl'", "c.season = ?"]
+        params = [season, season]                     # u.season (JOIN), then c.season
+        if group and group != "all" and group in self.PLAYER_GROUPS:
+            gs = self.PLAYER_GROUPS[group]
+            where.append(f"COALESCE(f.main_position, pl.position_group) IN ({','.join(['?'] * len(gs))})")
+            params += gs
+        if search:
+            where.append("strip_accents(lower(pl.player_name)) LIKE strip_accents(lower('%'||?||'%'))")
+            params.append(search)
+        params.append(limit)
+        df = self.con.execute(f"""
+            SELECT pl.player_name AS player, COALESCE(u.team, f.team) AS team,
+                   COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position,
+                   c.rating, c.classification, f.market_value_eur,
+                   u.goals, u.assists, pe.fpid
+            FROM player_ratings_combined c
+            JOIN players pl USING(player_id)
+            LEFT JOIN v_player_profile_full f ON f.player_id = c.player_id
+            LEFT JOIN v_stats_ucl u ON u.player_id = c.player_id AND u.season = ?
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = c.player_id
+            WHERE {' AND '.join(where)}
+            ORDER BY c.rating DESC, f.market_value_eur DESC NULLS LAST
+            LIMIT ?
+        """, params).df()
+        return [{"player": r.player, "team": r.team, "position": r.position,
+                 "rating": _i(r.rating), "classification": r.classification,
+                 "market_value_eur": None if pd.isna(r.market_value_eur) else float(r.market_value_eur),
+                 "goals": _i(r.goals), "assists": _i(r.assists),
+                 "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                for r in df.itertuples()]
+
     def web_spotlight(self, season: str = FOCUS_SEASON) -> dict:
         def top(col, tbl="v_player_season_stats", rnd=0):
             r = self.con.execute(
-                f"SELECT pl.player_name, v.{col} AS val FROM {tbl} v "
-                "JOIN players pl USING(player_id) "
+                f"SELECT pl.player_name, v.{col} AS val, v.team, "
+                "  (SELECT max(fotmob_player_id) FROM player_enrichment e "
+                "   WHERE e.player_id = v.player_id AND e.fotmob_player_id IS NOT NULL) AS fpid "
+                f"FROM {tbl} v JOIN players pl USING(player_id) "
                 f"WHERE v.season = ? AND v.{col} IS NOT NULL ORDER BY v.{col} DESC LIMIT 1",
                 [season]).fetchone()
-            return {"player": r[0], "value": round(float(r[1]), rnd) if rnd else int(r[1])} if r else None
+            return {"player": r[0], "value": round(float(r[1]), rnd) if rnd else int(r[1]),
+                    "photo": self.player_photo(r[3]), "team_logo": self.team_logo(r[2])} if r else None
         return {
             "top_scorer": top("goals"), "top_assists": top("assists"),
             "most_xg": top("xg", rnd=1), "most_chances": top("chances_created"),
