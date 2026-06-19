@@ -473,6 +473,13 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .pp .pp-n{font-weight:600;font-size:11px;color:var(--text);max-width:72px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pp:hover .pp-n{color:var(--accent2)}
 
+/* licensed photo credit under the profile header image */
+.ph-img{display:flex;flex-direction:column;align-items:center;gap:5px}
+.photo-credit{font-size:10px;line-height:1.2;text-align:center;max-width:76px}
+.photo-credit a{color:var(--muted2)}
+.photo-credit a:hover{color:var(--muted)}
+.photo-credit:empty{display:none}
+
 /* season heatmap canvas */
 #heat{width:100%;height:auto;border-radius:10px;display:block;background:#0e1f17;border:1px solid var(--border)}
 

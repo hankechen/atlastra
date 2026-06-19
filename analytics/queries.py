@@ -66,6 +66,7 @@ class SoccerDB:
     def __init__(self, db_path=None, read_only=True):
         self.con = duckdb.connect(str(db_path or DB_PATH), read_only=read_only)
         self._logo_map = None
+        self._wiki_photos = None
 
     def team_logo(self, name):
         """Crest URL for a team display name, or None. Resolves by normalized name
@@ -87,10 +88,38 @@ class SoccerDB:
         fid = self._logo_map.get(_norm_team(name))
         return FOTMOB_TEAM_IMG.format(fid) if fid else None
 
-    @staticmethod
-    def player_photo(fotmob_player_id):
-        return None if fotmob_player_id is None or pd.isna(fotmob_player_id) \
-            else FOTMOB_PLAYER_IMG.format(int(fotmob_player_id))
+    def player_photo(self, fotmob_player_id):
+        """Photo URL for a player, keyed by FotMob id. Prefers a licensed
+        Wikimedia Commons image (table player_image, backfilled by
+        load_wikimedia_images) and falls back to the FotMob CDN for anyone
+        Commons doesn't cover."""
+        if fotmob_player_id is None or pd.isna(fotmob_player_id):
+            return None
+        fid = int(fotmob_player_id)
+        if self._wiki_photos is None:
+            self._wiki_photos = {}
+            try:
+                rows = self.con.execute(
+                    "SELECT fotmob_player_id, image_url FROM player_image "
+                    "WHERE fotmob_player_id IS NOT NULL AND image_url IS NOT NULL"
+                ).fetchall()
+            except Exception:  # noqa: BLE001 -- table not built yet
+                rows = []
+            self._wiki_photos = {int(f): u for f, u in rows}
+        return self._wiki_photos.get(fid) or FOTMOB_PLAYER_IMG.format(fid)
+
+    def _photo_credit(self, pid: int) -> dict | None:
+        """Attribution for a player's licensed Commons photo (None if the photo
+        is the FotMob fallback or the table isn't built)."""
+        try:
+            r = self.con.execute(
+                "SELECT credit, license, file_page FROM player_image "
+                "WHERE player_id = ? AND image_url IS NOT NULL", [pid]).fetchone()
+        except Exception:  # noqa: BLE001 -- table not built yet
+            return None
+        if not r:
+            return None
+        return {"credit": r[0], "license": r[1], "page": r[2]}
 
     def close(self):
         self.con.close()
@@ -1178,6 +1207,7 @@ class SoccerDB:
         return {
             "name": prof["player_name"], "team": team,
             "photo": self.player_photo(fpid[0] if fpid else None),
+            "photo_credit": self._photo_credit(pid),  # CC attribution if licensed
             "team_logo": self.team_logo(team),
             "position_group": prof["position_group"],
             "detailed_position": prof.get("detailed_position"),  # LW/RW/LB/RB/CAM/... (FotMob)

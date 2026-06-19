@@ -80,6 +80,13 @@ async function load(name, careerStat = 'xa') {
   document.getElementById('pname').innerHTML = p.name + ' <span class="verified">✔</span>';
   const photoEl = document.querySelector('.ph .photo');
   if (photoEl) photoEl.innerHTML = avatarHTML(p.photo, p.name);
+  const credEl = document.getElementById('photoCredit');
+  if (credEl) {
+    const c = p.photo_credit;
+    credEl.innerHTML = c
+      ? `<a href="${c.page || '#'}" target="_blank" rel="noopener" title="${c.credit || ''} — ${c.license || ''}">📷 ${c.credit || 'Wikimedia'}${c.license ? ' · ' + c.license : ''}</a>`
+      : '';
+  }
   document.getElementById('pteam').innerHTML = crestHTML(p.team_logo, 'crest-sm') + (p.team || '');
   document.getElementById('ppos').textContent = p.detailed_position || p.position_group;
   document.getElementById('page').textContent = p.age ?? '—';
