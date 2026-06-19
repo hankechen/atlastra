@@ -117,7 +117,18 @@ a{color:inherit;text-decoration:none}
 
 /* home hero */
 .hero{position:relative;overflow:hidden;border-radius:var(--radius);border:1px solid var(--border);
-  background:radial-gradient(120% 140% at 80% 20%,#1d2a55 0%,#0c1322 55%,#0a0e1a 100%);padding:34px}
+  background:radial-gradient(120% 140% at 80% 20%,#1d2a55 0%,#0c1322 55%,#0a0e1a 100%);padding:34px;
+  min-height:330px}
+/* keep the copy above the figure */
+.hero h1,.hero p,.hero .cta,.hero-stats{position:relative;z-index:1}
+.hero-stats{max-width:480px}
+/* cut-out player filling the empty right side; left edge softly faded into the gradient */
+.hero-fig{position:absolute;right:14px;bottom:0;height:118%;width:auto;z-index:0;
+  pointer-events:none;user-select:none;filter:drop-shadow(0 8px 22px rgba(0,0,0,.45));
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 20%);
+          mask-image:linear-gradient(90deg,transparent 0,#000 20%)}
+@media(max-width:1180px){.hero-fig{opacity:.55;right:-10px}}
+@media(max-width:880px){.hero-fig{display:none}}
 .hero h1{font-size:40px;line-height:1.05;font-weight:800;letter-spacing:-.5px}
 .hero h1 .accent{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero p{color:var(--muted);margin:14px 0 22px;font-size:15px}

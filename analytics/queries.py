@@ -45,6 +45,10 @@ def _fmt_season(code):
 
 
 # FotMob image CDNs -- crests keyed by team id, photos by player id.
+# Set True to prefer licensed Wikimedia Commons photos (table player_image, built
+# by pipeline.load_wikimedia_images) over the FotMob CDN, with per-photo credits.
+# Off for now -- the app shows FotMob headshots; flip to re-enable.
+USE_LICENSED_PHOTOS = False
 FOTMOB_PLAYER_IMG = "https://images.fotmob.com/image_resources/playerimages/{}.png"
 FOTMOB_TEAM_IMG = "https://images.fotmob.com/image_resources/logo/teamlogo/{}.png"
 
@@ -96,6 +100,8 @@ class SoccerDB:
         if fotmob_player_id is None or pd.isna(fotmob_player_id):
             return None
         fid = int(fotmob_player_id)
+        if not USE_LICENSED_PHOTOS:
+            return FOTMOB_PLAYER_IMG.format(fid)
         if self._wiki_photos is None:
             self._wiki_photos = {}
             try:
@@ -111,6 +117,8 @@ class SoccerDB:
     def _photo_credit(self, pid: int) -> dict | None:
         """Attribution for a player's licensed Commons photo (None if the photo
         is the FotMob fallback or the table isn't built)."""
+        if not USE_LICENSED_PHOTOS:
+            return None
         try:
             r = self.con.execute(
                 "SELECT credit, license, file_page FROM player_image "
