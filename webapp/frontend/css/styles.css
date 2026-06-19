@@ -43,6 +43,13 @@ a{color:inherit;text-decoration:none}
 .navi .livedot{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red)}
 .navi.league .sq{width:16px;height:16px;border-radius:5px;flex:none}
 .navi.league{color:var(--text);padding:7px 12px}
+.navi.group-active .ic{color:var(--accent)}
+.subnav{display:flex;flex-direction:column;gap:2px;position:relative;margin:1px 0 3px}
+.subnav::before{content:'';position:absolute;left:21px;top:3px;bottom:7px;width:1.5px;
+  background:var(--border);border-radius:2px}
+.navi.sub{padding:7px 12px 7px 38px;font-size:13.5px}
+.navi.sub .ic{width:17px;height:17px}
+.navi.sub.active{box-shadow:inset 3px 0 0 var(--accent)}
 .nav-label{display:flex;align-items:center;justify-content:space-between;
   font-size:11px; letter-spacing:1.4px; color:var(--muted2); font-weight:700; padding:4px 12px 8px; text-transform:uppercase}
 .nav-label .chev{display:flex;color:var(--muted2)}
@@ -211,6 +218,11 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .placeholder-note{font-size:10.5px;color:var(--muted2);font-style:italic}
 
 /* players directory */
+.subtabs{display:flex;gap:2px;flex-wrap:wrap;margin:2px 0 22px;border-bottom:1px solid var(--border)}
+.subtabs a{padding:9px 16px;font-size:13.5px;font-weight:600;color:var(--muted);
+  border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .12s}
+.subtabs a:hover{color:var(--text)}
+.subtabs a.active{color:#fff;border-bottom-color:var(--accent)}
 .page-head{display:flex;align-items:center;justify-content:space-between;margin:6px 0 18px}
 .page-head h2{font-size:24px;font-weight:800}
 .page-head p{color:var(--muted);font-size:13px;margin-top:3px}
@@ -463,3 +475,45 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 
 /* season heatmap canvas */
 #heat{width:100%;height:auto;border-radius:10px;display:block;background:#0e1f17;border:1px solid var(--border)}
+
+/* ---- Scout / Player Finder (use case 1) ---- */
+.scout-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:18px 24px;align-items:end}
+.flt{display:flex;flex-direction:column;gap:7px}
+.flt label{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);font-weight:700}
+.flt .val{color:var(--accent2);font-weight:700}
+.flt input[type=range]{width:100%;accent-color:var(--accent);height:4px}
+.scout-meta{display:flex;justify-content:space-between;align-items:center;margin:18px 0 12px}
+.scout-meta .cnt{color:var(--muted);font-size:13px}
+.scout-meta .cnt b{color:var(--text)}
+.stbl{width:100%;border-collapse:collapse}
+.stbl thead th{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);
+  font-weight:700;text-align:right;padding:0 14px 12px;border-bottom:1px solid var(--border)}
+.stbl thead th:first-child,.stbl thead th.l{text-align:left}
+.stbl thead th.m{color:var(--accent2)}
+.stbl tbody td{padding:11px 14px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+.stbl tbody tr{cursor:pointer}
+.stbl tbody tr:hover{background:var(--card2)}
+.stbl td.l{text-align:left}
+.stbl .pcell{display:flex;align-items:center;gap:11px}
+.stbl .pcell .pic{width:34px;height:34px;border-radius:50%;overflow:hidden;flex:0 0 34px;position:relative;background:linear-gradient(#1b2236,#101626)}
+.stbl .pcell .nm{font-weight:700}
+.stbl .pcell .sub{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:5px}
+.stbl .rk{color:var(--muted2);font-weight:700;width:26px}
+.stbl .mcol{color:var(--accent2);font-weight:800}
+.stbl .rtg{font-weight:800}
+
+/* ---- Team Styles (use case 3) ---- */
+.style-board{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}
+@media(max-width:920px){.style-board{grid-template-columns:1fr}}
+.style-pickers{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+.style-pickers .tp{display:flex;align-items:center;gap:9px;background:var(--card2);border:1px solid var(--border2);
+  border-radius:12px;padding:8px 12px}
+.style-pickers .tp .dot{width:10px;height:10px;border-radius:50%}
+.style-pickers select{background:transparent;border:none;color:var(--text);font-weight:700;font-size:14px;outline:none;cursor:pointer}
+.axis-tbl{width:100%;border-collapse:collapse;margin-top:4px}
+.axis-tbl td{padding:10px 6px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.axis-tbl td:first-child{color:var(--muted);font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.5px}
+.axis-tbl .bar{height:7px;border-radius:5px;background:var(--border);position:relative;min-width:90px}
+.axis-tbl .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.axis-tbl .sc{font-weight:800;text-align:right;width:42px}
+.axis-tbl .rw{color:var(--muted);text-align:right;width:64px;font-size:12.5px}

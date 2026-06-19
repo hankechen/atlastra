@@ -922,6 +922,160 @@ class SoccerDB:
                         for r in df.itertuples()],
         }
 
+    # ---- Scout / Player Finder (use case: discovery) ----------------------
+    # key -> (v_player_season_stats column, label, fmt). fmt in int/f1/f2/pct.
+    SCOUT_METRICS = {
+        "rating": (None, "Atlastra Rating", "int"),
+        "goals": ("goals", "Goals", "int"),
+        "assists": ("assists", "Assists", "int"),
+        "ga": ("ga", "Goals + Assists", "int"),
+        "xg": ("xg", "xG", "f1"),
+        "xa": ("xa", "xA", "f1"),
+        "goals_per90": ("goals_per90", "Goals / 90", "f2"),
+        "xa_per90": ("xa_per90", "xA / 90", "f2"),
+        "ga_per90": ("ga_per90", "G+A / 90", "f2"),
+        "key_passes": ("key_passes", "Key Passes", "int"),
+        "chances_created": ("chances_created", "Chances Created", "int"),
+        "big_chances_created": ("big_chances_created", "Big Chances Created", "int"),
+        "dribbles_completed": ("dribbles_completed", "Dribbles", "int"),
+        "tackles": ("tackles", "Tackles", "int"),
+        "interceptions": ("interceptions", "Interceptions", "int"),
+        "recoveries": ("recoveries", "Recoveries", "int"),
+        "duels_won_pct": ("duels_won_pct", "Duels Won %", "pct"),
+        "pass_accuracy_pct": ("pass_accuracy_pct", "Pass Accuracy %", "pct"),
+    }
+
+    def web_scout(self, pos: str = "all", metric: str = "rating",
+                  max_value_m: float = 0, min_minutes: int = 450,
+                  max_age: int = 0, min_rating: int = 0,
+                  limit: int = 40, season: str = FOCUS_SEASON) -> dict:
+        """Player Finder: filter the player pool by position, budget (market-value
+        ceiling, €m), reliability (min minutes), age and rating, ranked by a chosen
+        metric. Returns the metric catalogue + matching players."""
+        metric = metric if metric in self.SCOUT_METRICS else "rating"
+        col = self.SCOUT_METRICS[metric][0]
+        rating_sql = "COALESCE(c.rating, f.rating)"
+        metric_sql = rating_sql if col is None else f"v.{col}"
+        # placeholder order matches the query text: c.season (LEFT JOIN) then
+        # v.season (WHERE), then the conditional filters, then LIMIT.
+        where = ["f.player_id IS NOT NULL", "v.season = ?"]
+        params: list = [season, season]                      # c.season, v.season
+        if pos and pos != "all" and pos in self.PLAYER_GROUPS:
+            gs = self.PLAYER_GROUPS[pos]
+            where.append(f"f.main_position IN ({','.join(['?'] * len(gs))})")
+            params += gs
+        if min_minutes:
+            where.append("v.minutes >= ?"); params.append(min_minutes)
+        if max_value_m:
+            where.append("f.market_value_eur IS NOT NULL AND f.market_value_eur <= ?")
+            params.append(max_value_m * 1_000_000)
+        if max_age:
+            where.append("b.fotmob_age IS NOT NULL AND b.fotmob_age <= ?")
+            params.append(max_age)
+        if min_rating:
+            where.append(f"{rating_sql} >= ?"); params.append(min_rating)
+        where.append(f"{metric_sql} IS NOT NULL")
+        params.append(limit)
+        df = self.con.execute(f"""
+            SELECT pl.player_name AS player, f.team,
+                   COALESCE(f.detailed_position, f.main_position) AS position,
+                   {rating_sql} AS rating, f.classification, f.market_value_eur,
+                   b.fotmob_age AS age, b.nationality, v.minutes,
+                   {metric_sql} AS metric_val, pe.fpid
+            FROM v_player_profile_full f
+            JOIN players pl ON pl.player_id = f.player_id
+            JOIN v_player_season_stats v ON v.player_id = f.player_id
+            LEFT JOIN player_ratings_combined c
+                   ON c.player_id = f.player_id AND c.scope='league' AND c.season=?
+            LEFT JOIN player_bio b ON b.player_id = f.player_id
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = f.player_id
+            WHERE {' AND '.join(where)}
+            ORDER BY metric_val DESC NULLS LAST, {rating_sql} DESC NULLS LAST
+            LIMIT ?
+        """, params).df()
+        fmt = self.SCOUT_METRICS[metric][2]
+        def mv(v):
+            if v is None or pd.isna(v):
+                return None
+            return _i(v) if fmt == "int" else _r(v, 2 if fmt == "f2" else 1)
+        players = [{"player": r.player, "team": r.team, "position": r.position,
+                    "rating": _i(r.rating), "classification": r.classification,
+                    "market_value_eur": None if pd.isna(r.market_value_eur) else float(r.market_value_eur),
+                    "age": _i(r.age), "nationality": r.nationality, "minutes": _i(r.minutes),
+                    "metric_val": mv(r.metric_val),
+                    "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                   for r in df.itertuples()]
+        return {
+            "metrics": [{"key": k, "label": lbl} for k, (_c, lbl, _f) in self.SCOUT_METRICS.items()],
+            "groups": [{"key": "all", "label": "All positions"}]
+                      + [{"key": g, "label": g} for g in self.PLAYER_GROUPS],
+            "metric": metric, "metric_label": self.SCOUT_METRICS[metric][1],
+            "metric_fmt": fmt, "count": len(players), "players": players,
+        }
+
+    # ---- Team style fingerprint (use case: team identity) -----------------
+    STYLE_AXES = [
+        ("atk", "Attack"), ("def", "Defence"), ("press", "Pressing"),
+        ("pen", "Penetration"), ("fin", "Finishing"), ("ctrl", "Control"),
+    ]
+
+    def web_team_options(self, season: str = FOCUS_SEASON) -> list[dict]:
+        """Every team with season stats, for the style-comparison pickers."""
+        df = self.con.execute("""
+            SELECT t.team_name, l.league_name
+            FROM team_season_stats s JOIN teams t USING(team_id)
+            JOIN leagues l ON l.league_key = t.league_key
+            WHERE s.season = ? ORDER BY l.league_name, t.team_name
+        """, [season]).df()
+        return [{"team": r.team_name, "league": r.league_name,
+                 "team_logo": self.team_logo(r.team_name)} for r in df.itertuples()]
+
+    def web_team_style(self, name: str, season: str = FOCUS_SEASON) -> dict:
+        """A team's playing-style fingerprint: six axes scored 0-100 as the
+        percentile of the team's per-match profile against every team in the
+        season (cross-league). Axes: attack (xG for), defence (xG against,
+        inverted), pressing (PPDA, inverted), penetration (deep completions),
+        finishing (goals minus xG), control (share of total xG)."""
+        tid = self.find_team_id(name)
+        if tid is None:
+            return {}
+        row = self.con.execute("""
+            WITH agg AS (
+              SELECT t.team_id, t.team_name, l.league_name,
+                     avg(m.xg_for) xgf, avg(m.xg_against) xga, avg(m.ppda) ppda,
+                     avg(m.deep_completions) deep, avg(m.goals_for - m.xg_for) fin,
+                     avg(m.xg_for) / NULLIF(avg(m.xg_for) + avg(m.xg_against), 0) ctrl
+              FROM team_match_stats m JOIN teams t USING(team_id)
+              JOIN leagues l ON l.league_key = t.league_key
+              WHERE m.season = ? GROUP BY 1, 2, 3
+            ), ranked AS (
+              SELECT *,
+                100*percent_rank() OVER (ORDER BY xgf)       s_atk,
+                100*percent_rank() OVER (ORDER BY xga DESC)  s_def,
+                100*percent_rank() OVER (ORDER BY ppda DESC) s_press,
+                100*percent_rank() OVER (ORDER BY deep)      s_pen,
+                100*percent_rank() OVER (ORDER BY fin)       s_fin,
+                100*percent_rank() OVER (ORDER BY ctrl)      s_ctrl
+              FROM agg
+            )
+            SELECT * FROM ranked WHERE team_id = ?
+        """, [season, tid]).df()
+        if row.empty:
+            return {}
+        r = row.iloc[0]
+        scores = {"atk": r.s_atk, "def": r.s_def, "press": r.s_press,
+                  "pen": r.s_pen, "fin": r.s_fin, "ctrl": r.s_ctrl}
+        raws = {"atk": _r(r.xgf, 2), "def": _r(r.xga, 2), "press": _r(r.ppda, 1),
+                "pen": _r(r.deep, 1), "fin": _r(r.fin, 2), "ctrl": _i(r.ctrl * 100)}
+        return {
+            "team": r.team_name, "league": r.league_name,
+            "team_logo": self.team_logo(r.team_name),
+            "axes": [{"key": k, "label": lbl, "score": _i(scores[k]), "raw": raws[k]}
+                     for k, lbl in self.STYLE_AXES],
+        }
+
     # cumulative stats we expose per scope (frontend derives per-90 from these)
     _SCOPE_COUNTS = ["games", "minutes", "goals", "assists", "xg", "xa", "shots",
                      "chances_created", "big_chances_created", "dribbles_completed",

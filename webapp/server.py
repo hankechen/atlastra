@@ -62,6 +62,17 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_archetype(q.get("name", ["Poacher"])[0])
         if path == "/api/team_of_season":
             return d.web_team_of_season()
+        if path == "/api/scout":
+            return d.web_scout(
+                q.get("pos", ["all"])[0], q.get("metric", ["rating"])[0],
+                float(q.get("max_value", ["0"])[0]), int(q.get("min_minutes", ["450"])[0]),
+                int(q.get("max_age", ["0"])[0]), int(q.get("min_rating", ["0"])[0]),
+                int(q.get("limit", ["40"])[0]))
+        if path == "/api/team_options":
+            return d.web_team_options()
+        if path == "/api/team_style":
+            names = q.get("name", [])
+            return [d.web_team_style(n) for n in names] if names else []
         raise KeyError(path)
 
 

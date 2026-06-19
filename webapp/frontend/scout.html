@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Scout</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=4">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players or teams…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Scout — Player Finder</h2><p>Filter the player pool by position, budget, age and reliability, then rank by the metric you care about. Built on this season's data.</p></div>
+    </div>
+    <div id="subtabs" class="subtabs"></div>
+
+    <section class="card">
+      <div class="scout-filters">
+        <div class="flt"><label>Position</label><select id="fPos" class="cmp-select"></select></div>
+        <div class="flt"><label>Rank by</label><select id="fMetric" class="cmp-select"></select></div>
+        <div class="flt"><label>Max value <span class="val" id="vValue">Any</span></label>
+          <input type="range" id="fValue" min="0" max="200" step="5" value="0"></div>
+        <div class="flt"><label>Max age <span class="val" id="vAge">Any</span></label>
+          <input type="range" id="fAge" min="17" max="40" step="1" value="40"></div>
+        <div class="flt"><label>Min minutes <span class="val" id="vMin">450</span></label>
+          <input type="range" id="fMin" min="0" max="3000" step="90" value="450"></div>
+        <div class="flt"><label>Min rating <span class="val" id="vRating">Any</span></label>
+          <input type="range" id="fRating" min="0" max="95" step="1" value="0"></div>
+      </div>
+    </section>
+
+    <div class="scout-meta">
+      <div class="cnt" id="cnt"></div>
+    </div>
+    <section class="card" style="padding:6px 8px">
+      <div id="results"></div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=7"></script>
+<script src="/js/scout.js?v=1"></script>
+</body>
+</html>

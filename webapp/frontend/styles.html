@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Team Styles</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=4">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players or teams…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Team Style Fingerprints</h2><p>Each team's playing identity across six axes, scored 0–100 as a percentile against every team in Europe's top 5 this season. Pick two to compare.</p></div>
+    </div>
+    <div id="subtabs" class="subtabs"></div>
+
+    <div class="style-pickers">
+      <div class="tp"><span class="dot" id="dotA"></span><select id="teamA"></select></div>
+      <div class="tp"><span class="dot" id="dotB"></span><select id="teamB"></select></div>
+    </div>
+
+    <div class="style-board">
+      <section class="card">
+        <div class="card-h"><h3>Style radar</h3><span class="muted" style="font-size:12px">Percentile vs top-5 teams</span></div>
+        <canvas id="radar" height="320"></canvas>
+        <div id="legend" class="cmp-legend"></div>
+      </section>
+      <section class="card">
+        <div class="card-h"><h3>Axis breakdown</h3><span class="muted" style="font-size:12px">score · per-match value</span></div>
+        <table class="axis-tbl" id="axisTbl"></table>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="/js/api.js?v=7"></script>
+<script src="/js/styles.js?v=1"></script>
+</body>
+</html>

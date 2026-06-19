@@ -132,9 +132,11 @@ async function load(name, careerStat = 'xa') {
 // transparent at the very low end so the pitch shows through (no blue wash).
 function heatColor(v) {
   v = Math.min(1, v);
-  const hue = 145 - 145 * Math.min(1, v * 1.15);     // 145 green -> 0 red
-  const alpha = Math.max(0, Math.min(0.82, (v - 0.04) * 1.15));
-  return `hsla(${hue}, 85%, 50%, ${alpha})`;
+  const t = Math.min(1, v * 1.4);                     // saturate toward red faster
+  const hue = 145 - 145 * t;                          // 145 green -> 0 red
+  const light = 50 + 12 * t;                          // brighter at the hot end
+  const alpha = Math.max(0, Math.min(0.95, (v - 0.03) * 1.7));
+  return `hsla(${hue}, 100%, ${light}%, ${alpha})`;
 }
 function drawPitch(ctx, W, H) {
   ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5;
@@ -162,7 +164,9 @@ function drawHeatmap(grid) {
   ctx.save(); ctx.filter = 'blur(10px)';
   for (let r = 0; r < GH; r++) for (let col = 0; col < GW; col++) {
     const v = grid[r][col];
-    if (v > 0.02) { ctx.fillStyle = heatColor(v); ctx.fillRect(col * cw, r * ch, cw + 1.5, ch + 1.5); }
+    // SofaScore width axis: low-y = player's RIGHT side. Mirror rows so the
+    // right flank renders at the bottom on a left->right attacking pitch.
+    if (v > 0.02) { ctx.fillStyle = heatColor(v); ctx.fillRect(col * cw, (GH - 1 - r) * ch, cw + 1.5, ch + 1.5); }
   }
   ctx.restore();
   drawPitch(ctx, W, H);

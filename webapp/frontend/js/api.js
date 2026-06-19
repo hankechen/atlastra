@@ -107,17 +107,44 @@ const ICONS = {
   chevR: '<path d="M9 6l6 6-6 6"/>',
   chevD: '<path d="M6 9l6 6 6-6"/>',
   archetypes: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+  scout: '<circle cx="11" cy="11" r="7"/><path d="M11 7v8M7 11h8M20.5 20.5 16 16"/>',
+  styles: '<path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9z"/><path d="M12 8l4 2.2v4.4L12 17l-4-2.4v-4.4z"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
-// [label, icon, href, trailing]  trailing: 'live' red dot, 'chevR' arrow
+// [label, icon, href, trailing, children]  trailing: 'live' dot / 'chevR' arrow;
+// children: nested [label, icon, href] tools shown indented under the parent.
 const NAV_MAIN = [
   ['Home', 'home', '/index.html'], ['Live Matches', 'live', '#', 'live'],
-  ['Players', 'players', '/players.html'], ['Teams', 'teams', '/teams.html'],
-  ['Compare', 'compare', '/compare.html'], ['Search', 'search', '/search.html'],
+  ['Players', 'players', '/players.html', null, [
+    ['Compare', 'compare', '/compare.html'],
+    ['Scout', 'scout', '/scout.html'],
+    ['Archetypes', 'archetypes', '/archetypes.html'],
+  ]],
+  ['Teams', 'teams', '/teams.html', null, [
+    ['Team Styles', 'styles', '/styles.html'],
+  ]],
+  ['Search', 'search', '/search.html'],
 ];
-const NAV_ANALYTICS = [['Archetypes', 'archetypes', '/archetypes.html'],
-  ['Rankings & Awards', 'rankings', '#', 'chevR']];
+const NAV_ANALYTICS = [['Rankings & Awards', 'rankings', '#', 'chevR']];
+
+// in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];
+// activeKey matches the value a page passes to renderSidebar().
+const TAB_GROUPS = [
+  [['Directory', '/players.html', 'Players'], ['Compare', '/compare.html', 'Compare'],
+   ['Scout', '/scout.html', 'Scout'], ['Archetypes', '/archetypes.html', 'Archetypes']],
+  [['Standings', '/teams.html', 'Teams'], ['Team Styles', '/styles.html', 'Team Styles']],
+];
+
+// fills an existing #subtabs placeholder (opt-in per page) with its group's tabs
+function renderSubtabs(active) {
+  const el = document.getElementById('subtabs');
+  if (!el) return;
+  const group = TAB_GROUPS.find(g => g.some(([, , key]) => key === active));
+  if (!group) return;
+  el.innerHTML = group.map(([label, href, key]) =>
+    `<a href="${href}" class="${key === active ? 'active' : ''}">${label}</a>`).join('');
+}
 const NAV_MINE = [
   ['My Profile', 'profile', '#'], ['My Players', 'myplayers', '#'],
   ['My Comparisons', 'compare', '#'], ['Watchlist', 'watchlist', '#'],
@@ -126,10 +153,15 @@ const LEAGUES = [['Premier League', '#e23a3a'], ['La Liga', '#e8a33d'], ['Serie 
                  ['Bundesliga', '#d12a2a'], ['Ligue 1', '#edc23a']];
 
 function renderSidebar(active) {
-  const item = ([n, ic, href, trail]) => {
+  const item = ([n, ic, href, trail, children]) => {
     const end = trail === 'live' ? '<span class="livedot"></span>'
       : trail === 'chevR' ? `<span class="chev">${svg('chevR')}</span>` : '';
-    return `<a href="${href}" class="navi ${n === active ? 'active' : ''}">${svg(ic)}<span class="t">${n}</span>${end}</a>`;
+    const childActive = children && children.some(([cn]) => cn === active);
+    const parentCls = `navi ${n === active ? 'active' : ''} ${childActive ? 'group-active' : ''}`;
+    let html = `<a href="${href}" class="${parentCls}">${svg(ic)}<span class="t">${n}</span>${end}</a>`;
+    if (children) html += `<div class="subnav">${children.map(([cn, cic, chref]) =>
+      `<a href="${chref}" class="navi sub ${cn === active ? 'active' : ''}">${svg(cic)}<span class="t">${cn}</span></a>`).join('')}</div>`;
+    return html;
   };
   const section = (label, items, extra = '') =>
     `<div class="nav-label">${label}${extra}</div><nav class="nav">${items.map(item).join('')}</nav>`;
@@ -152,6 +184,7 @@ function renderSidebar(active) {
       <span class="chev">${svg('chevR')}</span></div>
     <a href="#" class="sb-user"><span class="ava">JD<i class="on"></i></span>
       <span class="u-tx"><b>John Doe</b><span>View Profile</span></span><span class="chev">${svg('chevR')}</span></a>`;
+  renderSubtabs(active);
 }
 
 // player list row used by rankings / trending
