@@ -288,7 +288,9 @@ def rate(season: str = FOCUS_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) 
 
     def _final(player, team, dg):
         fm = fmg.get((player, team))                 # keyed by (name, team)
-        if fm in ("GK", "CB", "ST", "AM", "W", "FB"):
+        # CM/DM are authoritative only as a manual override (DESC_TO_GROUP emits
+        # CMID for FotMob's own CM/DM tags, so these come from OVERRIDES).
+        if fm in ("GK", "CB", "ST", "AM", "W", "FB", "CM", "DM"):
             return fm
         if fm == "CMID":
             return "DM" if dg == "DM" else "CM"

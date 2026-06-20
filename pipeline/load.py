@@ -30,6 +30,13 @@ warnings.filterwarnings("ignore")
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+# Upstream Understat records that carry a wrong name. Keyed by player_id so the
+# correction survives every re-scrape/re-load.
+#   8094: Lyon (2019/20-2024/25) -> Man City (2025/26) is Rayan Cherki's career,
+#         but Understat labels the record "Mathis Cherki" (his younger brother).
+NAME_OVERRIDES = {8094: "Rayan Cherki"}
+
+
 def _position_group(raw: str) -> str | None:
     """Understat encodes positions like 'F M S'; map the primary code to a group."""
     if not isinstance(raw, str) or not raw.strip():
@@ -100,7 +107,9 @@ def load_players(con, players: pd.DataFrame) -> None:
     # One identity row per player; prefer the most recent season's position.
     p = players.sort_values("season").drop_duplicates("player_id", keep="last")
     rows = [
-        (int(r.player_id), r.player, r.position, _position_group(r.position))
+        (int(r.player_id),
+         NAME_OVERRIDES.get(int(r.player_id), r.player),
+         r.position, _position_group(r.position))
         for r in p.itertuples()
     ]
     con.executemany(

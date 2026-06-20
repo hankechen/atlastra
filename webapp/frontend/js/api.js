@@ -82,6 +82,14 @@ const FIFA2ISO = {
   GAB: 'GA', ANG: 'AO', RSA: 'ZA', JPN: 'JP', KOR: 'KR', AUS: 'AU', IRN: 'IR',
   KSA: 'SA', UZB: 'UZ', GEO: 'GE', ARM: 'AM', ISR: 'IL', JAM: 'JM', PAN: 'PA',
 };
+// ISO 3166 alpha-2 (e.g. 'BR') -> flag emoji via regional-indicator symbols.
+// Used for national teams in the live/fixtures feed, which carry an alpha-2 code.
+function flagISO2(cc) {
+  if (!cc || cc.length !== 2) return '';
+  const up = cc.toUpperCase();
+  if (up === 'GB') return ''; // home nations come through as ENG/SCO/WAL separately
+  return up.replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt()));
+}
 function flagEmoji(ccode) {
   const special = { ENG: '🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
     SCO: '🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}',
@@ -115,7 +123,7 @@ const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="curr
 // [label, icon, href, trailing, children]  trailing: 'live' dot / 'chevR' arrow;
 // children: nested [label, icon, href] tools shown indented under the parent.
 const NAV_MAIN = [
-  ['Home', 'home', '/index.html'], ['Live Matches', 'live', '#', 'live'],
+  ['Home', 'home', '/index.html'], ['Live Matches', 'live', '/live.html', 'live'],
   ['Players', 'players', '/players.html', null, [
     ['Compare', 'compare', '/compare.html'],
     ['Scout', 'scout', '/scout.html'],
@@ -185,6 +193,45 @@ function renderSidebar(active) {
     <a href="#" class="sb-user"><span class="ava">JD<i class="on"></i></span>
       <span class="u-tx"><b>John Doe</b><span>View Profile</span></span><span class="chev">${svg('chevR')}</span></a>`;
   renderSubtabs(active);
+}
+
+// ---- live / fixtures match row (shared by home widget + /live.html) ----
+// A team's badge: flag emoji for national teams (have a country code), else the
+// club crest, else an empty placeholder square so the grid stays aligned.
+// SofaScore gives UK home nations non-ISO codes (England 'EN', Scotland 'SX' --
+// which is really Sint Maarten's code), so resolve those by name to the proper
+// tag-sequence flag emoji (held in flagEmoji's special map) before any ISO lookup.
+const HOME_NATION = { England: 'ENG', Scotland: 'SCO', Wales: 'WAL' };
+function teamBadge(m, side) {
+  const hn = HOME_NATION[m[side]];
+  const f = hn ? flagEmoji(hn) : flagISO2(m[side + '_country']);
+  if (f) return `<span class="nflag">${f}</span>`;
+  return crestHTML(m[side + '_logo'], 'crest') || '<span class="crest"></span>';
+}
+// Left "minute" cell: running clock for live, 'HT' on the break, 'FT' for results,
+// local kickoff time for upcoming.
+function matchClock(m) {
+  if (m.status === 'inprogress') return m.minute ? `${m.minute}'` : 'HT';
+  if (m.status === 'finished') return 'FT';
+  return new Date(m.kickoff_ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+const matchDay = (ts) => new Date(ts * 1000)
+  .toLocaleDateString([], { day: 'numeric', month: 'short' });
+// One `.match` grid row. The trailing tag is LIVE (red) for in-play, else the date.
+function matchRow(m) {
+  const played = m.home_score != null;
+  const score = played ? `${m.home_score} - ${m.away_score}` : 'vs';
+  const clk = m.status === 'inprogress' ? 'min live-min' : 'min';
+  const tag = m.status === 'inprogress'
+    ? `<span class="live">● LIVE</span>` : `<span class="tag">${matchDay(m.kickoff_ts)}</span>`;
+  const bold = (side) => m.winner === (side === 'home' ? 1 : 2) ? ' won' : '';
+  const href = m.event_id != null ? ` onclick="location.href='/match.html?id=${m.event_id}'" style="cursor:pointer"` : '';
+  return `<div class="match"${href}>
+    <span class="${clk}">${matchClock(m)}</span>
+    <span class="tm${bold('home')}">${teamBadge(m, 'home')}<span class="nm">${m.home}</span></span>
+    <span class="sc">${score}</span>
+    <span class="tm away${bold('away')}"><span class="nm">${m.away}</span>${teamBadge(m, 'away')}</span>
+    ${tag}</div>`;
 }
 
 // player list row used by rankings / trending

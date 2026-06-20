@@ -1,18 +1,22 @@
 renderSidebar('Home');
 attachSearchDropdown(document.getElementById('searchBox'));
 
-// ---- placeholders (no live/predictor/ToTS data in the warehouse) ----
-const LIVE = [
-  ['76', 'Arsenal', '2', '1', 'Chelsea', 'LIVE'], ['54', 'Barcelona', '1', '0', 'Sevilla', 'LIVE'],
-  ['31', 'Inter', '0', '0', 'AC Milan', 'LIVE'], ['HT', 'Bayern Munich', '1', '1', 'Leverkusen', 'HT'],
-  ['23', 'PSG', '0', '0', 'Marseille', 'LIVE'],
-];
-document.getElementById('liveMatches').innerHTML = LIVE.map(([m, h, hg, ag, a, st]) => `
-  <div class="match"><span class="min">${m}'</span>
-    <span class="tm"><span class="crest"></span>${h}</span>
-    <span class="sc">${hg} - ${ag}</span>
-    <span class="tm away">${a}<span class="crest"></span></span>
-    <span class="live">${st}</span></div>`).join('');
+// ---- live matches widget (real SofaScore feed) ----
+// Show what's on: live games first, then the soonest upcoming, then latest results.
+(async () => {
+  const box = document.getElementById('liveMatches');
+  try {
+    const d = await api('/api/live?recent=4&upcoming=5');
+    const feed = [...d.live, ...d.upcoming, ...d.recent].slice(0, 5);
+    box.innerHTML = feed.length ? feed.map(matchRow).join('')
+      : '<div class="placeholder-note">No fixtures in the current window.</div>';
+    const note = box.parentElement.querySelector('.placeholder-note');
+    if (note) note.textContent = d.live.length
+      ? `${d.live.length} match${d.live.length > 1 ? 'es' : ''} live now` : 'No live matches right now';
+  } catch {
+    box.innerHTML = '<div class="placeholder-note">Live feed unavailable.</div>';
+  }
+})();
 
 const BALLON = [['Kylian Mbappé', 34], ['Lamine Yamal', 29], ['Jude Bellingham', 16], ['Pedri', 8], ['Florian Wirtz', 7]];
 document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `

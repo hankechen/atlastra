@@ -152,6 +152,28 @@ SOFASCORE_TOP5_TOURNAMENTS = {
     "FRA-Ligue 1":        34,
 }
 
+# Competitions covered by the live/fixtures feed (pipeline/load_live.py). Keyed by
+# a short code -> (SofaScore uniqueTournament id, display name, group). We pull the
+# day-by-day scheduled-events feed and filter to these ids, so one date call serves
+# every competition at once. The top-5 reuse SOFASCORE_TOP5_TOURNAMENTS ids; UCL is
+# id 7; the internationals are FIFA World Cup 16 / EURO 1 / Copa America 133.
+SOFASCORE_LIVE_TOURNAMENTS = {
+    "EPL":   (SOFASCORE_TOP5_TOURNAMENTS["ENG-Premier League"], "Premier League", "Top 5 Leagues"),
+    "LALIGA": (SOFASCORE_TOP5_TOURNAMENTS["ESP-La Liga"],        "La Liga",        "Top 5 Leagues"),
+    "SERIEA": (SOFASCORE_TOP5_TOURNAMENTS["ITA-Serie A"],        "Serie A",        "Top 5 Leagues"),
+    "BUNDESLIGA": (SOFASCORE_TOP5_TOURNAMENTS["GER-Bundesliga"], "Bundesliga",     "Top 5 Leagues"),
+    "LIGUE1": (SOFASCORE_TOP5_TOURNAMENTS["FRA-Ligue 1"],        "Ligue 1",        "Top 5 Leagues"),
+    "UCL":   (SOFASCORE_UCL_TOURNAMENT_ID, "UEFA Champions League", "Champions League"),
+    "WC":    (16,  "FIFA World Cup", "International"),
+    "EURO":  (1,   "UEFA EURO",      "International"),
+    "COPA":  (133, "Copa América",   "International"),
+}
+
+# How many days back (recent results) and forward (upcoming fixtures) the live
+# feed scrapes around "today" each run.
+LIVE_DAYS_BACK = 3
+LIVE_DAYS_AHEAD = 7
+
 # Seasons to pull from Understat. Player stats, matches and team stats are all
 # collected for the full history so standings and cross-year progression work
 # across every season.

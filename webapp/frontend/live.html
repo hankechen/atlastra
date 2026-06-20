@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Live Matches</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=3">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Live Matches</h2><p>Live scores, today's fixtures and recent results across the top-5 leagues, the Champions League and major international tournaments. <span id="updated" class="muted"></span></p></div>
+      <button id="refresh" class="btn btn-ghost">↻ Refresh</button>
+    </div>
+
+    <div class="tabs" id="stateTabs"></div>
+    <div id="feed"></div>
+  </main>
+</div>
+<script src="/js/api.js?v=3"></script>
+<script src="/js/live.js?v=3"></script>
+</body>
+</html>

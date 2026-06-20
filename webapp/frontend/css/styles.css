@@ -127,14 +127,20 @@ a{color:inherit;text-decoration:none}
 .hero-stats .s span{color:var(--muted);font-size:12px}
 
 /* live matches */
-.match{display:grid;grid-template-columns:42px 1fr auto 1fr 44px;align-items:center;gap:8px;padding:10px 4px;border-bottom:1px solid var(--border)}
+.match{display:grid;grid-template-columns:auto 1fr auto 1fr auto;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--border)}
 .match:last-child{border-bottom:none}
-.match .min{color:var(--green);font-weight:700;font-size:12px}
-.match .tm{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+.match .min{color:var(--muted);font-weight:700;font-size:12px;white-space:nowrap}
+.match .live-min{color:var(--green)}
+.match .tm{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;min-width:0}
+.match .tm .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .match .tm.away{justify-content:flex-end}
-.match .crest{width:20px;height:20px;border-radius:4px;background:#222b44}
-.match .sc{font-weight:800;font-size:15px;text-align:center;letter-spacing:1px}
-.match .live{color:var(--red);font-weight:700;font-size:10px;text-align:right}
+.match .tm.won .nm{color:#fff}
+.match .crest{width:20px;height:20px;border-radius:4px;background:#222b44;flex:none}
+.match .nflag{font-size:18px;line-height:1;flex:none}
+.match .sc{font-weight:800;font-size:15px;text-align:center;letter-spacing:1px;white-space:nowrap}
+.match .live{color:var(--red);font-weight:700;font-size:10px;text-align:right;white-space:nowrap}
+.match .tag{color:var(--muted);font-size:10px;text-align:right;white-space:nowrap}
+.live-group{margin-bottom:16px}
 
 /* standings table */
 table{width:100%;border-collapse:collapse;font-size:13px}
@@ -216,6 +222,10 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
 .bo-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
 select{background:var(--card2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:6px 10px;font-family:inherit;font-size:12.5px}
 .placeholder-note{font-size:10.5px;color:var(--muted2);font-style:italic}
+.season-sel{margin-left:10px;padding:3px 8px;font-size:12px;font-weight:600;border-radius:7px;cursor:pointer;vertical-align:middle}
+.pinned-banner{margin-top:16px;padding:9px 14px;border-radius:9px;font-size:12.5px;
+  background:rgba(125,92,245,.10);border:1px solid rgba(125,92,245,.30);color:#cdd4e6}
+.pinned-banner b{color:#b9a6f7}
 
 /* players directory */
 .subtabs{display:flex;gap:2px;flex-wrap:wrap;margin:2px 0 22px;border-bottom:1px solid var(--border)}
@@ -531,3 +541,72 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .axis-tbl .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
 .axis-tbl .sc{font-weight:800;text-align:right;width:42px}
 .axis-tbl .rw{color:var(--muted);text-align:right;width:64px;font-size:12.5px}
+
+/* ---------- Match detail page ---------- */
+.match-hero{padding:18px 22px}
+.mh-comp{color:var(--muted);font-size:12.5px;font-weight:600;text-align:center;margin-bottom:10px}
+.mh-row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px}
+.mh-team{display:flex;align-items:center;gap:12px;font-size:18px;font-weight:700}
+.mh-team.away{justify-content:flex-end}
+.mh-team .nflag{font-size:30px}
+.mh-team .crest{width:34px;height:34px}
+.mh-score{font-size:34px;font-weight:800;text-align:center;letter-spacing:2px;white-space:nowrap}
+.mh-score .dash{margin:0 8px;color:var(--muted)}
+.mh-score .vs{font-size:18px;color:var(--muted);letter-spacing:0}
+.mh-st{margin-top:4px}
+.mh-st .live{color:var(--red);font-size:12px;font-weight:700}
+.mh-st .tag{color:var(--muted);font-size:11px}
+.tabs.sm{margin-bottom:0;gap:12px}
+.tabs.sm .tab{font-size:12px;padding-bottom:6px}
+
+/* stat rows */
+.stat-group{margin-bottom:14px}
+.stat-row{display:grid;grid-template-columns:48px 1fr 48px;grid-template-rows:auto auto;align-items:center;gap:2px 8px;padding:7px 2px}
+.stat-row .sv{font-weight:700;font-size:14px}
+.stat-row .sv.away{text-align:right}
+.stat-row .sl{text-align:center;color:var(--muted);font-size:12px}
+.stat-row .sbar{grid-column:1/4;display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--border)}
+.stat-row .sbar i.h{background:var(--accent)}
+.stat-row .sbar i.a{background:#56607e}
+
+/* lineups */
+.lu-col .lu-row{display:grid;grid-template-columns:26px 1fr auto auto;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:13px}
+.lu-col .lu-row:last-child{border-bottom:none}
+.lu-no{color:var(--muted);font-weight:700;text-align:center;font-size:12px}
+.lu-nm{font-weight:600}
+.lu-pos{color:var(--muted);font-size:11px}
+.lu-sub-h{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px}
+.ratingchip.sm{width:30px;height:22px;border-radius:5px;font-size:11.5px}
+
+/* pitch + shot map */
+.pitch-wrap{padding:8px 0}
+.pitch-svg{width:100%;height:auto;background:#0e1f17;border-radius:10px}
+.pitch-svg .pl{fill:none;stroke:rgba(255,255,255,.18);stroke-width:.4}
+.pitch-svg .shot{stroke:#0e1f17;stroke-width:.3;opacity:.9;cursor:pointer}
+.pitch-svg .shot.goal{fill:#34c46a}
+.pitch-svg .shot.ontarget{fill:#e8b04b}
+.pitch-svg .shot.offtarget{fill:#7f8aa3;opacity:.6}
+.legend{display:flex;gap:16px;align-items:center;margin-top:10px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend i.lg{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.legend i.lg.goal{background:#34c46a}.legend i.lg.ontarget{background:#e8b04b}.legend i.lg.offtarget{background:#7f8aa3}
+
+/* timeline */
+.tl{padding:4px 0}
+.tl-row{display:grid;grid-template-columns:46px 26px 1fr;align-items:center;gap:8px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:13px}
+.tl-row.away{background:rgba(255,255,255,.015)}
+.tl-min{color:var(--muted);font-weight:700;text-align:right;font-size:12px}
+.tl-ic{text-align:center}
+.tl-period{text-align:center;color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:8px 0;border-top:1px dashed var(--border)}
+
+/* player stats table */
+.pl-tbl th{cursor:pointer;white-space:nowrap}
+.pl-tbl th.sorted{color:#fff}
+.pl-tbl th.tl,.pl-tbl td.tl{text-align:left}
+.pl-tbl td{text-align:center;white-space:nowrap}
+.pl-tbl .pl-no{color:var(--muted);font-weight:700;display:inline-block;width:20px}
+.pl-tbl tr.sub-row td{opacity:.62}
+
+/* heatmaps */
+.hm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:10px}
+.hm-cell canvas{width:100%;height:auto;border-radius:8px;display:block}
+.hm-nm{font-size:11.5px;font-weight:600;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

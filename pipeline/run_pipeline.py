@@ -30,6 +30,8 @@ from pipeline import profile as profile_mod
 from pipeline import rate_combined as rate_combined_mod
 from pipeline import scrape_fotmob_positions as fmpos_scrape_mod
 from pipeline import load_fotmob_positions as fmpos_load_mod
+from pipeline import positions_history as poshist_mod
+from pipeline import load_live as live_mod
 
 
 def main():
@@ -116,6 +118,12 @@ def main():
     print("\n### 9. BUILD STAT VIEWS (UCL / Top-5 / combined / career) ###")
     views_mod.build_views()
 
+    print("\n### 9b. PER-SEASON POSITIONS (stat-derived fine groups for history) ###")
+    try:
+        poshist_mod.build_positions_history()
+    except Exception as e:
+        print(f"position history skipped ({repr(e)[:80]}); run `python -m pipeline.positions_history`.")
+
     print("\n### 10. PLAYER PROFILES (strengths / weaknesses / full profile) ###")
     try:
         profile_mod.build_profiles()
@@ -127,6 +135,12 @@ def main():
         rate_combined_mod.rate_combined()
     except Exception as e:
         print(f"combined ratings skipped ({repr(e)[:80]}); run `python -m pipeline.rate_combined`.")
+
+    print("\n### 12. LIVE MATCHES (SofaScore fixtures/results/in-play) ###")
+    try:
+        live_mod.load_live()
+    except Exception as e:
+        print(f"live feed skipped ({repr(e)[:80]}); run `python -m pipeline.load_live`.")
 
     print("\nDone. Try:  python tests/test_use_cases.py")
 

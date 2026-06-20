@@ -673,6 +673,51 @@ class SoccerDB:
             "most_dribbles": top("dribbles_completed"),
         }
 
+    def web_live(self, limit_recent: int = 40, limit_upcoming: int = 40) -> dict:
+        """Live / upcoming / recent matches from the live_matches table
+        (pipeline/load_live.py). Three buckets, each a flat list ordered for the UI;
+        live first by kickoff, upcoming soonest-first, recent newest-first."""
+        empty = {"live": [], "upcoming": [], "recent": [], "updated_at": None}
+        try:
+            df = self.con.execute("""
+                SELECT event_id, tournament_key, tournament_name, tournament_group,
+                       round_name, start_timestamp, status_type, status_desc, minute,
+                       home_team, home_country, away_team, away_country,
+                       home_score, away_score, winner_code,
+                       CAST(updated_at AS VARCHAR) AS updated_at
+                FROM live_matches
+            """).df()
+        except Exception:  # noqa: BLE001 -- table may not exist yet
+            return empty
+        if df.empty:
+            return empty
+
+        def match(r) -> dict:
+            none = lambda v: None if pd.isna(v) else v
+            return {
+                "event_id": int(r.event_id),
+                "competition": r.tournament_name, "group": r.tournament_group,
+                "round": none(r.round_name), "kickoff_ts": int(r.start_timestamp),
+                "status": r.status_type, "status_desc": none(r.status_desc),
+                "minute": None if pd.isna(r.minute) else int(r.minute),
+                "home": r.home_team, "home_logo": self.team_logo(r.home_team),
+                "home_country": none(r.home_country),
+                "home_score": None if pd.isna(r.home_score) else int(r.home_score),
+                "away": r.away_team, "away_logo": self.team_logo(r.away_team),
+                "away_country": none(r.away_country),
+                "away_score": None if pd.isna(r.away_score) else int(r.away_score),
+                "winner": None if pd.isna(r.winner_code) else int(r.winner_code),
+            }
+
+        live = [match(r) for r in df[df.status_type == "inprogress"]
+                .sort_values("start_timestamp").itertuples()]
+        upcoming = [match(r) for r in df[df.status_type == "notstarted"]
+                    .sort_values("start_timestamp").head(limit_upcoming).itertuples()]
+        recent = [match(r) for r in df[df.status_type == "finished"]
+                  .sort_values("start_timestamp", ascending=False).head(limit_recent).itertuples()]
+        return {"live": live, "upcoming": upcoming, "recent": recent,
+                "updated_at": df["updated_at"].iloc[0]}
+
     def _team_form(self, team_name: str, season: str, n: int = 5) -> list:
         """Last-n results as W/D/L, oldest→newest (for a form string)."""
         form = self.con.execute("""
@@ -1163,6 +1208,42 @@ class SoccerDB:
                      "duels_won", "tackles", "interceptions", "passes_completed"]
     _SCOPE_RATES = ["pass_accuracy_pct", "duels_won_pct"]   # minutes-weighted %
 
+    # Understat's per-season position code -> readable label. The code is a
+    # space-joined set (e.g. "F M S"); the first non-sub token is the primary.
+    _UNDERSTAT_POS_LABEL = {"GK": "Goalkeeper", "D": "Defender",
+                            "M": "Midfielder", "F": "Forward"}
+    # coarse group (player_position_history.coarse_group) -> readable fallback word
+    _COARSE_POS_LABEL = {"GK": "Goalkeeper", "DEF": "Defender",
+                         "MID": "Midfielder", "FWD": "Forward"}
+
+    def _player_season_position(self, pid: int, season: str) -> str | None:
+        """The player's position for ONE season -- how a career position CHANGE
+        surfaces (Bellingham CM→AM→ST→AM; Kimmich FB→CM). Prefers the stat-derived
+        FINE group from `player_position_history` (ST/W/AM/CM/DM/CB/FB/GK, inferred
+        from that season's stat profile -- see pipeline/positions_history.py), and
+        falls back to the readable coarse word when that season couldn't be split
+        (pre-2020/21, no FotMob defensive stats). Final fallback: Understat's raw
+        per-season position string."""
+        row = self.con.execute(
+            "SELECT fine_position, coarse_group FROM player_position_history "
+            "WHERE player_id = ? AND season = ?", [pid, season]).fetchone()
+        if row:
+            if row[0]:                                  # fine code, e.g. "AM"
+                return row[0]
+            if row[1]:                                  # coarse -> "Midfielder"
+                return self._COARSE_POS_LABEL.get(row[1])
+        us = self.con.execute(
+            "SELECT position FROM player_season_stats "
+            "WHERE player_id = ? AND season = ? AND position IS NOT NULL "
+            "ORDER BY minutes DESC LIMIT 1", [pid, season]).fetchone()
+        if not us or not us[0]:
+            return None
+        for tok in str(us[0]).split():
+            if tok in ("S", "Sub"):
+                continue
+            return self._UNDERSTAT_POS_LABEL.get(tok)
+        return None
+
     def _player_stat_scopes(self, pid: int, season: str = FOCUS_SEASON) -> dict:
         """Cumulative totals split into league / ucl / combined, from the canonical
         v_stats_combined (row-stacked by competition). Combined = league + ucl
@@ -1197,13 +1278,24 @@ class SoccerDB:
             scopes["combined"] = dict(lg or ucl)
         return scopes
 
-    def web_player(self, name: str, career_stat: str = "xa") -> dict:
+    def web_player(self, name: str, career_stat: str = "xa",
+                   season: str | None = None) -> dict:
         prof = self.player_profile(name)
         if not prof:
             return {}
         pid = self.find_player_id(name)
-        season = FOCUS_SEASON
-        # current-season tiles from the COMBINED (domestic + UCL) per-player view
+        # The season selector drives the parts that have real history (stat tiles,
+        # cumulative scopes, avg match rating, the common-metric League/UCL gauges).
+        # The datamb analysis (composite rating, radar, SWOT, archetype, heatmap,
+        # signature actions, market value) only exists for FOCUS_SEASON and stays
+        # pinned there -- see web_player's `pinned_season`/`is_current` outputs.
+        seasons_avail = [r[0] for r in self.con.execute(
+            "SELECT DISTINCT season FROM v_stats_combined_player "
+            "WHERE player_id = ? ORDER BY season DESC", [pid]).fetchall()]
+        if season not in seasons_avail:
+            season = FOCUS_SEASON if FOCUS_SEASON in seasons_avail else (
+                seasons_avail[0] if seasons_avail else FOCUS_SEASON)
+        # selected-season tiles from the COMBINED (domestic + UCL) per-player view
         t = self.con.execute("""
             SELECT games, goals, assists, xg, xa, chances_created, big_chances_created,
                    dribbles_completed, minutes, pass_accuracy_pct, rating
@@ -1235,12 +1327,17 @@ class SoccerDB:
             [pid]).df()
         pcts = dict(zip(pm.metric_label, pm.percentile))
         radar = [{"axis": a, "value": v} for a, v in self._radar_values(pcts)]
-        # career progression of one stat (+ current team = latest season's team)
+        # career progression of one stat; team = the SELECTED season's club (so a
+        # past-season view shows the right crest, e.g. Bellingham at Dortmund), not
+        # just the latest team.
         prog = self.player_progression(name, stats=[career_stat])
         career_stat = career_stat if career_stat in prog.columns else "ga_per90"
         career = [{"season": _fmt_season(r.season), "value": _r(getattr(r, career_stat))}
                   for r in prog.itertuples() if pd.notna(getattr(r, career_stat))]
-        team = prog.iloc[-1]["team"] if len(prog) else None
+        team = None
+        if len(prog):
+            match = prog[prog["season"] == season]
+            team = (match.iloc[-1]["team"] if len(match) else prog.iloc[-1]["team"])
         # rank-in-group + percentile (player_ratings_v2 is datamb-name keyed; bridge
         # via player_profile_metrics which carries both datamb name and player_id)
         ctx = self.con.execute("""
@@ -1256,13 +1353,21 @@ class SoccerDB:
         fpid = self.con.execute(
             "SELECT max(fotmob_player_id) FROM player_enrichment "
             "WHERE player_id=? AND fotmob_player_id IS NOT NULL", [pid]).fetchone()
+        # Position for the SELECTED season. Current season keeps the rich FotMob
+        # detail (LW/RW/CAM); past seasons use Understat's per-season position so a
+        # career position change actually shows (coarse, but real for all players).
+        if season == FOCUS_SEASON:
+            pos_group, pos_detail = prof["position_group"], prof.get("detailed_position")
+        else:
+            season_pos = self._player_season_position(pid, season)
+            pos_group, pos_detail = (season_pos or prof["position_group"]), None
         return {
             "name": prof["player_name"], "team": team,
             "photo": self.player_photo(fpid[0] if fpid else None),
             "photo_credit": self._photo_credit(pid),  # CC attribution if licensed
             "team_logo": self.team_logo(team),
-            "position_group": prof["position_group"],
-            "detailed_position": prof.get("detailed_position"),  # LW/RW/LB/RB/CAM/... (FotMob)
+            "position_group": pos_group,           # per-season (Understat) for past seasons
+            "detailed_position": pos_detail,        # LW/RW/LB/RB/CAM/... (FotMob, current season only)
             "age": self._player_age(prof["player_name"]) or (bio[3] if bio else None),
             "nationality": bio[0] if bio else None,
             "country_code": bio[1] if bio else None,
@@ -1277,8 +1382,14 @@ class SoccerDB:
             "stats_scopes": self._player_stat_scopes(pid, season),  # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9
-            "heatmap": self._player_heatmap(pid, season),  # SofaScore season heatmap grid
+            "heatmap": self._player_heatmap(pid, FOCUS_SEASON),  # pinned: heatmaps only scraped for FOCUS_SEASON
             "career_stat": career_stat, "career": career,
+            # season selector: which season the stats/gauges above reflect, the
+            # available list, and whether the pinned analysis matches it
+            "season": season,
+            "seasons": [{"value": s, "label": _fmt_season(s)} for s in seasons_avail],
+            "is_current": season == FOCUS_SEASON,
+            "pinned_season": _fmt_season(FOCUS_SEASON),
             "strengths": _split(prof["strengths"]),
             "weaknesses": _split(prof["weaknesses"]),
             "areas_of_improvement": _split(prof["areas_of_improvement"]),

@@ -3,7 +3,7 @@ Atlastra web UI -- zero-dependency server (Python stdlib only).
 
 Serves the static frontend (webapp/frontend) and a small JSON API backed by
 analytics.queries.SoccerDB (real DuckDB data). Anything the warehouse doesn't
-have (live matches, Ballon d'Or predictor, team-of-season, heatmap, technique
+have (Ballon d'Or predictor, heatmap, technique
 analysis, nationality, contract) is a clearly-labelled placeholder in the
 frontend, per the design mock.
 
@@ -18,6 +18,7 @@ from urllib.parse import urlparse, parse_qs
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from analytics.queries import SoccerDB  # noqa: E402
+from webapp import live_feed  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent / "frontend"
 PORT = 8000
@@ -25,7 +26,30 @@ CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
       ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png"}
 
 
+# Live match-detail endpoints proxy SofaScore (server-side TLS bypass) and never
+# touch the warehouse, so they bypass the SoccerDB context manager below.
+def match_api(path: str, q: dict) -> dict:
+    eid = int(q.get("id", [0])[0])
+    if path == "/api/match":
+        return live_feed.header(eid)
+    if path == "/api/match/stats":
+        return live_feed.statistics(eid)
+    if path == "/api/match/lineups":
+        return live_feed.lineups(eid)
+    if path == "/api/match/shotmap":
+        return live_feed.shotmap(eid)
+    if path == "/api/match/timeline":
+        return live_feed.timeline(eid)
+    if path == "/api/match/player-stats":
+        return live_feed.player_stats(eid)
+    if path == "/api/match/heatmap":
+        return live_feed.player_heatmap(eid, int(q.get("player_id", [0])[0]))
+    raise KeyError(path)
+
+
 def api(path: str, q: dict) -> dict | list:
+    if path.startswith("/api/match"):
+        return match_api(path, q)
     with SoccerDB(read_only=True) as d:
         if path == "/api/overview":
             return d.web_overview()
@@ -38,11 +62,15 @@ def api(path: str, q: dict) -> dict | list:
                                  scope=q.get("scope", ["league"])[0])
         if path == "/api/spotlight":
             return d.web_spotlight()
+        if path == "/api/live":
+            return d.web_live(int(q.get("recent", ["40"])[0]),
+                              int(q.get("upcoming", ["40"])[0]))
         if path == "/api/standings":
             return d.web_standings(q.get("league", ["ENG-Premier League"])[0])
         if path == "/api/player":
             return d.web_player(q.get("name", ["Pedri"])[0],
-                                q.get("career_stat", ["xa"])[0])
+                                q.get("career_stat", ["xa"])[0],
+                                q.get("season", [None])[0])
         if path == "/api/compare":
             names = q.get("name", [])
             stats = q.get("stat") or None

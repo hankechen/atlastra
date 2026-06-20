@@ -83,6 +83,18 @@ WEIGHTS = {
            "goals": .04, "assists": .04},
 }
 
+# Per-scope weight overrides: a fine position can use a different vector in the UCL
+# than in the league. UCL wingers lean more on goals and less on dribble/shot volume
+# (knockout finishing matters more than the league sample suggests). Falls back to
+# WEIGHTS[grp] for any (scope, group) not listed here.
+SCOPE_WEIGHTS = {
+    "ucl": {
+        "W": {"dribbles_completed": .14, "chances_created": .14, "assists": .14, "xg": .12,
+              "goals": .14, "big_chances_created": .08, "dribble_success_pct": .08,
+              "shots": .06, "pass_accuracy_pct": .06, "duels_won_pct": .04},
+    },
+}
+
 # GKs can't be rated on the outfield common metrics, so they get their own vector
 # over keeper stats that exist in BOTH sources: save% / goals conceded / clean
 # sheets / saves (league from player_wyscout, UCL derived from ucl_player_stats).
@@ -274,10 +286,29 @@ LEAGUE_RATING_OVERRIDES = {
 }
 
 
-def rate_combined(season: str = FOCUS_SEASON) -> None:
-    con = duckdb.connect(str(DB_PATH))
+def _rate_one_season(con, season: str) -> pd.DataFrame:
+    """Build the League + UCL common-metric ratings for ONE season. Position:
+    the CURRENT season uses player_profile_metrics (official FotMob fine, aligned
+    with the rest of the current-season analysis); PAST seasons use the stat-derived
+    per-season fine position from `player_position_history` so a player is rated in
+    the role he actually played that year (e.g. Mbappé as a Winger in 21/22, not the
+    Striker he is now) -- fixing the old carry-back mismatch. Where a past season has
+    no fine split (pre-2020/21), it falls back to the carried-back current fine, then
+    a coarse->fine guess. Market-value calibration falls back to 1.0 for seasons with
+    no market data (see _market_gain_mult)."""
     df = con.execute(AGG, [season]).df()
-    # prefer datamb's fine position; fall back to a coarse->fine guess if missing
+    if df.empty:
+        return pd.DataFrame()
+    # past seasons: override the carried-back current position with that season's
+    # actual (stat-derived) fine position where we have one.
+    if season != FOCUS_SEASON:
+        pph = con.execute(
+            "SELECT player_id, fine_position FROM player_position_history "
+            "WHERE season = ? AND fine_position IS NOT NULL", [season]).df()
+        pmap = {int(p): f for p, f in zip(pph["player_id"], pph["fine_position"])}
+        df["datamb_fine"] = [pmap.get(int(p), f)
+                             for p, f in zip(df["player_id"], df["datamb_fine"])]
+    # prefer the fine position; fall back to a coarse->fine guess if missing
     df["position_group"] = [fine if fine in WEIGHTS else COARSE_FALLBACK.get(ug)
                             for fine, ug in zip(df["datamb_fine"], df["understat_group"])]
     # player_id -> fine group (outfield from datamb; GKs straight from players),
@@ -288,14 +319,14 @@ def rate_combined(season: str = FOCUS_SEASON) -> None:
         pid2fine[int(pid)] = "GK"
     mv_mult = _market_gain_mult(con, season, pid2fine)
     gain = {g: BASE_GAIN[g] * mv_mult[g] for g in BASE_GAIN}
-    print("  gains (base x market):", {g: round(gain[g], 3) for g in BASE_GAIN})
 
     frames = []
     for scope, (K, min_min) in SCOPES.items():
         s = df[(df["scope"] == scope) & (pd.to_numeric(df["minutes"]) >= min_min)
                & df["position_group"].isin(WEIGHTS.keys())]
         for grp, g in s.groupby("position_group"):
-            r = _rate_group(g, grp, WEIGHTS[grp], METRICS, K, gain.get(grp, 1.0))
+            w = SCOPE_WEIGHTS.get(scope, {}).get(grp, WEIGHTS[grp])
+            r = _rate_group(g, grp, w, METRICS, K, gain.get(grp, 1.0))
             r["scope"] = scope
             frames.append(r)
         # GKs: own vector over keeper stats, sourced per scope (see _gk_*_df)
@@ -309,11 +340,31 @@ def rate_combined(season: str = FOCUS_SEASON) -> None:
             r = _rate_group(gk, "GK", GK_WEIGHTS, GK_METRICS, K, gain["GK"])
             r["scope"] = scope
             frames.append(r)
+    if not frames:
+        return pd.DataFrame()
     out = pd.concat(frames, ignore_index=True)
     out["season"] = season
+    return out
 
-    if LEAGUE_RATING_OVERRIDES:                       # force specific league ratings
-        m = (out["scope"] == "league") & out["player_id"].isin(LEAGUE_RATING_OVERRIDES)
+
+def rate_combined(season: str = FOCUS_SEASON, all_seasons: bool = True) -> None:
+    """Rate every season present in v_stats_combined_player (all_seasons=True, the
+    default, so the player profile's season selector can show comparable gauges
+    for past seasons) or just `season`."""
+    con = duckdb.connect(str(DB_PATH))
+    if all_seasons:
+        seasons = [r[0] for r in con.execute(
+            "SELECT DISTINCT season FROM v_stats_combined_player ORDER BY season").fetchall()]
+    else:
+        seasons = [season]
+    parts = [o for s in seasons if not (o := _rate_one_season(con, s)).empty]
+    out = pd.concat(parts, ignore_index=True)
+
+    # Reputation pins apply ONLY to the current season (they're a "this season"
+    # judgement, not a claim about the player's whole history).
+    if LEAGUE_RATING_OVERRIDES:
+        m = ((out["season"] == FOCUS_SEASON) & (out["scope"] == "league")
+             & out["player_id"].isin(LEAGUE_RATING_OVERRIDES))
         out.loc[m, "rating"] = out.loc[m, "player_id"].map(LEAGUE_RATING_OVERRIDES).astype(int)
         out.loc[m, "classification"] = [_classify(r, k) for r, k in
                                         zip(out.loc[m, "rating"], out.loc[m, "rank_in_group"])]
@@ -322,12 +373,13 @@ def rate_combined(season: str = FOCUS_SEASON) -> None:
     con.execute("""CREATE TABLE player_ratings_combined AS SELECT
         player_id, season, scope, position_group, minutes, rating,
         rank_in_group, percentile, classification FROM out""")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_prc ON player_ratings_combined(player_id, scope)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_prc ON player_ratings_combined(player_id, season)")
     n_l = (out["scope"] == "league").sum()
     n_u = (out["scope"] == "ucl").sum()
     con.close()
     n_gk = (out["position_group"] == "GK").sum()
-    print(f"player_ratings_combined: {n_l} league + {n_u} UCL ratings "
+    print(f"player_ratings_combined: {n_l} league + {n_u} UCL ratings across "
+          f"{out['season'].nunique()} seasons "
           f"(common-metric, fine ST/W/AM/CM/DM/FB/CB + GK; {n_gk} GK rows).")
 
 

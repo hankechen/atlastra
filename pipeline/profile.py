@@ -244,7 +244,8 @@ def build_profiles(season: str = FOCUS_SEASON,
 
     def _final(player_id, dg):
         fm = fmg.get(player_id)
-        if fm in ("GK", "CB", "ST", "AM", "W", "FB"):
+        # CM/DM authoritative only via a manual override (see load_fotmob_positions).
+        if fm in ("GK", "CB", "ST", "AM", "W", "FB", "CM", "DM"):
             return fm
         if fm == "CMID":
             return "DM" if dg == "DM" else "CM"

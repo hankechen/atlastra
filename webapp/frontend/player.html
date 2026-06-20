@@ -28,7 +28,8 @@
           </div>
           <div>
             <h1 id="pname">—<span class="verified">✔</span></h1>
-            <div class="team"><span id="pteam"></span> · <span class="pos" id="ppos"></span></div>
+            <div class="team"><span id="pteam"></span> · <span class="pos" id="ppos"></span>
+              <select id="seasonSel" class="season-sel" title="View stats for a season"></select></div>
             <div class="meta">
               <div class="m"><span>Age</span><b id="page">—</b></div>
               <div class="m"><span>Nationality</span><b id="pnat">—</b></div>
@@ -56,7 +57,7 @@
               <div class="val"><b id="rUcl">—</b></div></div>
             <div class="cls" id="cUcl"></div></div>
         </div>
-        <div class="placeholder-note" style="text-align:center;margin-top:8px">Common-metric rating · combined stats below</div>
+        <div class="placeholder-note" id="ratingNote" style="text-align:center;margin-top:8px">Common-metric rating · combined stats below</div>
       </section>
       <section class="card"><div class="card-h"><h3>Atlastra Top 10</h3><a class="see" href="/players.html">See all</a></div><div id="top10"></div></section>
     </div>
@@ -66,11 +67,14 @@
       <div class="card-h"><h3>Per-90 Statistics</h3><div class="scopetog" id="togPer90"></div></div>
       <div class="tiles" id="tiles"></div></section>
 
+    <!-- pinned-analysis banner: shown only when viewing a past season -->
+    <div id="pinnedBanner" class="pinned-banner" hidden></div>
+
     <!-- row: radar + career + strengths -->
     <div class="grid" style="grid-template-columns:1fr 1fr 1fr; margin-top:18px">
       <section class="card"><div class="card-h"><h3>Percentile Radar ⓘ</h3></div>
         <canvas id="radar" height="260"></canvas>
-        <div class="muted" style="font-size:12px;margin-top:6px">Compared to same position in Top-5 leagues · This season</div></section>
+        <div class="muted" id="radarNote" style="font-size:12px;margin-top:6px">Compared to same position in Top-5 leagues · This season</div></section>
       <section class="card"><div class="card-h"><h3>Career Progression ⓘ</h3>
         <select id="careerStat"><option value="xa">xA</option><option value="ga_per90">G/A per 90</option>
           <option value="goals">Goals</option><option value="assists">Assists</option>
@@ -85,7 +89,7 @@
     <div class="grid" style="grid-template-columns:1.05fr 1fr; margin-top:18px">
       <section class="card"><div class="card-h"><h3>Player Archetype</h3><a class="see" id="archMore">See role →</a></div>
         <div id="archetype"></div></section>
-      <section class="card"><div class="card-h"><h3>Similar Players</h3><span class="muted" style="font-size:12px">By statistical profile · this season</span></div>
+      <section class="card"><div class="card-h"><h3>Similar Players</h3><span class="muted" id="simNote" style="font-size:12px">By statistical profile · this season</span></div>
         <div id="similar"></div></section>
     </div>
 
@@ -99,6 +103,6 @@
   </main>
 </div>
 <script src="/js/api.js?v=4"></script>
-<script src="/js/player.js?v=7"></script>
+<script src="/js/player.js?v=8"></script>
 </body>
 </html>

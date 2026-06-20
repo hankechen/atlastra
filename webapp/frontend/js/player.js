@@ -2,6 +2,8 @@ renderSidebar('Players');
 Chart.defaults.color = '#7f8aa3';
 Chart.defaults.font.family = 'Inter';
 let radarChart, careerChart;
+let curSeason = null;                                // selected season (raw code)
+const setText = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
 
 // stat tiles read from a scope object {games,minutes,goals,...,pass_accuracy_pct}.
 // kind: 'count' shown as-is, 'per90' = v/min*90, 'pct' = v%, 'dec' = 1 decimal total.
@@ -73,11 +75,37 @@ function drawGauge(canvasId, rating, w = 150, h = 92) {
   }
 }
 
-async function load(name, careerStat = 'xa') {
-  const p = await api('/api/player?name=' + encodeURIComponent(name) + '&career_stat=' + careerStat);
+async function load(name, careerStat = 'xa', season = null) {
+  let url = '/api/player?name=' + encodeURIComponent(name) + '&career_stat=' + careerStat;
+  if (season) url += '&season=' + encodeURIComponent(season);
+  const p = await api(url);
   if (!p.name) { document.getElementById('crumb').textContent = 'not found'; return; }
   document.getElementById('crumb').textContent = p.name;
   document.getElementById('pname').innerHTML = p.name + ' <span class="verified">✔</span>';
+
+  // season selector + pinned-analysis labelling. The stat tiles, League/UCL
+  // gauges and avg rating follow the chosen season; the radar / SWOT / archetype
+  // / signature actions / heatmap only exist for the pinned (latest) season.
+  curSeason = p.season;
+  const seasons = p.seasons || [];
+  const selLabel = (seasons.find(s => s.value === p.season) || {}).label || '';
+  document.getElementById('seasonSel').innerHTML = seasons.map(s =>
+    `<option value="${s.value}"${s.value === p.season ? ' selected' : ''}>${s.label}</option>`).join('');
+  const banner = document.getElementById('pinnedBanner');
+  if (p.is_current) {
+    banner.hidden = true;
+    setText('radarNote', 'Compared to same position in Top-5 leagues · ' + selLabel);
+    setText('simNote', 'By statistical profile · ' + selLabel);
+    setText('ratingNote', 'Common-metric rating · combined stats below');
+  } else {
+    banner.hidden = false;
+    banner.innerHTML = `Showing <b>${selLabel}</b> statistics &amp; League/UCL ratings. ` +
+      `Radar, strengths &amp; weaknesses, archetype, signature actions and heatmap reflect ` +
+      `<b>${p.pinned_season}</b> (latest available).`;
+    setText('radarNote', 'Same position in Top-5 leagues · ' + p.pinned_season + ' (latest)');
+    setText('simNote', 'By statistical profile · ' + p.pinned_season + ' (latest)');
+    setText('ratingNote', 'Common-metric rating · ' + selLabel);
+  }
   const photoEl = document.querySelector('.ph .photo');
   if (photoEl) photoEl.innerHTML = avatarHTML(p.photo, p.name);
   const credEl = document.getElementById('photoCredit');
@@ -232,10 +260,14 @@ function drawCareer(career, stat) {
 // ---- boot ----
 const params = new URLSearchParams(location.search);
 let current = params.get('name') || 'Pedri';
-load(current);
-document.getElementById('careerStat').onchange = (e) => load(current, e.target.value);
+const careerStatVal = () => document.getElementById('careerStat').value;
+load(current, 'xa', params.get('season'));      // ?season=2324 deep-links a season
+document.getElementById('careerStat').onchange = (e) => load(current, e.target.value, curSeason);
+document.getElementById('seasonSel').onchange = (e) => load(current, careerStatVal(), e.target.value);
 document.getElementById('searchBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.value.trim()) { current = e.target.value.trim(); load(current); }
+  if (e.key === 'Enter' && e.target.value.trim()) {
+    current = e.target.value.trim(); curSeason = null; load(current, careerStatVal());
+  }
 });
 
 // Atlastra Top 10 rail

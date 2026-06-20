@@ -41,9 +41,12 @@ RW, LW = {83, 88, 92}, {96, 105, 106, 107}
 GENERIC_W = {87}
 ST = {104, 114, 115}
 
-# Manual overrides for any remaining obvious FotMob mis-tags, keyed by Understat
-# player name -> (group, side). Empty unless a clear case is found.
-OVERRIDES: dict = {}
+# Manual overrides for any remaining obvious FotMob mis-tags, keyed by FotMob
+# player name -> (group, side). An explicit CM/DM here is authoritative (the
+# rating engine's _final honours it), bypassing datamb's tercile CM/DM split.
+#   Jude Bellingham: FotMob's primary tag is CAM (->AM) and datamb's terciles
+#   call him DM; he plays as a box-to-box CM, so pin it. See [[positions-use-fotmob]].
+OVERRIDES: dict = {"Jude Bellingham": ("CM", None)}
 
 # FotMob positionIdsDesc text token -> (rating group, side). PRIMARY (first) token
 # is the main position. This is FotMob's own labelling, so it's authoritative --

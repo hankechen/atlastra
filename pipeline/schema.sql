@@ -348,3 +348,32 @@ CREATE INDEX IF NOT EXISTS idx_pss_posgroup ON player_season_stats(position_grou
 CREATE INDEX IF NOT EXISTS idx_matches_season ON matches(league_key, season);
 CREATE INDEX IF NOT EXISTS idx_tms_team     ON team_match_stats(team_id, season);
 CREATE INDEX IF NOT EXISTS idx_ratings_grp  ON player_ratings(league_key, season, position_group);
+
+-- ---------- Live / fixtures feed (SofaScore, pipeline/load_live.py) ----------
+-- One row per match across the covered competitions, refreshed each scrape run.
+-- status_type is SofaScore's: 'notstarted' (upcoming) / 'inprogress' (live) /
+-- 'finished' (result). `minute` is only set while inprogress. event_id is the
+-- SofaScore event id (stable across refreshes), so the table is rebuilt wholesale.
+CREATE TABLE IF NOT EXISTS live_matches (
+    event_id        BIGINT PRIMARY KEY,
+    tournament_key  VARCHAR,         -- our code: EPL/UCL/WC/...
+    tournament_name VARCHAR,         -- display name
+    tournament_group VARCHAR,        -- 'Top 5 Leagues' / 'Champions League' / 'International'
+    round_name      VARCHAR,         -- e.g. 'Round 38', 'Quarterfinal'
+    start_timestamp BIGINT,          -- kickoff, unix seconds (UTC)
+    status_type     VARCHAR,         -- notstarted / inprogress / finished
+    status_desc     VARCHAR,         -- '1st half' / 'Halftime' / 'Ended' / 'Not started'
+    minute          INTEGER,         -- live clock minute (NULL unless inprogress)
+    home_team       VARCHAR,
+    home_team_id    BIGINT,
+    home_country    VARCHAR,         -- ISO alpha-2, national teams only (for a flag)
+    away_team       VARCHAR,
+    away_team_id    BIGINT,
+    away_country    VARCHAR,
+    home_score      INTEGER,         -- NULL if not started
+    away_score      INTEGER,
+    winner_code     INTEGER,         -- 1 home / 2 away / 3 draw (SofaScore), NULL if undecided
+    updated_at      TIMESTAMP        -- when this row was scraped
+);
+CREATE INDEX IF NOT EXISTS idx_live_status ON live_matches(status_type, start_timestamp);
+CREATE INDEX IF NOT EXISTS idx_live_tourn  ON live_matches(tournament_key);
