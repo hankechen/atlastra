@@ -55,8 +55,8 @@ METRICS = {
 # FINE-position weight vectors over the common metrics (auto-normalised in code).
 # Wingers split from strikers; AM from CM from DM; FB from CB. GK not rated.
 WEIGHTS = {
-    "ST": {"goals": .26, "xg": .18, "shots": .12, "dribbles_completed": .08,
-           "big_chances_created": .08, "assists": .06, "chances_created": .06,
+    "ST": {"goals": .24, "xg": .18, "shots": .12, "dribbles_completed": .08,
+           "big_chances_created": .08, "assists": .08, "chances_created": .06,
            "duels_won_pct": .06, "pass_accuracy_pct": .06, "dribble_success_pct": .04},
     "W":  {"dribbles_completed": .16, "chances_created": .14, "assists": .14, "xg": .12,
            "goals": .10, "big_chances_created": .08, "dribble_success_pct": .08,

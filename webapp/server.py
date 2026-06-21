@@ -54,13 +54,16 @@ def api(path: str, q: dict) -> dict | list:
         return match_api(path, q)
     if path == "/api/national_team":          # SofaScore live proxy (no DB)
         return live_feed.national_team(int(q.get("id", [0])[0]))
+    if path == "/api/player_club":
+        return live_feed.player_club(int(q.get("id", [0])[0]))
     with SoccerDB(read_only=True) as d:
         if path == "/api/overview":
             return d.web_overview()
         if path == "/api/rankings":
             return d.web_rankings(int(q.get("limit", ["10"])[0]))
         if path == "/api/position_rankings":
-            return d.web_position_rankings(int(q.get("limit", ["20"])[0]))
+            return d.web_position_rankings(int(q.get("limit", ["20"])[0]),
+                                           scope=q.get("scope", ["league"])[0])
         if path == "/api/alltime_seasons":
             return d.web_alltime_seasons(q.get("scope", ["combined"])[0],
                                          int(q.get("limit", ["20"])[0]))

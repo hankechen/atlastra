@@ -218,7 +218,8 @@ async function openPlayerModal(id) {
   wrap.className = 'pm-overlay';
   wrap.innerHTML = `<div class="pm-card">
       <button class="pm-x" aria-label="Close">×</button>
-      <div class="pm-head"><div><div class="pm-nm">${esc(name)} ${cards}</div><div class="pm-sub">${sub}</div></div>${chip}</div>
+      <div class="pm-head"><div><div class="pm-nm">${esc(name)} ${cards}</div><div class="pm-sub">${sub}</div>
+        <div class="pm-club" id="pmClub"></div></div>${chip}</div>
       <div class="pm-grid">${grid}</div>
       <div class="pm-heat"><div class="pm-heat-h">Match heatmap</div><canvas id="pmHeat" width="300" height="195"></canvas></div>
       <a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}">View full season profile →</a>
@@ -229,6 +230,14 @@ async function openPlayerModal(id) {
   wrap.querySelector('.pm-x').onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   document.addEventListener('keydown', onKey);
+  // club team (so a national-team player shows the club they play for)
+  api('/api/player_club?id=' + id).then(cl => {
+    const ce = wrap.querySelector('#pmClub');
+    if (!ce || !cl || !cl.team) return;
+    ce.innerHTML = cl.national
+      ? `🛡 ${esc(cl.team)}`
+      : `🛡 Club: <a onclick="event.stopPropagation();location.href='/team.html?name=${encodeURIComponent(cl.team)}'">${esc(cl.team)}</a>`;
+  }).catch(() => {});
   try {
     const h = await A('/api/match/heatmap?player_id=' + id);
     const cv = wrap.querySelector('#pmHeat');

@@ -572,17 +572,18 @@ class SoccerDB:
         ("FB", "Full-backs"), ("CB", "Centre-backs"), ("GK", "Goalkeepers"),
     ]
 
-    def web_position_rankings(self, limit: int = 20, season: str = FOCUS_SEASON) -> dict:
-        """Top-N players per fine position group by the combined-League rating (same
-        engine as the directory/profile). Returns ordered groups, each with a ranked
-        player list."""
+    def web_position_rankings(self, limit: int = 20, season: str = FOCUS_SEASON,
+                              scope: str = "league") -> dict:
+        """Top-N players per fine position group by the combined rating for a scope
+        ('league' or 'ucl'). Returns ordered groups, each with a ranked player list."""
+        scope = "ucl" if scope == "ucl" else "league"
         df = self.con.execute("""
             WITH r AS (
                 SELECT c.player_id, c.position_group AS grp, c.rating, c.classification,
                        row_number() OVER (PARTITION BY c.position_group
                            ORDER BY c.rating DESC, c.percentile DESC) AS rn
                 FROM player_ratings_combined c
-                WHERE c.scope = 'league' AND c.season = ?)
+                WHERE c.scope = ? AND c.season = ?)
             SELECT r.grp, r.rn, r.rating, r.classification,
                    pl.player_name AS player, f.team,
                    COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position, pe.fpid
@@ -593,7 +594,7 @@ class SoccerDB:
                    ON pe.player_id = r.player_id
             WHERE r.rn <= ?
             ORDER BY r.grp, r.rn
-        """, [season, limit]).df()
+        """, [scope, season, limit]).df()
         by_grp: dict = {}
         for r in df.itertuples():
             by_grp.setdefault(r.grp, []).append({

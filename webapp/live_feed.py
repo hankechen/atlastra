@@ -319,6 +319,16 @@ def _team_event_row(e: dict) -> dict:
             "status": (e.get("status") or {}).get("type")}
 
 
+def player_club(pid: int) -> dict:
+    """A player's current club (SofaScore /player) -- used in the lineup modal so a
+    national-team player shows the club they actually play for."""
+    tm = ((_get(f"/player/{pid}", ttl=900) or {}).get("player") or {}).get("team") or {}
+    if not tm.get("name"):
+        return {"available": False}
+    return {"available": True, "team": tm.get("name"), "team_id": tm.get("id"),
+            "national": bool(tm.get("national"))}
+
+
 def national_team(team_id: int) -> dict:
     """A national team's roster + recent results + upcoming fixtures, live from
     SofaScore team endpoints (keyed by the team id we store in live_matches)."""
