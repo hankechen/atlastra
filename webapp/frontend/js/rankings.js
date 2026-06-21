@@ -29,7 +29,8 @@ function renderSubTabs() {
     el.querySelectorAll('.pill').forEach(p => p.onclick = () => { posActive = p.dataset.k; renderSubTabs(); drawList(); });
   } else {
     el.innerHTML = SEASON_SCOPES.map(([k, l]) => `<span class="pill ${k === seasonScope ? 'active' : ''}" data-k="${k}">${l}</span>`).join('');
-    el.querySelectorAll('.pill').forEach(p => p.onclick = () => { seasonScope = p.dataset.k; renderSubTabs(); drawList(); });
+    // each season scope is a separate fetch -> refresh() so the new scope loads
+    el.querySelectorAll('.pill').forEach(p => p.onclick = () => { seasonScope = p.dataset.k; refresh(); });
   }
 }
 
