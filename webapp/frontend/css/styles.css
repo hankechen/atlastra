@@ -142,6 +142,20 @@ a{color:inherit;text-decoration:none}
 .match .tag{color:var(--muted);font-size:10px;text-align:right;white-space:nowrap}
 .live-group{margin-bottom:16px}
 
+/* Live Matches page (#feed): larger, roomier match rows than the compact home widget */
+#feed .live-group{margin-bottom:22px}
+#feed .live-group .card-h{margin-bottom:6px}
+#feed .live-group .card-h h3{font-size:17px}
+#feed .match{gap:16px;padding:16px 10px}
+#feed .match .min{font-size:15px;min-width:46px}
+#feed .match .tm{gap:12px;font-size:16.5px}
+#feed .match .crest{width:32px;height:32px;border-radius:7px}
+#feed .match .nflag{font-size:28px}
+#feed .match .sc{font-size:23px;letter-spacing:1.5px;min-width:62px}
+#feed .match .live{font-size:12px}
+#feed .match .tag{font-size:12px}
+#feed .tabs .tab{font-size:15px}
+
 /* standings table */
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{color:var(--muted);font-weight:600;text-align:left;padding:8px 6px;font-size:12px}
