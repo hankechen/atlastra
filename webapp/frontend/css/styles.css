@@ -626,6 +626,23 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .luc-rt{position:absolute;right:-9px;bottom:-5px;font-size:9px;font-weight:700;color:#06140a;border-radius:4px;padding:0 3px;font-style:normal}
 .luc-cap{position:absolute;left:-7px;top:-5px;font-size:8px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:13px;height:13px;line-height:13px;font-style:normal}
 
+/* ---- player match-stats modal ---- */
+.pm-overlay{position:fixed;inset:0;z-index:50;background:rgba(4,7,16,.66);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:20px}
+.pm-card{position:relative;width:100%;max-width:380px;background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.pm-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;line-height:1;cursor:pointer}
+.pm-x:hover{color:var(--text)}
+.pm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding-right:18px}
+.pm-nm{font-size:18px;font-weight:700}
+.pm-sub{color:var(--muted);font-size:12.5px;margin-top:2px}
+.pm-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.pm-s{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:8px 6px;text-align:center}
+.pm-s span{display:block;color:var(--muted);font-size:10.5px;margin-bottom:3px}
+.pm-s b{font-size:15px;font-weight:700}
+.pm-heat{margin-top:14px}
+.pm-heat-h{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.pm-heat canvas{width:100%;height:auto;border-radius:8px;display:block}
+.pm-full{display:block;text-align:center;margin-top:14px}
+
 /* pitch + shot map */
 .pitch-wrap{padding:8px 0}
 .pitch-svg{width:100%;height:auto;background:#0e1f17;border-radius:10px}

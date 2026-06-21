@@ -98,7 +98,13 @@ function placeSide(xi, rows, isHome) {
     const k = rows[ri], t = n === 1 ? 0 : ri / (n - 1);
     let y = 0.93 - t * (0.93 - 0.57);
     if (!isHome) y = 1 - y;
-    for (let j = 0; j < k; j++) out.push({ x: 0.09 + 0.82 * ((j + 0.5) / k), y, p: xi[idx++] });
+    for (let j = 0; j < k; j++) {
+      // SofaScore lists each line from the team's RIGHT. The home team attacks UP,
+      // so its left must land on the viewer's left -> reverse the slot. Away attacks
+      // DOWN and is already oriented correctly.
+      const slot = isHome ? (k - 1 - j) : j;
+      out.push({ x: 0.09 + 0.82 * ((slot + 0.5) / k), y, p: xi[idx++] });
+    }
   }
   return out;
 }
@@ -107,7 +113,7 @@ function chipHTML({ x, y, p }, isHome) {
     ? `<i class="luc-rt" style="background:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</i>` : '';
   const cap = p.captain ? '<i class="luc-cap">C</i>' : '';
   return `<div class="luc ${isHome ? 'h' : 'a'}" style="left:${(x * 100).toFixed(1)}%;top:${(y * 100).toFixed(1)}%"
-      onclick="location.href='/player.html?name=${encodeURIComponent(p.name)}'" title="${esc(p.name)}${p.position ? ' · ' + esc(p.position) : ''}">
+      onclick="openPlayerModal(${p.id})" title="${esc(p.name)} — view match stats">
       <span class="luc-dot">${p.number ?? ''}${rt}${cap}</span>
       <span class="luc-nm">${esc(_surname(p.name))}</span></div>`;
 }
@@ -125,16 +131,73 @@ function lineupSideList(s, label) {
 }
 function subsCol(s, label) {
   if (!s || !(s.substitutes || []).length) return '';
-  const row = (p) => `<div class="lu-row"><span class="lu-no">${p.number ?? ''}</span>
-    <span class="lu-nm" onclick="location.href='/player.html?name=${encodeURIComponent(p.name)}'" style="cursor:pointer">${esc(p.name)}</span>
+  const row = (p) => `<div class="lu-row" onclick="openPlayerModal(${p.id})" style="cursor:pointer">
+    <span class="lu-no">${p.number ?? ''}</span>
+    <span class="lu-nm">${esc(p.name)}</span>
     <span class="lu-pos">${esc(p.position || '')}</span>
     ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   return `<section class="card lu-col"><div class="card-h"><h3>${esc(label)} — subs</h3></div>${s.substitutes.map(row).join('')}</section>`;
+}
+
+// ---- player match-stats modal (opened from a lineup chip / sub) ----
+let _luStats = null, _luNames = {};        // SofaScore id -> match-stats row / name
+async function ensureLineupStats() {
+  if (_luStats) return _luStats;
+  const d = await A('/api/match/player-stats');
+  _luStats = {};
+  if (d.available) for (const p of d.players) _luStats[p.id] = p;
+  return _luStats;
+}
+const _pmCell = (label, val) => `<div class="pm-s"><span>${label}</span><b>${val}</b></div>`;
+async function openPlayerModal(id) {
+  if (id == null) return;
+  const map = await ensureLineupStats();
+  const p = map[id] || null;
+  const name = (p && p.name) || _luNames[id] || 'Player';
+  const f2 = (v) => v == null ? '—' : (+v).toFixed(2);
+  const passAcc = p && p.passes ? Math.round((p.accurate_passes || 0) / p.passes * 100) + '%' : '—';
+  const cards = p ? (('🟨'.repeat(p.yellow || 0)) + (p.red ? '🟥' : '')) : '';
+  const grid = p ? [
+    _pmCell('Minutes', p.minutes ?? '—'), _pmCell('Goals', p.goals ?? 0),
+    _pmCell('Assists', p.assists ?? 0), _pmCell('Shots (SoT)', `${p.shots ?? 0} (${p.shots_on_target ?? 0})`),
+    _pmCell('xG', f2(p.xg)), _pmCell('xA', f2(p.xa)),
+    _pmCell('Passes', `${p.passes ?? 0} · ${passAcc}`), _pmCell('Key passes', p.key_passes ?? 0),
+    _pmCell('Tackles', p.tackles ?? 0), _pmCell('Duels won', p.duels_won ?? 0),
+    _pmCell('Touches', p.touches ?? 0), _pmCell('Fouls', p.fouls ?? 0),
+  ].join('') : '<div class="placeholder-note">No match stats recorded for this player (likely an unused substitute).</div>';
+  const chip = p && p.rating != null
+    ? `<span class="ratingchip" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : '';
+  const sub = p ? `${esc(p.position || '')}${p.number != null ? ' · #' + p.number : ''} · ${esc(p.team || '')}${p.started ? '' : ' · sub'}` : '';
+  const wrap = document.createElement('div');
+  wrap.className = 'pm-overlay';
+  wrap.innerHTML = `<div class="pm-card">
+      <button class="pm-x" aria-label="Close">×</button>
+      <div class="pm-head"><div><div class="pm-nm">${esc(name)} ${cards}</div><div class="pm-sub">${sub}</div></div>${chip}</div>
+      <div class="pm-grid">${grid}</div>
+      <div class="pm-heat"><div class="pm-heat-h">Match heatmap</div><canvas id="pmHeat" width="300" height="195"></canvas></div>
+      <a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}">View full season profile →</a>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  wrap.querySelector('.pm-x').onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  document.addEventListener('keydown', onKey);
+  try {
+    const h = await A('/api/match/heatmap?player_id=' + id);
+    const cv = wrap.querySelector('#pmHeat');
+    if (cv && h.available && h.points.length) drawPoints(cv, h.points);
+    else if (cv) cv.closest('.pm-heat').innerHTML = '<div class="placeholder-note">No heatmap for this player.</div>';
+  } catch { /* heatmap optional */ }
 }
 async function loadLineups() {
   const d = await A('/api/match/lineups');
   if (!d.available) { body().innerHTML = empty('Lineups not published yet.'); return; }
   const note = d.confirmed ? '' : '<div class="placeholder-note" style="margin-bottom:10px">⚠ Predicted lineup — not yet confirmed.</div>';
+  // id -> name (incl. subs) so the player-stats modal has a name even with no stats
+  for (const side of [d.home, d.away])
+    for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
+      if (p.id != null) _luNames[p.id] = p.name;
   const hx = d.home?.starting_xi || [], ax = d.away?.starting_xi || [];
   const hRows = parseFormation(d.home?.formation, hx.length);
   const aRows = parseFormation(d.away?.formation, ax.length);
@@ -158,6 +221,8 @@ async function loadLineups() {
     body().innerHTML = note + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
       ${lineupSideList(d.home, head?.home || 'Home')}${lineupSideList(d.away, head?.away || 'Away')}</div>`;
   }
+  const pq = new URLSearchParams(location.search).get('player');   // deep-link to a player's match stats
+  if (pq) openPlayerModal(+pq);
 }
 
 // ---- Shot map ----
