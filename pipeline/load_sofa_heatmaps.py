@@ -75,8 +75,11 @@ def load_sofa_heatmaps(season: str = FOCUS_SEASON) -> None:
         rows.append((pid, season, r.grid))
 
     out = pd.DataFrame(rows, columns=["player_id", "season", "grid"])
-    con.execute("DROP TABLE IF EXISTS player_heatmap")
-    con.execute("CREATE TABLE player_heatmap (player_id BIGINT, season VARCHAR, grid VARCHAR)")
+    # append-safe per season (so past-season heatmaps accumulate instead of
+    # overwriting the current one): create if needed, replace just this season.
+    con.execute("CREATE TABLE IF NOT EXISTS player_heatmap "
+                "(player_id BIGINT, season VARCHAR, grid VARCHAR)")
+    con.execute("DELETE FROM player_heatmap WHERE season = ?", [season])
     con.register("out_df", out)
     con.execute("INSERT INTO player_heatmap SELECT * FROM out_df")
     con.unregister("out_df")
@@ -87,4 +90,4 @@ def load_sofa_heatmaps(season: str = FOCUS_SEASON) -> None:
 
 
 if __name__ == "__main__":
-    load_sofa_heatmaps()
+    load_sofa_heatmaps(sys.argv[1] if len(sys.argv) > 1 else FOCUS_SEASON)

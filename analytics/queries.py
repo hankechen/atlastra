@@ -582,6 +582,8 @@ class SoccerDB:
         combined-UCL rating and their UCL G/A."""
         if scope == "ucl":
             return self._web_players_ucl(group, search, limit, season)
+        if scope == "former":
+            return self._web_players_former(group, search, limit)
         # params order matches the ?-placeholders below: v.season, c.season, [group], [search], limit
         where, params = ["f.player_id IS NOT NULL"], [season, season]
         if group and group != "all" and group in self.PLAYER_GROUPS:
@@ -653,6 +655,85 @@ class SoccerDB:
                  "rating": _i(r.rating), "classification": r.classification,
                  "market_value_eur": None if pd.isna(r.market_value_eur) else float(r.market_value_eur),
                  "goals": _i(r.goals), "assists": _i(r.assists),
+                 "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                for r in df.itertuples()]
+
+    @staticmethod
+    def _tier(rating) -> str:
+        """Absolute rating -> classification label (rank-free, for synthetic numbers
+        like the combined rating; mirrors rate.py _classify's tiers)."""
+        if rating is None:
+            return ""
+        if rating >= 90: return "World-Class"
+        if rating >= 80: return "Elite"
+        if rating >= 65: return "Above Average"
+        if rating >= 50: return "Average"
+        return "Below Average"
+
+    def _web_players_former(self, group, search, limit) -> list[dict]:
+        """'Former Players' directory: notable players whose last top-5-league
+        season is before FOCUS_SEASON (left for another league, retired, etc. --
+        Messi, Ronaldo, Suárez …). Each card shows that player's BEST former season
+        by a COMBINED League+UCL rating (minutes-weighted blend of the two scope
+        ratings -- same 'Combined' idea as the profile's stat scopes), with that
+        season's advanced stats. Built on the per-season backfilled ratings +
+        per-season positions ([[atlastra-webapp]], [[combined-ucl-league-ratings]])."""
+        where = ["x.rn = 1", "x.lg_r IS NOT NULL"]
+        params: list = [FOCUS_SEASON]                 # the < FOCUS_SEASON filter
+        if group and group != "all" and group in self.PLAYER_GROUPS:
+            gs = self.PLAYER_GROUPS[group]
+            where.append(f"x.position IN ({','.join(['?'] * len(gs))})")
+            params += gs
+        if search:
+            where.append("strip_accents(lower(pl.player_name)) LIKE strip_accents(lower('%'||?||'%'))")
+            params.append(search)
+        params.append(limit)
+        df = self.con.execute(f"""
+            WITH latest AS (
+                SELECT player_id, max(season) AS last_season
+                FROM player_ratings_combined GROUP BY player_id),
+            former AS (SELECT player_id FROM latest WHERE last_season < ?),
+            seas AS (   -- pivot league & ucl scope rows into one row per season
+                SELECT c.player_id, c.season,
+                       max(CASE WHEN scope='league' THEN rating END)  AS lg_r,
+                       max(CASE WHEN scope='league' THEN minutes END) AS lg_m,
+                       max(CASE WHEN scope='ucl'    THEN rating END)  AS ucl_r,
+                       max(CASE WHEN scope='ucl'    THEN minutes END) AS ucl_m,
+                       max(CASE WHEN scope='league' THEN position_group END) AS position
+                FROM player_ratings_combined c JOIN former USING (player_id)
+                GROUP BY c.player_id, c.season),
+            comb AS (   -- minutes-weighted League+UCL blend; pick each player's best
+                SELECT *, CASE WHEN ucl_r IS NULL THEN lg_r
+                               ELSE round((lg_r*lg_m + ucl_r*ucl_m)
+                                          / NULLIF(lg_m + ucl_m, 0)) END AS comb_r
+                FROM seas),
+            x AS (
+                SELECT *, row_number() OVER (PARTITION BY player_id
+                           ORDER BY comb_r DESC, lg_m DESC) AS rn FROM comb)
+            SELECT pl.player_name AS player, x.season, x.position,
+                   x.comb_r AS rating, x.lg_r AS rating_league, x.ucl_r AS rating_ucl,
+                   v.team, v.goals, v.assists, v.xg, v.xa,
+                   v.key_passes, v.dribbles_completed, pe.fpid
+            FROM x
+            JOIN players pl USING (player_id)
+            LEFT JOIN v_player_season_stats v
+                   ON v.player_id = x.player_id AND v.season = x.season
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = x.player_id
+            WHERE {' AND '.join(where)}
+            -- players who didn't feature in the UCL that season sort to the bottom
+            -- (their "combined" is league-only, so it isn't comparable to a true blend)
+            ORDER BY (x.ucl_r IS NULL), x.comb_r DESC, v.goals DESC NULLS LAST
+            LIMIT ?
+        """, params).df()
+        return [{"player": r.player, "team": r.team, "position": r.position,
+                 "season": _fmt_season(r.season), "season_code": r.season,
+                 "rating": _i(r.rating), "classification": self._tier(_i(r.rating)),
+                 "rating_league": _i(r.rating_league), "rating_ucl": _i(r.rating_ucl),
+                 "goals": _i(r.goals), "assists": _i(r.assists),
+                 "xg": _r(r.xg, 1), "xa": _r(r.xa, 1),
+                 "key_passes": _i(r.key_passes), "dribbles": _i(r.dribbles_completed),
                  "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
                 for r in df.itertuples()]
 
@@ -1320,13 +1401,39 @@ class SoccerDB:
                      "chances_created": p90(t[5]), "big_chances_created": p90(t[6]),
                      "dribbles_per90": p90(t[7]),
                      "pass_accuracy": _i(t[9])}    # already a %
-        # percentile radar -- player_radar_metrics scores every player on all 6
-        # axes' metrics (vs same position), so no axis is a fake neutral 50
-        pm = self.con.execute(
-            "SELECT metric_label, percentile FROM player_radar_metrics WHERE player_id = ?",
-            [pid]).df()
-        pcts = dict(zip(pm.metric_label, pm.percentile))
-        radar = [{"axis": a, "value": v} for a, v in self._radar_values(pcts)]
+        # Radar + SWOT. Current season = the full datamb analysis (6 axes, vs same
+        # position). Past 2020/21+ seasons = the reduced per-season radar/SWOT
+        # (player_radar_hist / player_swot_hist, 5 axes, Understat+FotMob only --
+        # see pipeline/profile_history.py). Older seasons have neither. hist_level
+        # tells the UI which (current | reduced | none).
+        _AXIS_ORDER = ["Finishing", "Chance Creation", "Dribbling", "Passing", "Defending"]
+        if season == FOCUS_SEASON:
+            pm = self.con.execute(
+                "SELECT metric_label, percentile FROM player_radar_metrics WHERE player_id = ?",
+                [pid]).df()
+            pcts = dict(zip(pm.metric_label, pm.percentile))
+            radar = [{"axis": a, "value": v} for a, v in self._radar_values(pcts)]
+            strengths = _split(prof["strengths"])
+            weaknesses = _split(prof["weaknesses"])
+            areas = _split(prof["areas_of_improvement"])
+            hist_level = "current"
+        else:
+            rh = self.con.execute(
+                "SELECT axis, value FROM player_radar_hist WHERE player_id=? AND season=?",
+                [pid, season]).df()
+            if len(rh):
+                rmap = dict(zip(rh.axis, rh.value))
+                radar = [{"axis": a, "value": _i(rmap[a])} for a in _AXIS_ORDER if a in rmap]
+                sw = self.con.execute(
+                    "SELECT strengths, weaknesses, areas_of_improvement "
+                    "FROM player_swot_hist WHERE player_id=? AND season=?", [pid, season]).fetchone()
+                strengths = _split(sw[0]) if sw else []
+                weaknesses = _split(sw[1]) if sw else []
+                areas = _split(sw[2]) if sw else []
+                hist_level = "reduced"
+            else:
+                radar, strengths, weaknesses, areas = [], [], [], []
+                hist_level = "none"
         # career progression of one stat; team = the SELECTED season's club (so a
         # past-season view shows the right crest, e.g. Bellingham at Dortmund), not
         # just the latest team.
@@ -1382,7 +1489,7 @@ class SoccerDB:
             "stats_scopes": self._player_stat_scopes(pid, season),  # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9
-            "heatmap": self._player_heatmap(pid, FOCUS_SEASON),  # pinned: heatmaps only scraped for FOCUS_SEASON
+            "heatmap": self._player_heatmap(pid, season),  # season-aware (past seasons scraped from SofaScore)
             "career_stat": career_stat, "career": career,
             # season selector: which season the stats/gauges above reflect, the
             # available list, and whether the pinned analysis matches it
@@ -1390,9 +1497,10 @@ class SoccerDB:
             "seasons": [{"value": s, "label": _fmt_season(s)} for s in seasons_avail],
             "is_current": season == FOCUS_SEASON,
             "pinned_season": _fmt_season(FOCUS_SEASON),
-            "strengths": _split(prof["strengths"]),
-            "weaknesses": _split(prof["weaknesses"]),
-            "areas_of_improvement": _split(prof["areas_of_improvement"]),
+            "hist_level": hist_level,   # current | reduced | none (radar/SWOT/heatmap)
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "areas_of_improvement": areas,
         }
 
     # nice labels for the comparison table (use case 5)

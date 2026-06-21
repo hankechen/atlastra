@@ -92,19 +92,29 @@ async function load(name, careerStat = 'xa', season = null) {
   document.getElementById('seasonSel').innerHTML = seasons.map(s =>
     `<option value="${s.value}"${s.value === p.season ? ' selected' : ''}>${s.label}</option>`).join('');
   const banner = document.getElementById('pinnedBanner');
-  if (p.is_current) {
+  // hist_level: what the radar/SWOT/heatmap reflect for the chosen season —
+  // 'current' (full datamb), 'reduced' (per-season, Understat+FotMob), 'none'.
+  if (p.hist_level === 'current') {
     banner.hidden = true;
     setText('radarNote', 'Compared to same position in Top-5 leagues · ' + selLabel);
     setText('simNote', 'By statistical profile · ' + selLabel);
     setText('ratingNote', 'Common-metric rating · combined stats below');
   } else {
     banner.hidden = false;
-    banner.innerHTML = `Showing <b>${selLabel}</b> statistics &amp; League/UCL ratings. ` +
-      `Radar, strengths &amp; weaknesses, archetype, signature actions and heatmap reflect ` +
-      `<b>${p.pinned_season}</b> (latest available).`;
-    setText('radarNote', 'Same position in Top-5 leagues · ' + p.pinned_season + ' (latest)');
-    setText('simNote', 'By statistical profile · ' + p.pinned_season + ' (latest)');
     setText('ratingNote', 'Common-metric rating · ' + selLabel);
+    setText('simNote', 'By statistical profile · ' + p.pinned_season + ' (latest)');
+    if (p.hist_level === 'reduced') {
+      banner.innerHTML = `Showing <b>${selLabel}</b>. Stats, League/UCL ratings, radar, ` +
+        `strengths &amp; weaknesses and heatmap are for this season (radar uses a reduced ` +
+        `metric set). Composite rating, archetype &amp; signature actions reflect ` +
+        `<b>${p.pinned_season}</b> (latest).`;
+      setText('radarNote', 'Same position · ' + selLabel + ' · reduced metric set');
+    } else {                                   // 'none' (pre-2020/21)
+      banner.innerHTML = `Showing <b>${selLabel}</b> statistics &amp; League/UCL ratings. ` +
+        `Radar, strengths/weaknesses &amp; heatmap aren't available this far back; ` +
+        `archetype &amp; signature actions reflect <b>${p.pinned_season}</b> (latest).`;
+      setText('radarNote', 'Not available for ' + selLabel);
+    }
   }
   const photoEl = document.querySelector('.ph .photo');
   if (photoEl) photoEl.innerHTML = avatarHTML(p.photo, p.name);
@@ -230,9 +240,14 @@ function renderArchetype(a) {
 }
 
 function drawRadar(radar) {
+  if (radarChart) radarChart.destroy();
+  const cv = document.getElementById('radar');
+  if (!radar || !radar.length) {                  // no radar for this season (pre-2020/21)
+    cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+    return;
+  }
   const labels = radar.map(r => r.axis);
   const data = radar.map(r => r.value ?? 50);     // axis not measured for this position -> neutral
-  if (radarChart) radarChart.destroy();
   radarChart = new Chart(document.getElementById('radar'), {
     type: 'radar',
     data: { labels, datasets: [{ data, fill: true, backgroundColor: 'rgba(85,112,240,.35)',

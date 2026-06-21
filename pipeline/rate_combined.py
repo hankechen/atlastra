@@ -300,12 +300,20 @@ def _rate_one_season(con, season: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
     # past seasons: override the carried-back current position with that season's
-    # actual (stat-derived) fine position where we have one.
+    # actual position. Use the stat-derived FINE split where we have one, else map
+    # the season's COARSE group to a default fine -- crucially NOT the player's
+    # LATEST career group (carried back from players.position_group), which mis-rated
+    # role-changers, e.g. an ex-winger who finished as a wing-back had his earlier
+    # forward seasons graded in the CB cohort and topped it (Rashica/Bamba 91).
     if season != FOCUS_SEASON:
         pph = con.execute(
-            "SELECT player_id, fine_position FROM player_position_history "
-            "WHERE season = ? AND fine_position IS NOT NULL", [season]).df()
-        pmap = {int(p): f for p, f in zip(pph["player_id"], pph["fine_position"])}
+            "SELECT player_id, fine_position, coarse_group FROM player_position_history "
+            "WHERE season = ?", [season]).df()
+        pmap = {}
+        for r in pph.itertuples():
+            pos = r.fine_position if pd.notna(r.fine_position) else COARSE_FALLBACK.get(r.coarse_group)
+            if pos:
+                pmap[int(r.player_id)] = pos
         df["datamb_fine"] = [pmap.get(int(p), f)
                              for p, f in zip(df["player_id"], df["datamb_fine"])]
     # prefer the fine position; fall back to a coarse->fine guess if missing

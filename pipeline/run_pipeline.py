@@ -31,6 +31,7 @@ from pipeline import rate_combined as rate_combined_mod
 from pipeline import scrape_fotmob_positions as fmpos_scrape_mod
 from pipeline import load_fotmob_positions as fmpos_load_mod
 from pipeline import positions_history as poshist_mod
+from pipeline import profile_history as profhist_mod
 from pipeline import load_live as live_mod
 
 
@@ -123,6 +124,12 @@ def main():
         poshist_mod.build_positions_history()
     except Exception as e:
         print(f"position history skipped ({repr(e)[:80]}); run `python -m pipeline.positions_history`.")
+
+    print("\n### 9c. PER-SEASON RADAR + SWOT (reduced metric set, 2020/21+) ###")
+    try:
+        profhist_mod.build_profile_history()
+    except Exception as e:
+        print(f"profile history skipped ({repr(e)[:80]}); run `python -m pipeline.profile_history`.")
 
     print("\n### 10. PLAYER PROFILES (strengths / weaknesses / full profile) ###")
     try:
