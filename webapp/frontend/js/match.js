@@ -2,8 +2,8 @@ renderSidebar('Live Matches');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const EID = new URLSearchParams(location.search).get('id');
-const TABS = [['lineups', 'Lineups'], ['stats', 'Stats'], ['shotmap', 'Shot Map'],
-              ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
+const TABS = [['lineups', 'Lineups'], ['prediction', 'Prediction'], ['stats', 'Stats'],
+              ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
 const TAB_KEYS = TABS.map(([k]) => k);
 let head = null, timer = null;
 let active = TAB_KEYS.includes(new URLSearchParams(location.search).get('tab'))
@@ -48,7 +48,7 @@ function renderTabs() {
   el.querySelectorAll('.tab').forEach(t => t.onclick = () => { active = t.dataset.k; renderTabs(); loadActive(); });
 }
 const body = () => document.getElementById('tabBody');
-const LOADERS = { stats: loadStats, lineups: loadLineups, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
+const LOADERS = { stats: loadStats, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
 async function loadActive(refresh) {
   if (!refresh) body().innerHTML = '<section class="card"><div class="placeholder-note">Loading…</div></section>';
   try { await LOADERS[active](); } catch { body().innerHTML = '<section class="card"><div class="placeholder-note">Could not load this section.</div></section>'; }
@@ -77,6 +77,33 @@ async function loadStats() {
         </div>`;
       }).join('')}
     </section>`).join('');
+}
+
+// ---- Prediction (from bookmaker odds) ----
+async function loadPrediction() {
+  const d = await A('/api/match/prediction');
+  if (!d.available) { body().innerHTML = empty('No betting odds available for this match yet.'); return; }
+  const c = d.consensus;
+  const teams = { home: head?.home || 'Home', draw: 'Draw', away: head?.away || 'Away' };
+  const predLabel = d.predicted === 'draw' ? 'Draw' : `${teams[d.predicted]} win`;
+  const seg = (k, cls) => `<div class="pr-seg ${cls}${d.predicted === k ? ' pred' : ''}" style="width:${c[k]}%" title="${esc(teams[k])} ${c[k]}%">${c[k] >= 10 ? c[k] + '%' : ''}</div>`;
+  const oddsRows = d.books.map((b, i) => `<tr><td class="tl">Bookmaker ${i + 1}</td>
+    <td>${b.odds.home}</td><td>${b.odds.draw}</td><td>${b.odds.away}</td></tr>`).join('');
+  const liveOdds = head?.status === 'inprogress';
+  body().innerHTML = `<section class="card">
+      <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live odds</span> · ' : ''}${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}</span></div>
+      <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% implied</span></div>
+      <div class="pr-bar">${seg('home', 'h')}${seg('draw', 'd')}${seg('away', 'a')}</div>
+      <div class="pr-legend">
+        <span><i class="h"></i>${esc(teams.home)} <b>${c.home}%</b></span>
+        <span><i class="d"></i>Draw <b>${c.draw}%</b></span>
+        <span><i class="a"></i>${esc(teams.away)} <b>${c.away}%</b></span></div>
+      <div class="card-h" style="margin-top:18px"><h3>Bookmaker odds <span class="muted" style="font-weight:400">(decimal)</span></h3></div>
+      <div class="ltbl-wrap"><table class="ltbl">
+        <thead><tr><th class="tl">Source</th><th>${esc(teams.home)}</th><th>Draw</th><th>${esc(teams.away)}</th></tr></thead>
+        <tbody>${oddsRows}</tbody></table></div>
+      <div class="placeholder-note" style="margin-top:10px">Win probabilities are implied from bookmaker 1X2 odds with the margin removed, averaged across sources (via SofaScore). Not betting advice.</div>
+    </section>`;
 }
 
 // ---- Lineups (formation pitch) ----
@@ -392,7 +419,7 @@ const empty = (msg) => `<section class="card"><div class="placeholder-note">${es
   if (head?.status === 'inprogress') {
     timer = setInterval(async () => {
       await loadHeader();
-      if (['stats', 'timeline', 'players'].includes(active)) loadActive(true);
+      if (['stats', 'timeline', 'players', 'prediction'].includes(active)) loadActive(true);
       if (head?.status !== 'inprogress') clearInterval(timer);   // stop once final
     }, 30000);
   }

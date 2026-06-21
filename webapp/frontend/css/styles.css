@@ -626,6 +626,20 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .luc-rt{position:absolute;right:-9px;bottom:-5px;font-size:9px;font-weight:700;color:#06140a;border-radius:4px;padding:0 3px;font-style:normal}
 .luc-cap{position:absolute;left:-7px;top:-5px;font-size:8px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:13px;height:13px;line-height:13px;font-style:normal}
 
+/* ---- match prediction (from bookmaker odds) ---- */
+.pr-head{font-size:15px;margin:4px 0 12px}
+.pr-head b{font-weight:700}
+.pr-bar{display:flex;height:30px;border-radius:8px;overflow:hidden;gap:2px}
+.pr-seg{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;min-width:2px;transition:width .3s}
+.pr-seg.h{background:linear-gradient(90deg,#5570f0,#7d5cf5)}
+.pr-seg.d{background:#56607e}
+.pr-seg.a{background:#e0556f}
+.pr-seg.pred{box-shadow:inset 0 0 0 2px rgba(255,255,255,.55)}
+.pr-legend{display:flex;justify-content:space-between;gap:10px;margin-top:10px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.pr-legend b{color:var(--text)}
+.pr-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+.pr-legend .h{background:#6a6ef0}.pr-legend .d{background:#56607e}.pr-legend .a{background:#e0556f}
+
 /* ---- player match-stats modal ---- */
 .pm-overlay{position:fixed;inset:0;z-index:50;background:rgba(4,7,16,.66);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:20px}
 .pm-card{position:relative;width:100%;max-width:380px;background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}

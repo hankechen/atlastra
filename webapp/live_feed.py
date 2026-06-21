@@ -247,3 +247,59 @@ def player_heatmap(eid: int, pid: int) -> dict:
         return {"available": False, "points": []}
     return {"available": True,
             "points": [{"x": p.get("x"), "y": p.get("y")} for p in pts]}
+
+
+# ---- prediction (from bookmaker odds) ---------------------------------------
+# SofaScore exposes a handful of bookmaker feeds per event under /odds/{providerId}.
+# We read each one's 1X2 (home/draw/away) market, convert to implied probability,
+# strip the bookmaker margin (over-round), and average across books for a consensus.
+_ODDS_PROVIDERS = (1, 5, 8, 11, 14, 16)
+
+
+def _frac_to_decimal(frac):
+    """SofaScore fractional odds ('21/50', '7/1') -> decimal (1.42, 8.0)."""
+    try:
+        s = str(frac)
+        if "/" in s:
+            n, d = s.split("/")
+            return round(int(n) / int(d) + 1, 2)
+        return round(float(s), 2)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def prediction(eid: int) -> dict:
+    """Consensus match prediction implied by bookmaker 1X2 odds (margin removed,
+    averaged across the available SofaScore odds feeds)."""
+    books = []
+    for prov in _ODDS_PROVIDERS:
+        # short TTL so in-play odds move with the game (the match page re-polls ~30s)
+        d = _get(f"/event/{eid}/odds/{prov}/featured", ttl=25)
+        feat = (d or {}).get("featured") or {}
+        # in-play: the 1X2 lives under 'fullTime' (default rotates to corners/BTTS/…);
+        # pre-match: the 1X2 IS the 'default'.
+        mk = feat.get("fullTime") or {}
+        if mk.get("marketGroup") != "1X2":
+            mk = feat.get("default") or {}
+        if mk.get("marketGroup") != "1X2":
+            continue
+        ch = {c.get("name"): c.get("fractionalValue") for c in mk.get("choices", [])}
+        dec = {k: _frac_to_decimal(ch.get(k)) for k in ("1", "X", "2")}
+        if not all(dec.values()):
+            continue
+        inv = {k: 1.0 / dec[k] for k in dec}
+        over = sum(inv.values())                       # >1 = the bookmaker margin
+        books.append({
+            "odds": {"home": dec["1"], "draw": dec["X"], "away": dec["2"]},
+            "probs": {"home": inv["1"] / over, "draw": inv["X"] / over, "away": inv["2"] / over},
+        })
+    if not books:
+        return {"available": False}
+    raw = {k: sum(b["probs"][k] for b in books) / len(books) * 100 for k in ("home", "draw", "away")}
+    cons = {k: round(v) for k, v in raw.items()}
+    fix = 100 - sum(cons.values())                     # keep the 3 ints summing to 100
+    if fix:
+        cons[max(raw, key=raw.get)] += fix
+    return {"available": True, "n_books": len(books), "consensus": cons,
+            "predicted": max(cons, key=cons.get),
+            "books": [{"odds": b["odds"]} for b in books]}

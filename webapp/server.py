@@ -44,6 +44,8 @@ def match_api(path: str, q: dict) -> dict:
         return live_feed.player_stats(eid)
     if path == "/api/match/heatmap":
         return live_feed.player_heatmap(eid, int(q.get("player_id", [0])[0]))
+    if path == "/api/match/prediction":
+        return live_feed.prediction(eid)
     raise KeyError(path)
 
 
