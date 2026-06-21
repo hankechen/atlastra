@@ -31,13 +31,20 @@ async function loadHeader() {
   const hero = document.getElementById('hero');
   if (!head.available) { hero.innerHTML = '<div class="placeholder-note">Match not found.</div>'; return; }
   const played = head.home_score != null;
+  // each team links to its page: national teams -> /nat.html, clubs -> /team.html
+  const teamLink = (side) => {
+    const id = head[side + '_id'], name = head[side];
+    if (head[side + '_national'] && id != null) return `/nat.html?id=${id}`;
+    return name ? `/team.html?name=${encodeURIComponent(name)}` : null;
+  };
+  const open = (side) => { const l = teamLink(side); return l ? ` onclick="location.href='${l}'" style="cursor:pointer"` : ''; };
   hero.innerHTML = `
     <div class="mh-comp">${esc(head.competition || '')}${head.round ? ' · ' + esc(head.round) : ''}</div>
     <div class="mh-row">
-      <div class="mh-team home">${badge('home')}<span class="mh-name">${esc(head.home)}</span></div>
+      <div class="mh-team home"${open('home')}>${badge('home')}<span class="mh-name">${esc(head.home)}</span></div>
       <div class="mh-score">${played ? `${head.home_score}<span class="dash">-</span>${head.away_score}` : '<span class="vs">vs</span>'}
         <div class="mh-st">${heroStatus()}</div></div>
-      <div class="mh-team away"><span class="mh-name">${esc(head.away)}</span>${badge('away')}</div>
+      <div class="mh-team away"${open('away')}><span class="mh-name">${esc(head.away)}</span>${badge('away')}</div>
     </div>`;
 }
 

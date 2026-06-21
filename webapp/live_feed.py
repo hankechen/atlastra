@@ -84,7 +84,9 @@ def header(eid: int) -> dict:
         "start_ts": ev.get("startTimestamp"),
         "status": st.get("type"), "status_desc": st.get("description"), "minute": minute,
         "home": home.get("name"), "home_id": home.get("id"), "home_country": country(home),
+        "home_national": bool(home.get("national")),
         "away": away.get("name"), "away_id": away.get("id"), "away_country": country(away),
+        "away_national": bool(away.get("national")),
         "home_score": (ev.get("homeScore") or {}).get("current"),
         "away_score": (ev.get("awayScore") or {}).get("current"),
         "xg_available": bool(ev.get("hasXg")),
@@ -303,3 +305,63 @@ def prediction(eid: int) -> dict:
     return {"available": True, "n_books": len(books), "consensus": cons,
             "predicted": max(cons, key=cons.get),
             "books": [{"odds": b["odds"]} for b in books]}
+
+
+# ---- national team (squad + recent results + fixtures) ----------------------
+def _team_event_row(e: dict) -> dict:
+    return {"event_id": e.get("id"),
+            "home": (e.get("homeTeam") or {}).get("name"),
+            "away": (e.get("awayTeam") or {}).get("name"),
+            "home_score": (e.get("homeScore") or {}).get("current"),
+            "away_score": (e.get("awayScore") or {}).get("current"),
+            "competition": (e.get("tournament") or {}).get("name"),
+            "ts": e.get("startTimestamp"),
+            "status": (e.get("status") or {}).get("type")}
+
+
+def national_team(team_id: int) -> dict:
+    """A national team's roster + recent results + upcoming fixtures, live from
+    SofaScore team endpoints (keyed by the team id we store in live_matches)."""
+    info = (_get(f"/team/{team_id}", ttl=600) or {}).get("team") or {}
+    if not info:
+        return {"available": False}
+    squad = []
+    for p in (_get(f"/team/{team_id}/players", ttl=600) or {}).get("players", []):
+        pl = p.get("player") or {}
+        squad.append({"id": pl.get("id"), "name": pl.get("name"),
+                      "position": pl.get("position"), "number": pl.get("jerseyNumber")})
+    last = (_get(f"/team/{team_id}/events/last/0", ttl=180) or {}).get("events", [])
+    nxt = (_get(f"/team/{team_id}/events/next/0", ttl=300) or {}).get("events", [])
+
+    # latest starting XI: this team's lineup from its most recent finished match
+    # that has one published (try a few back; each is one lineups() call).
+    latest_xi, tried = None, 0
+    for e in reversed(last):
+        if (e.get("status") or {}).get("type") != "finished":
+            continue
+        if tried >= 4:
+            break
+        tried += 1
+        lu = lineups(e.get("id"))
+        if not lu.get("available"):
+            continue
+        is_home = (e.get("homeTeam") or {}).get("id") == team_id
+        side = lu["home"] if is_home else lu["away"]
+        if side and side.get("starting_xi"):
+            opp = ((e.get("awayTeam") if is_home else e.get("homeTeam")) or {}).get("name")
+            latest_xi = {"event_id": e.get("id"), "opponent": opp, "is_home": is_home,
+                         "home_score": (e.get("homeScore") or {}).get("current"),
+                         "away_score": (e.get("awayScore") or {}).get("current"),
+                         "ts": e.get("startTimestamp"),
+                         "formation": side.get("formation"), "starting_xi": side.get("starting_xi")}
+            break
+
+    return {
+        "available": True, "id": team_id, "name": info.get("name"),
+        "country_code": (info.get("country") or {}).get("alpha2"),
+        "manager": (info.get("manager") or {}).get("name"),
+        "latest_xi": latest_xi,
+        "results": [_team_event_row(e) for e in reversed(last)][:12],   # most recent first
+        "fixtures": [_team_event_row(e) for e in nxt][:8],
+        "squad": squad,
+    }

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — National Team</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=12">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/teams.html?tab=national">National Teams</a> › <b id="crumb">—</b></div>
+    <div class="page-head"><div><h2 id="natName">National Team</h2><p id="natSub" class="muted"></p></div></div>
+
+    <div id="latestXI"></div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:18px">
+      <section class="card"><div class="card-h"><h3>Recent Results</h3></div><div id="results"></div></section>
+      <section class="card"><div class="card-h"><h3>Upcoming Fixtures</h3></div><div id="fixtures"></div></section>
+    </div>
+
+    <section class="card" style="margin-top:18px">
+      <div class="card-h"><h3>Squad</h3><span class="see" id="squadCount"></span></div>
+      <div id="squad"></div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=2"></script>
+<script src="/js/nat.js?v=2"></script>
+</body>
+</html>

@@ -564,6 +564,150 @@ class SoccerDB:
                  "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
                 for i, r in enumerate(df.itertuples())]
 
+    # fine position groups (player_ratings_combined.position_group) -> display label,
+    # in the order the Rankings page shows them.
+    POSITION_RANK_GROUPS = [
+        ("ST", "Strikers"), ("W", "Wingers"), ("AM", "Attacking Mids"),
+        ("CM", "Central Mids"), ("DM", "Defensive Mids"),
+        ("FB", "Full-backs"), ("CB", "Centre-backs"), ("GK", "Goalkeepers"),
+    ]
+
+    def web_position_rankings(self, limit: int = 20, season: str = FOCUS_SEASON) -> dict:
+        """Top-N players per fine position group by the combined-League rating (same
+        engine as the directory/profile). Returns ordered groups, each with a ranked
+        player list."""
+        df = self.con.execute("""
+            WITH r AS (
+                SELECT c.player_id, c.position_group AS grp, c.rating, c.classification,
+                       row_number() OVER (PARTITION BY c.position_group
+                           ORDER BY c.rating DESC, c.percentile DESC) AS rn
+                FROM player_ratings_combined c
+                WHERE c.scope = 'league' AND c.season = ?)
+            SELECT r.grp, r.rn, r.rating, r.classification,
+                   pl.player_name AS player, f.team,
+                   COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position, pe.fpid
+            FROM r JOIN players pl USING(player_id)
+            LEFT JOIN v_player_profile_full f ON f.player_id = r.player_id
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = r.player_id
+            WHERE r.rn <= ?
+            ORDER BY r.grp, r.rn
+        """, [season, limit]).df()
+        by_grp: dict = {}
+        for r in df.itertuples():
+            by_grp.setdefault(r.grp, []).append({
+                "rank": int(r.rn), "player": r.player, "team": r.team, "position": r.position,
+                "rating": int(r.rating), "classification": r.classification,
+                "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)})
+        return {"groups": [{"key": k, "label": lbl, "players": by_grp[k]}
+                           for k, lbl in self.POSITION_RANK_GROUPS if k in by_grp]}
+
+    def web_alltime_seasons(self, scope: str = "combined", limit: int = 20) -> list[dict]:
+        """Best individual SEASONS of all time (across every backfilled season) by
+        rating. scope: 'league' / 'ucl' (top player-seasons by that scope's rating)
+        or 'combined' (minutes-weighted League+UCL blend, requires both, so it's the
+        best all-round campaigns). Each row links to that player's profile at that
+        season."""
+        common = """
+            JOIN players pl USING(player_id)
+            LEFT JOIN v_player_season_stats v ON v.player_id = s.player_id AND v.season = s.season
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = s.player_id
+        """
+        if scope in ("league", "ucl"):
+            df = self.con.execute(f"""
+                WITH s AS (
+                    SELECT player_id, season, rating, position_group,
+                           row_number() OVER (ORDER BY rating DESC, percentile DESC) AS rn
+                    FROM player_ratings_combined WHERE scope = ?)
+                SELECT s.rn, s.season, s.rating, s.position_group, pl.player_name AS player,
+                       v.team, pe.fpid
+                FROM s {common} WHERE s.rn <= ? ORDER BY s.rn
+            """, [scope, limit]).df()
+        else:   # combined: minutes-weighted blend, both scopes required
+            df = self.con.execute(f"""
+                WITH pv AS (
+                    SELECT player_id, season,
+                           max(CASE WHEN scope='league' THEN rating END)  AS lg_r,
+                           max(CASE WHEN scope='league' THEN minutes END) AS lg_m,
+                           max(CASE WHEN scope='ucl'    THEN rating END)  AS ucl_r,
+                           max(CASE WHEN scope='ucl'    THEN minutes END) AS ucl_m,
+                           max(CASE WHEN scope='league' THEN position_group END) AS position_group
+                    FROM player_ratings_combined GROUP BY player_id, season),
+                s AS (
+                    SELECT player_id, season, position_group,
+                           round((lg_r*lg_m + ucl_r*ucl_m) / NULLIF(lg_m+ucl_m, 0)) AS rating,
+                           row_number() OVER (ORDER BY (lg_r*lg_m + ucl_r*ucl_m)
+                               / NULLIF(lg_m+ucl_m, 0) DESC) AS rn
+                    FROM pv WHERE lg_r IS NOT NULL AND ucl_r IS NOT NULL)
+                SELECT s.rn, s.season, s.rating, s.position_group, pl.player_name AS player,
+                       v.team, pe.fpid
+                FROM s {common} WHERE s.rn <= ? ORDER BY s.rn
+            """, [limit]).df()
+        return [{"rank": int(r.rn), "player": r.player, "team": r.team,
+                 "position": r.position_group, "rating": int(r.rating),
+                 "season": _fmt_season(r.season), "season_code": r.season,
+                 "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                for r in df.itertuples()]
+
+    def web_national_teams(self) -> list[dict]:
+        """National teams from the international feed (live_matches: WC + qualifiers +
+        major tournaments). Each with its flag code + recent record/form and a click
+        target (latest finished match, else next fixture). Sorted by points then GD
+        over the available window (small — it's just the current international window)."""
+        agg = self.con.execute("""
+            WITH m AS (
+                SELECT event_id, start_timestamp, status_type, home_team AS team,
+                       home_team_id AS team_id, home_country AS cc, home_score AS gf, away_score AS ga,
+                       CASE winner_code WHEN 1 THEN 'W' WHEN 2 THEN 'L' WHEN 3 THEN 'D' END AS res
+                FROM live_matches WHERE tournament_group = 'International' AND home_country IS NOT NULL
+                UNION ALL
+                SELECT event_id, start_timestamp, status_type, away_team,
+                       away_team_id, away_country, away_score, home_score,
+                       CASE winner_code WHEN 2 THEN 'W' WHEN 1 THEN 'L' WHEN 3 THEN 'D' END
+                FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL)
+            SELECT team, any_value(cc) AS cc, any_value(team_id) AS team_id,
+                   count(*) FILTER (WHERE status_type = 'finished') AS played,
+                   count(*) FILTER (WHERE res = 'W') AS w,
+                   count(*) FILTER (WHERE res = 'D') AS d,
+                   count(*) FILTER (WHERE res = 'L') AS l,
+                   COALESCE(SUM(gf) FILTER (WHERE status_type = 'finished'), 0) AS gf,
+                   COALESCE(SUM(ga) FILTER (WHERE status_type = 'finished'), 0) AS ga,
+                   max(CASE WHEN status_type = 'finished' THEN event_id END) AS last_event,
+                   arg_min(CASE WHEN status_type = 'notstarted' THEN event_id END,
+                           CASE WHEN status_type = 'notstarted' THEN start_timestamp END) AS next_event
+            FROM m GROUP BY team
+        """).df()
+        # last-5 form (most recent first) per team
+        formdf = self.con.execute("""
+            WITH m AS (
+                SELECT start_timestamp, home_team AS team,
+                       CASE winner_code WHEN 1 THEN 'W' WHEN 2 THEN 'L' WHEN 3 THEN 'D' END AS res
+                FROM live_matches WHERE tournament_group = 'International' AND home_country IS NOT NULL
+                  AND status_type = 'finished'
+                UNION ALL
+                SELECT start_timestamp, away_team,
+                       CASE winner_code WHEN 2 THEN 'W' WHEN 1 THEN 'L' WHEN 3 THEN 'D' END
+                FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL
+                  AND status_type = 'finished'),
+            o AS (SELECT team, res, row_number() OVER (PARTITION BY team ORDER BY start_timestamp DESC) rn FROM m)
+            SELECT team, string_agg(res, '' ORDER BY rn) AS form FROM o WHERE rn <= 5 GROUP BY team
+        """).df()
+        form = {r.team: list(r.form) for r in formdf.itertuples()}
+        rows = [{
+            "team": r.team, "country_code": r.cc, "team_id": _i(r.team_id),
+            "played": _i(r.played), "w": _i(r.w), "d": _i(r.d), "l": _i(r.l),
+            "gf": _i(r.gf), "ga": _i(r.ga), "gd": _i(r.gf) - _i(r.ga),
+            "points": _i(r.w) * 3 + _i(r.d),
+            "form": form.get(r.team, []),
+            "event_id": _i(r.last_event) if pd.notna(r.last_event) else (
+                _i(r.next_event) if pd.notna(r.next_event) else None),
+        } for r in agg.itertuples()]
+        rows.sort(key=lambda x: (-x["points"], -x["gd"], x["team"]))
+        return rows
+
     # tab groups for the Players directory -> rating position_groups
     PLAYER_GROUPS = {"FWD": ["ST", "W"], "MID": ["AM", "CM", "DM"],
                      "DEF": ["FB", "CB"], "GK": ["GK"]}
