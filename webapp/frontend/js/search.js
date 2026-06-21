@@ -19,7 +19,7 @@ async function runSearch(q) {
   pEl.innerHTML = d.players.length ? d.players.map(p => `
     <div class="sr" onclick="location.href='${playerHref(p.player)}'">
       <span class="pic">${avatarHTML(p.photo, p.player)}</span>
-      <span class="srx"><div class="nm">${p.player}</div>
+      <span class="srx"><div class="nm">${p.player}${p.former ? ` <span class="former-tag">former · ${p.season}</span>` : ''}</div>
         <div class="sub">${crestHTML(p.team_logo, 'crest-sm')}${p.team || ''} · ${p.position || ''}</div></span>
       <span class="srend">${p.goals ?? 0}G · ${p.assists ?? 0}A</span>
     </div>`).join('') : '<div class="empty">No players.</div>';

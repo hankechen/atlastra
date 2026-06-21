@@ -915,21 +915,29 @@ class SoccerDB:
         q = (query or "").strip()
         if not q:
             return {"query": q, "players": [], "teams": []}
+        # Search ALL seasons (so former players surface too); show each player's
+        # most-recent season's club/stats. Active players (current season) rank
+        # first, then by most recent season, then minutes.
         pdf = self.con.execute("""
-            SELECT pl.player_name, arg_max(t.team_name, ps.minutes) AS team,
+            WITH m AS (
+                SELECT ps.player_id, pl.player_name, max(ps.season) AS last_season
+                FROM player_season_stats ps JOIN players pl USING(player_id)
+                WHERE strip_accents(lower(pl.player_name)) LIKE strip_accents(lower('%'||?||'%'))
+                GROUP BY ps.player_id, pl.player_name)
+            SELECT m.player_name, m.last_season,
+                   arg_max(t.team_name, ps.minutes) AS team,
                    any_value(ps.position_group) AS position,
                    SUM(ps.goals) AS goals, SUM(ps.assists) AS assists,
                    SUM(ps.minutes) AS minutes, max(pe.fpid) AS fpid
-            FROM player_season_stats ps
-            JOIN players pl USING(player_id)
+            FROM m
+            JOIN player_season_stats ps ON ps.player_id = m.player_id AND ps.season = m.last_season
             JOIN teams t USING(team_id)
             LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
                        WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
-                   ON pe.player_id = ps.player_id
-            WHERE strip_accents(lower(pl.player_name)) LIKE strip_accents(lower('%'||?||'%'))
-              AND ps.season = ?
-            GROUP BY pl.player_id, pl.player_name
-            ORDER BY minutes DESC LIMIT ?
+                   ON pe.player_id = m.player_id
+            GROUP BY m.player_id, m.player_name, m.last_season
+            ORDER BY (m.last_season = ?) DESC, m.last_season DESC, minutes DESC
+            LIMIT ?
         """, [q, season, limit]).df()
         tdf = self.con.execute("""
             SELECT t.team_name, l.league_name AS league, l.country
@@ -941,7 +949,9 @@ class SoccerDB:
             "query": q,
             "players": [{"player": r.player_name, "team": r.team, "position": r.position,
                          "team_logo": self.team_logo(r.team), "photo": self.player_photo(r.fpid),
-                         "goals": _i(r.goals), "assists": _i(r.assists)}
+                         "goals": _i(r.goals), "assists": _i(r.assists),
+                         "season": _fmt_season(r.last_season),
+                         "former": r.last_season != season}
                         for r in pdf.itertuples()],
             "teams": [{"team": r.team_name, "league": r.league, "country": r.country,
                        "team_logo": self.team_logo(r.team_name)} for r in tdf.itertuples()],
