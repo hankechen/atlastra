@@ -2,12 +2,12 @@ renderSidebar('Live Matches');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const EID = new URLSearchParams(location.search).get('id');
-const TABS = [['stats', 'Stats'], ['lineups', 'Lineups'], ['shotmap', 'Shot Map'],
+const TABS = [['lineups', 'Lineups'], ['stats', 'Stats'], ['shotmap', 'Shot Map'],
               ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
 const TAB_KEYS = TABS.map(([k]) => k);
 let head = null, timer = null;
 let active = TAB_KEYS.includes(new URLSearchParams(location.search).get('tab'))
-  ? new URLSearchParams(location.search).get('tab') : 'stats';
+  ? new URLSearchParams(location.search).get('tab') : 'lineups';
 let playersCache = null, playerSort = { key: 'rating', dir: -1 };
 const heatCache = {};                       // player_id -> {points}
 
