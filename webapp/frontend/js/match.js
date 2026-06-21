@@ -139,10 +139,17 @@ function chipHTML({ x, y, p }, isHome) {
   const rt = p.rating != null
     ? `<i class="luc-rt" style="background:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</i>` : '';
   const cap = p.captain ? '<i class="luc-cap">C</i>' : '';
+  // goal / assist icons from the player's match stats (keyed by SofaScore id)
+  const st = _luStats && _luStats[p.id];
+  const g = st ? (st.goals || 0) : 0, a = st ? (st.assists || 0) : 0;
+  const ev = [];
+  if (g) ev.push(`<span class="ev g" title="${g} goal${g > 1 ? 's' : ''}">⚽${g > 1 ? '<b>' + g + '</b>' : ''}</span>`);
+  if (a) ev.push(`<span class="ev a" title="${a} assist${a > 1 ? 's' : ''}">👟${a > 1 ? '<b>' + a + '</b>' : ''}</span>`);
+  const evHTML = ev.length ? `<span class="luc-ev">${ev.join('')}</span>` : '';
   return `<div class="luc ${isHome ? 'h' : 'a'}" style="left:${(x * 100).toFixed(1)}%;top:${(y * 100).toFixed(1)}%"
       onclick="openPlayerModal(${p.id})" title="${esc(p.name)} — view match stats">
       <span class="luc-dot">${p.number ?? ''}${rt}${cap}</span>
-      <span class="luc-nm">${esc(_surname(p.name))}</span></div>`;
+      <span class="luc-nm">${esc(_surname(p.name))}${evHTML}</span></div>`;
 }
 // fallback list (used when a formation can't be parsed, e.g. predicted lineups)
 function lineupSideList(s, label) {
@@ -158,11 +165,16 @@ function lineupSideList(s, label) {
 }
 function subsCol(s, label) {
   if (!s || !(s.substitutes || []).length) return '';
-  const row = (p) => `<div class="lu-row" onclick="openPlayerModal(${p.id})" style="cursor:pointer">
-    <span class="lu-no">${p.number ?? ''}</span>
-    <span class="lu-nm">${esc(p.name)}</span>
-    <span class="lu-pos">${esc(p.position || '')}</span>
-    ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
+  const row = (p) => {
+    const st = _luStats && _luStats[p.id];
+    const g = st ? (st.goals || 0) : 0, a = st ? (st.assists || 0) : 0;
+    const ev = (g ? ` ⚽${g > 1 ? g : ''}` : '') + (a ? ` 👟${a > 1 ? a : ''}` : '');
+    return `<div class="lu-row" onclick="openPlayerModal(${p.id})" style="cursor:pointer">
+      <span class="lu-no">${p.number ?? ''}</span>
+      <span class="lu-nm">${esc(p.name)}<span class="lu-ev">${ev}</span></span>
+      <span class="lu-pos">${esc(p.position || '')}</span>
+      ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
+  };
   return `<section class="card lu-col"><div class="card-h"><h3>${esc(label)} — subs</h3></div>${s.substitutes.map(row).join('')}</section>`;
 }
 
@@ -225,6 +237,11 @@ async function loadLineups() {
   for (const side of [d.home, d.away])
     for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
       if (p.id != null) _luNames[p.id] = p.name;
+  // per-player match stats -> goal/assist icons on the chips (+ the modal); fresh
+  // each load so icons reflect the latest score.
+  const ps = await A('/api/match/player-stats');
+  _luStats = {};
+  if (ps.available) for (const pl of ps.players) _luStats[pl.id] = pl;
   const hx = d.home?.starting_xi || [], ax = d.away?.starting_xi || [];
   const hRows = parseFormation(d.home?.formation, hx.length);
   const aRows = parseFormation(d.away?.formation, ax.length);

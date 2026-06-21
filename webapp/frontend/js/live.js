@@ -2,12 +2,18 @@ renderSidebar('Live Matches');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const STATES = [
+  ['today', 'Today', "All of today's matches — live, upcoming and finished, by kickoff time."],
   ['live', 'Live', 'Matches in play right now.'],
   ['upcoming', 'Upcoming', 'Scheduled fixtures, soonest first.'],
   ['recent', 'Results', 'Recently finished matches.'],
 ];
-let data = { live: [], upcoming: [], recent: [] };
+let data = { today: [], live: [], upcoming: [], recent: [] };
 let active = null;
+
+const _isToday = (ts) => {
+  const d = new Date(ts * 1000), n = new Date();
+  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+};
 
 // group a flat match list by competition, preserving first-seen order
 function byCompetition(list) {
@@ -48,9 +54,13 @@ async function load() {
   btn.disabled = true;
   try {
     data = await api('/api/live');
-    // default tab: whatever has matches, preferring live > upcoming > results
+    // "Today" = every match kicking off today (live + scheduled + finished), by time
+    data.today = [...(data.live || []), ...(data.upcoming || []), ...(data.recent || [])]
+      .filter(m => _isToday(m.kickoff_ts))
+      .sort((a, b) => a.kickoff_ts - b.kickoff_ts);
+    // default tab: Today if it has matches, else live > upcoming > results
     if (!active || !data[active].length)
-      active = STATES.map(([k]) => k).find(k => data[k].length) || 'live';
+      active = STATES.map(([k]) => k).find(k => data[k].length) || 'today';
     if (data.updated_at)
       document.getElementById('updated').textContent =
         '· updated ' + new Date(data.updated_at.replace(' ', 'T')).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
