@@ -116,7 +116,7 @@ def _lineup_side(side: dict) -> dict:
         pl = p.get("player") or {}
         row = {"id": pl.get("id"), "name": pl.get("name"),
                "number": p.get("jerseyNumber") or p.get("shirtNumber"),
-               "position": p.get("position"),
+               "position": p.get("position"), "captain": bool(p.get("captain")),
                "rating": (p.get("statistics") or {}).get("rating")}
         (subs if p.get("substitute") else starters).append(row)
     return {"formation": side.get("formation"), "starting_xi": starters, "substitutes": subs}

@@ -168,7 +168,9 @@ def fetch_rows() -> list[dict]:
     return list(rows.values())
 
 
-def load_live() -> None:
+def load_live() -> int:
+    """Rebuild live_matches; returns the number of in-play matches (so a refresher
+    can pace itself -- poll fast while games are live, slow when idle)."""
     rows = fetch_rows()
     con = duckdb.connect(str(DB_PATH))
     con.execute(DDL)
@@ -185,6 +187,7 @@ def load_live() -> None:
     con.close()
     print(f"live_matches: {len(rows)} rows "
           f"({n_live} live, {n_fin} results, {n_up} upcoming).")
+    return n_live
 
 
 if __name__ == "__main__":

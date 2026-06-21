@@ -566,13 +566,16 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 
 /* stat rows */
 .stat-group{margin-bottom:14px}
-.stat-row{display:grid;grid-template-columns:48px 1fr 48px;grid-template-rows:auto auto;align-items:center;gap:2px 8px;padding:7px 2px}
-.stat-row .sv{font-weight:700;font-size:14px}
+.stat-row{display:grid;grid-template-columns:54px 1fr 54px;grid-template-rows:auto auto;align-items:center;gap:6px 10px;padding:9px 4px}
+.stat-row + .stat-row{border-top:1px solid rgba(255,255,255,.045)}
+.stat-row .sv{font-weight:700;font-size:14.5px;color:var(--muted2)}     /* trailing side dim by default */
 .stat-row .sv.away{text-align:right}
-.stat-row .sl{text-align:center;color:var(--muted);font-size:12px}
-.stat-row .sbar{grid-column:1/4;display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--border)}
-.stat-row .sbar i.h{background:var(--accent)}
-.stat-row .sbar i.a{background:#56607e}
+.stat-row .sv.lead{color:var(--text)}                                   /* leader bright */
+.stat-row .sl{text-align:center;color:var(--muted);font-size:12px;font-weight:500}
+.stat-row .sbar{grid-column:1/4;display:flex;gap:3px;height:7px;border-radius:4px;overflow:hidden;background:transparent}
+.stat-row .sbar i{display:block;border-radius:4px;min-width:2px}
+.stat-row .sbar i.h{background:linear-gradient(90deg,#5570f0,#7d5cf5)}
+.stat-row .sbar i.a{background:#e0556f;opacity:.85}
 
 /* lineups */
 .lu-col .lu-row{display:grid;grid-template-columns:26px 1fr auto auto;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:13px}
@@ -582,6 +585,32 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .lu-pos{color:var(--muted);font-size:11px}
 .lu-sub-h{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin:10px 0 2px}
 .ratingchip.sm{width:30px;height:22px;border-radius:5px;font-size:11.5px}
+
+/* ---- formation pitch (match lineups) ---- */
+.lp-head{display:flex;align-items:center;justify-content:center;gap:10px;padding:8px;font-size:13.5px;color:var(--muted)}
+.lp-head b{color:var(--text);font-weight:700}
+.lineup-pitch{position:relative;width:100%;max-width:540px;margin:0 auto;aspect-ratio:68/104;border-radius:12px;
+  border:1px solid rgba(255,255,255,.18);overflow:hidden;
+  background:repeating-linear-gradient(0deg,#16331f 0,#16331f 8.66%,#14301d 8.66%,#14301d 17.3%)}
+.lineup-pitch .lp-mid{position:absolute;left:0;right:0;top:50%;height:2px;background:rgba(255,255,255,.22)}
+.lineup-pitch .lp-circle{position:absolute;left:50%;top:50%;width:22%;aspect-ratio:1;transform:translate(-50%,-50%);
+  border:2px solid rgba(255,255,255,.22);border-radius:50%}
+.lineup-pitch .lp-spot{position:absolute;left:50%;top:50%;width:4px;height:4px;transform:translate(-50%,-50%);border-radius:50%;background:rgba(255,255,255,.3)}
+.lineup-pitch .lp-box{position:absolute;left:21%;width:58%;height:14%;border:2px solid rgba(255,255,255,.2)}
+.lineup-pitch .lp-box.top{top:-2px}
+.lineup-pitch .lp-box.bot{bottom:-2px}
+.lineup-pitch .lp-six{position:absolute;left:35%;width:30%;height:6%;border:2px solid rgba(255,255,255,.16)}
+.lineup-pitch .lp-six.top{top:-2px}
+.lineup-pitch .lp-six.bot{bottom:-2px}
+.luc{position:absolute;transform:translate(-50%,-50%);width:62px;text-align:center;cursor:pointer;z-index:2}
+.luc-dot{position:relative;display:flex;align-items:center;justify-content:center;width:34px;height:34px;margin:0 auto;
+  border-radius:50%;font-weight:700;font-size:13px;color:#fff;background:rgba(16,22,38,.94);border:2px solid #5570f0;transition:transform .1s}
+.luc.a .luc-dot{border-color:#e0556f}
+.luc:hover .luc-dot{transform:scale(1.12)}
+.luc-nm{display:block;margin-top:3px;font-size:10.5px;font-weight:600;color:#fff;text-shadow:0 1px 3px #000;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.luc-rt{position:absolute;right:-9px;bottom:-5px;font-size:9px;font-weight:700;color:#06140a;border-radius:4px;padding:0 3px;font-style:normal}
+.luc-cap{position:absolute;left:-7px;top:-5px;font-size:8px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:13px;height:13px;line-height:13px;font-style:normal}
 
 /* pitch + shot map */
 .pitch-wrap{padding:8px 0}

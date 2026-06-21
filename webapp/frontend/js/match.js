@@ -65,18 +65,54 @@ async function loadStats() {
         const hv = it.home_value, av = it.away_value;
         const numeric = typeof hv === 'number' && typeof av === 'number';
         const hp = numeric ? pct(hv, av) : 50;
+        // emphasise the leading side, dim the trailing one
+        const lead = numeric ? (hv > av ? 'home' : av > hv ? 'away' : '') : '';
+        const hcls = lead === 'home' ? 'lead' : lead === 'away' ? 'lo' : '';
+        const acls = lead === 'away' ? 'lead' : lead === 'home' ? 'lo' : '';
         return `<div class="stat-row">
-          <span class="sv home">${esc(it.home ?? '—')}</span>
+          <span class="sv home ${hcls}">${esc(it.home ?? '—')}</span>
           <span class="sl">${esc(it.name)}</span>
-          <span class="sv away">${esc(it.away ?? '—')}</span>
+          <span class="sv away ${acls}">${esc(it.away ?? '—')}</span>
           <div class="sbar"><i class="h" style="width:${hp}%"></i><i class="a" style="width:${100 - hp}%"></i></div>
         </div>`;
       }).join('')}
     </section>`).join('');
 }
 
-// ---- Lineups ----
-function lineupSide(s, label) {
+// ---- Lineups (formation pitch) ----
+const _surname = (n) => { const p = String(n || '').trim().split(' '); return p.length > 1 ? p[p.length - 1] : n; };
+
+// formation "4-2-3-1" + XI length -> row sizes [GK, ...lines] (back -> front), or
+// null if it doesn't add up (predicted / exotic -> caller falls back to a list).
+function parseFormation(f, xiLen) {
+  if (!f) return null;
+  const parts = String(f).split('-').map(n => parseInt(n, 10)).filter(n => n > 0);
+  if (!parts.length || parts.reduce((a, b) => a + b, 0) + 1 !== xiLen) return null;
+  return [1, ...parts];
+}
+// place each XI player at an {x,y} on a vertical pitch (0..1). Home defends the
+// bottom (GK low), away the top (mirrored), both attacking the halfway line.
+function placeSide(xi, rows, isHome) {
+  const out = [], n = rows.length; let idx = 0;
+  for (let ri = 0; ri < n; ri++) {
+    const k = rows[ri], t = n === 1 ? 0 : ri / (n - 1);
+    let y = 0.93 - t * (0.93 - 0.57);
+    if (!isHome) y = 1 - y;
+    for (let j = 0; j < k; j++) out.push({ x: 0.09 + 0.82 * ((j + 0.5) / k), y, p: xi[idx++] });
+  }
+  return out;
+}
+function chipHTML({ x, y, p }, isHome) {
+  const rt = p.rating != null
+    ? `<i class="luc-rt" style="background:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</i>` : '';
+  const cap = p.captain ? '<i class="luc-cap">C</i>' : '';
+  return `<div class="luc ${isHome ? 'h' : 'a'}" style="left:${(x * 100).toFixed(1)}%;top:${(y * 100).toFixed(1)}%"
+      onclick="location.href='/player.html?name=${encodeURIComponent(p.name)}'" title="${esc(p.name)}${p.position ? ' · ' + esc(p.position) : ''}">
+      <span class="luc-dot">${p.number ?? ''}${rt}${cap}</span>
+      <span class="luc-nm">${esc(_surname(p.name))}</span></div>`;
+}
+// fallback list (used when a formation can't be parsed, e.g. predicted lineups)
+function lineupSideList(s, label) {
   if (!s) return '';
   const row = (p) => `<div class="lu-row"><span class="lu-no">${p.number ?? ''}</span>
     <span class="lu-nm">${esc(p.name)}</span><span class="lu-pos">${esc(p.position || '')}</span>
@@ -87,12 +123,41 @@ function lineupSide(s, label) {
     ${(s.substitutes || []).length ? `<div class="lu-sub-h">Substitutes</div>${s.substitutes.map(row).join('')}` : ''}
   </section>`;
 }
+function subsCol(s, label) {
+  if (!s || !(s.substitutes || []).length) return '';
+  const row = (p) => `<div class="lu-row"><span class="lu-no">${p.number ?? ''}</span>
+    <span class="lu-nm" onclick="location.href='/player.html?name=${encodeURIComponent(p.name)}'" style="cursor:pointer">${esc(p.name)}</span>
+    <span class="lu-pos">${esc(p.position || '')}</span>
+    ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
+  return `<section class="card lu-col"><div class="card-h"><h3>${esc(label)} — subs</h3></div>${s.substitutes.map(row).join('')}</section>`;
+}
 async function loadLineups() {
   const d = await A('/api/match/lineups');
   if (!d.available) { body().innerHTML = empty('Lineups not published yet.'); return; }
   const note = d.confirmed ? '' : '<div class="placeholder-note" style="margin-bottom:10px">⚠ Predicted lineup — not yet confirmed.</div>';
-  body().innerHTML = note + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-    ${lineupSide(d.home, head?.home || 'Home')}${lineupSide(d.away, head?.away || 'Away')}</div>`;
+  const hx = d.home?.starting_xi || [], ax = d.away?.starting_xi || [];
+  const hRows = parseFormation(d.home?.formation, hx.length);
+  const aRows = parseFormation(d.away?.formation, ax.length);
+  if (hRows && aRows) {
+    const chips = placeSide(hx, hRows, true).map(c => chipHTML(c, true)).join('')
+                + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');
+    body().innerHTML = note + `
+      <section class="card">
+        <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b></div>
+        <div class="lineup-pitch">
+          <span class="lp-mid"></span><span class="lp-circle"></span><span class="lp-spot"></span>
+          <span class="lp-box top"></span><span class="lp-box bot"></span>
+          <span class="lp-six top"></span><span class="lp-six bot"></span>
+          ${chips}
+        </div>
+        <div class="lp-head h"><b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
+      </section>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
+        ${subsCol(d.home, head?.home || 'Home')}${subsCol(d.away, head?.away || 'Away')}</div>`;
+  } else {
+    body().innerHTML = note + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+      ${lineupSideList(d.home, head?.home || 'Home')}${lineupSideList(d.away, head?.away || 'Away')}</div>`;
+  }
 }
 
 // ---- Shot map ----
