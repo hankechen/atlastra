@@ -1183,6 +1183,8 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .pv-vs small{display:block}
 
 /* club crest in the lineup player modal */
-.pm-club{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.pm-club-crest{width:18px;height:18px;object-fit:contain;flex:none}
+.pm-club{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:15px;margin-top:8px}
+.pm-club-crest{width:28px;height:28px;object-fit:contain;flex:none}
 .pm-club-lbl{color:var(--muted)}
+.pm-club a{color:var(--text);font-weight:700}
+.pm-club a:hover{color:var(--accent)}
