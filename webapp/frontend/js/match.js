@@ -2,12 +2,12 @@ renderSidebar('Live Matches');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const EID = new URLSearchParams(location.search).get('id');
-const TABS = [['lineups', 'Lineups'], ['prediction', 'Prediction'], ['stats', 'Stats'],
+const TABS = [['preview', 'Preview'], ['lineups', 'Lineups'], ['prediction', 'Prediction'], ['stats', 'Stats'],
               ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
 const TAB_KEYS = TABS.map(([k]) => k);
 let head = null, timer = null;
-let active = TAB_KEYS.includes(new URLSearchParams(location.search).get('tab'))
-  ? new URLSearchParams(location.search).get('tab') : 'lineups';
+const _urlTab = new URLSearchParams(location.search).get('tab');
+let active = TAB_KEYS.includes(_urlTab) ? _urlTab : null;   // resolved after header (default by status)
 let playersCache = null, playerSort = { key: 'rating', dir: -1 };
 const heatCache = {};                       // player_id -> {points}
 
@@ -55,7 +55,7 @@ function renderTabs() {
   el.querySelectorAll('.tab').forEach(t => t.onclick = () => { active = t.dataset.k; renderTabs(); loadActive(); });
 }
 const body = () => document.getElementById('tabBody');
-const LOADERS = { stats: loadStats, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
+const LOADERS = { preview: loadPreview, stats: loadStats, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
 async function loadActive(refresh) {
   if (!refresh) body().innerHTML = '<section class="card"><div class="placeholder-note">Loading…</div></section>';
   try { await LOADERS[active](); } catch { body().innerHTML = '<section class="card"><div class="placeholder-note">Could not load this section.</div></section>'; }
@@ -441,18 +441,41 @@ async function loadHeatmaps() {
   renderTeam('home');
 }
 
+// ---- Preview (data-driven, works for upcoming national-team fixtures too) ----
+async function loadPreview() {
+  const d = await A('/api/fixture_preview');
+  if (!d.available) { body().innerHTML = empty('Preview not available for this match.'); return; }
+  const H = d.home, AW = d.away, p = d.prediction, h2h = d.h2h;
+  const fp = (f) => `<span class="pv-fp ${f === 'W' ? 'w' : f === 'L' ? 'l' : 'd'}">${f}</span>`;
+  const recent = (t) => `<div class="pv-recent"><div class="pv-form-pills">${t.recent.map(r => fp(r.result)).join('') || '<span class="muted" style="font-size:12px">No recent matches</span>'}</div>
+    ${t.recent.slice(0, 5).map(r => `<div class="pv-rec-row">${fp(r.result)}<b>${r.gf}–${r.ga}</b><span>vs ${esc(r.opponent)}</span></div>`).join('')}</div>`;
+  const keyc = (t) => `<div class="pv-keycol"><h5>${esc(t.name)}</h5>${(t.key || []).length
+    ? t.key.map(k => `<a class="pv-kpl" href="/player.html?name=${encodeURIComponent(k.player)}"><span class="pv-kpl-ph">${avatarHTML(k.photo, k.player)}</span><span class="pv-kpl-tx"><b>${esc(k.player)}</b><span>${esc(k.position)}${k.club ? ' · ' + esc(k.club) : ''}</span></span><span class="pv-kpl-rat">${k.rating}</span></a>`).join('')
+    : '<div class="muted" style="font-size:12px;padding:6px 0">No top-5-league players in the squad.</div>'}</div>`;
+  body().innerHTML = `
+    ${p ? `<section class="card pv-pred"><div class="card-h"><h3>Projection</h3><span class="muted" style="font-size:12px">bookmaker consensus</span></div>
+      <div class="pv-bar"><i class="h" style="width:${p.home}%">${p.home}%</i><i class="d" style="width:${p.draw}%">${p.draw}%</i><i class="a" style="width:${p.away}%">${p.away}%</i></div>
+      <div class="pv-bar-leg"><span><i class="dot h"></i>${esc(H.name)}</span><span><i class="dot d"></i>Draw</span><span><i class="dot a"></i>${esc(AW.name)}</span></div></section>` : ''}
+    <section class="card pv-form"><div class="card-h"><h3>Recent form</h3></div><div class="pv-keycols">${recent(H)}${recent(AW)}</div></section>
+    <section class="card"><div class="card-h"><h3>Key players</h3><span class="muted" style="font-size:12px">by Atlastra rating</span></div><div class="pv-keycols">${keyc(H)}${keyc(AW)}</div></section>
+    <section class="card"><div class="card-h"><h3>Head-to-head</h3></div>${h2h
+      ? `<div class="pv-h2h-tally"><div class="pv-h2h-t"><b>${h2h.home_wins ?? 0}</b><span>${esc(H.name)} wins</span></div><div class="pv-h2h-t"><b>${h2h.draws ?? 0}</b><span>Draws</span></div><div class="pv-h2h-t"><b>${h2h.away_wins ?? 0}</b><span>${esc(AW.name)} wins</span></div></div>`
+      : '<div class="muted" style="padding:8px">No previous meetings on record.</div>'}</section>`;
+}
+
 const empty = (msg) => `<section class="card"><div class="placeholder-note">${esc(msg)}</div></section>`;
 
 // ---- boot + live polling ----
 (async () => {
   if (!EID) { document.getElementById('hero').innerHTML = empty('No match selected.'); return; }
   await loadHeader();
+  if (!active) active = head?.status === 'notstarted' ? 'preview' : 'lineups';   // default by status
   renderTabs();
   await loadActive();
   if (head?.status === 'inprogress') {
     timer = setInterval(async () => {
       await loadHeader();
-      if (['stats', 'timeline', 'players', 'prediction'].includes(active)) loadActive(true);
+      if (['stats', 'timeline', 'players', 'prediction', 'preview'].includes(active)) loadActive(true);
       if (head?.status !== 'inprogress') clearInterval(timer);   // stop once final
     }, 30000);
   }
