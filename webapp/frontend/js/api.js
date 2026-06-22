@@ -156,9 +156,30 @@ function renderNotifPanel() {
   if (cl) cl.onclick = (e) => { e.preventDefault(); Notif.clear(); renderNotifPanel(); updateNotifBadge(); };
 }
 
+// Make the top-right avatar a link to the user's profile (shows their picture
+// or initials). Runs on every page alongside the notification bell.
+function initTopbarUser() {
+  const av = document.querySelector('.tb-icons .avatar');
+  if (!av) return;
+  const p = Store.profile();
+  av.style.cursor = 'pointer';
+  av.title = 'Your profile';
+  if (p.picture) {
+    av.style.backgroundImage = `url('${p.picture}')`;
+    av.style.backgroundSize = 'cover';
+    av.style.backgroundPosition = 'center';
+    av.textContent = '';
+  } else {
+    av.textContent = initials(p.name);
+    av.classList.add('avatar-ini');
+  }
+  av.onclick = () => { location.href = '/profile.html'; };
+}
+
 function initNotifications() {
   const icons = document.querySelector('.tb-icons');
   if (!icons || document.getElementById('nbell')) return;
+  initTopbarUser();
   [...icons.children].forEach(c => { if ((c.textContent || '').trim() === '🔔') c.remove(); });
   const wrap = document.createElement('div'); wrap.className = 'nbell-wrap';
   wrap.innerHTML = `<button class="nbell" id="nbell" title="Notifications">🔔<i class="nbadge" id="nbadge"></i></button><div class="npanel" id="npanel"></div>`;
