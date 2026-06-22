@@ -2273,6 +2273,33 @@ class SoccerDB:
         enough = r["big"]["minutes"] >= 270 and r["weak"]["minutes"] >= 270
         return {"available": enough, **r, "season": season}
 
+    def web_squad_key_players(self, names: list, top: int = 3, season: str = FOCUS_SEASON) -> list:
+        """Match SofaScore squad names to our warehouse and return the top-rated few
+        (for national-team match previews — most internationals play in the top-5)."""
+        seen, found = set(), []
+        for nm in (names or [])[:30]:
+            pid = self.find_player_id(nm, season)
+            if not pid or pid in seen:
+                continue
+            seen.add(pid)
+            r = self.con.execute(
+                """SELECT pl.player_name,
+                          COALESCE(f.detailed_position, f.main_position, pl.position_group) AS pos,
+                          COALESCE(c.rating, f.rating) AS rating, f.team, pe.fpid
+                   FROM players pl
+                   LEFT JOIN v_player_profile_full f ON f.player_id = pl.player_id
+                   LEFT JOIN player_ratings_combined c
+                          ON c.player_id = pl.player_id AND c.scope='league' AND c.season = ?
+                   LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                              WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                          ON pe.player_id = pl.player_id
+                   WHERE pl.player_id = ?""", [season, pid]).fetchone()
+            if r and r[2] is not None:
+                found.append({"player": r[0], "position": r[1], "rating": int(r[2]),
+                              "club": r[3], "photo": self.player_photo(r[4])})
+        found.sort(key=lambda x: -x["rating"])
+        return found[:top]
+
     def _table_exists(self, name: str) -> bool:
         return bool(self.con.execute(
             "SELECT 1 FROM information_schema.tables WHERE table_name = ?", [name]).fetchone())

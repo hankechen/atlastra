@@ -141,6 +141,12 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_card(q.get("name", ["Pedri"])[0], q.get("season", [None])[0])
         if path == "/api/preview":
             return d.web_match_preview(q.get("home", ["Arsenal"])[0], q.get("away", ["Chelsea"])[0])
+        if path == "/api/fixture_preview":         # SofaScore preview + key-player enrichment
+            pv = live_feed.fixture_preview(int(q.get("id", [0])[0]))
+            if pv.get("available"):
+                for side in ("home", "away"):
+                    pv[side]["key"] = d.web_squad_key_players(pv[side].pop("squad", []))
+            return pv
         if path == "/api/big_game_board":
             return d.web_big_game_board()
         if path == "/api/big_game":

@@ -375,3 +375,50 @@ def national_team(team_id: int) -> dict:
         "fixtures": [_team_event_row(e) for e in nxt][:8],
         "squad": squad,
     }
+
+
+def _form_for(team_id: int):
+    """A national/club team's last results from its own perspective (most recent first)."""
+    last = (_get(f"/team/{team_id}/events/last/0", ttl=180) or {}).get("events", [])
+    rows = []
+    for e in reversed(last):                       # API returns oldest-first
+        ht, at = e.get("homeTeam") or {}, e.get("awayTeam") or {}
+        is_home = ht.get("id") == team_id
+        gf = (e.get("homeScore") if is_home else e.get("awayScore") or {}).get("current")
+        ga = (e.get("awayScore") if is_home else e.get("homeScore") or {}).get("current")
+        if gf is None or ga is None:
+            continue
+        rows.append({"opponent": (at if is_home else ht).get("name"), "gf": gf, "ga": ga,
+                     "result": "W" if gf > ga else "D" if gf == ga else "L",
+                     "comp": (e.get("tournament") or {}).get("name")})
+        if len(rows) >= 6:
+            break
+    return rows
+
+
+def _squad_names(team_id: int):
+    ps = (_get(f"/team/{team_id}/players", ttl=600) or {}).get("players", [])
+    return [(p.get("player") or {}).get("name") for p in ps if (p.get("player") or {}).get("name")]
+
+
+def fixture_preview(eid: int) -> dict:
+    """SofaScore-driven preview for an upcoming fixture (works for national teams):
+    recent form, head-to-head, bookmaker projection, and squad names for the
+    server to enrich into key players from our ratings."""
+    h = header(eid)
+    if not h.get("available") or not h.get("home_id"):
+        return {"available": False, "error": "Fixture not found."}
+    hid, aid = h["home_id"], h["away_id"]
+    pred = prediction(eid)
+    td = (_get(f"/event/{eid}/h2h", ttl=600) or {}).get("teamDuel")
+    return {
+        "available": True, "event_id": eid, "competition": h.get("competition"),
+        "round": h.get("round"), "kickoff_ts": h.get("start_ts"), "status": h.get("status"),
+        "home": {"name": h["home"], "id": hid, "country": h.get("home_country"),
+                 "national": h.get("home_national"), "recent": _form_for(hid), "squad": _squad_names(hid)},
+        "away": {"name": h["away"], "id": aid, "country": h.get("away_country"),
+                 "national": h.get("away_national"), "recent": _form_for(aid), "squad": _squad_names(aid)},
+        "prediction": pred.get("consensus") if pred.get("available") else None,
+        "h2h": ({"home_wins": td.get("homeWins"), "draws": td.get("draws"),
+                 "away_wins": td.get("awayWins")} if td else None),
+    }

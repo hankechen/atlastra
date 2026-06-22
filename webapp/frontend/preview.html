@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atlastra — Match Preview</title>
+<title>Atlastra — Match Previews</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=20">
+<link rel="stylesheet" href="/css/styles.css?v=22">
 </head>
 <body>
 <div class="app">
@@ -16,21 +16,19 @@
       <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
     </div>
 
-    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Match Preview</b></div>
+    <div class="breadcrumb"><a href="/live.html">Live Matches</a> › <b>Match Previews</b></div>
     <div class="page-head">
-      <div><h2>Match Preview</h2><p>Pick two teams for a data-driven preview — recent xG form, key player matchups, head-to-head, and an xG-based projection.</p></div>
+      <div><h2>Match Previews</h2><p>Auto-generated, data-driven previews for upcoming fixtures — recent form, head-to-head, key players, and a bookmaker projection.</p></div>
     </div>
 
-    <section class="card pv-pick">
-      <div class="pv-pick-team"><label>Home</label><div class="card-search"><input id="homeSearch" placeholder="Home team…"><div class="card-dd" id="homeDD"></div></div></div>
-      <div class="pv-pick-vs">vs</div>
-      <div class="pv-pick-team"><label>Away</label><div class="card-search"><input id="awaySearch" placeholder="Away team…"><div class="card-dd" id="awayDD"></div></div></div>
-    </section>
-
-    <div id="pv-out"></div>
+    <div class="pv-layout">
+      <section class="card pv-list-card"><div class="card-h"><h3>Upcoming</h3><span class="muted" id="pvCount" style="font-size:12px"></span></div>
+        <div class="pv-fixtures" id="pvFixtures"></div></section>
+      <div id="pv-out"></div>
+    </div>
   </main>
 </div>
 <script src="/js/api.js?v=12"></script>
-<script src="/js/preview.js?v=1"></script>
+<script src="/js/preview.js?v=2"></script>
 </body>
 </html>
