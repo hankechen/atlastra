@@ -335,7 +335,6 @@ const NAV_ANALYTICS = [
   ['Find the Next…', 'compare', '/findnext.html'],
   ['Player Cards', 'players', '/card.html'],
   ['Football DNA Map', 'archetypes', '/dnamap.html'],
-  ['Match Preview', 'compare', '/preview.html'],
   ['Big Game Index', 'rankings', '/biggame.html'],
 ];
 
