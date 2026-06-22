@@ -135,6 +135,8 @@ async function load(name, careerStat = 'xa', season = null) {
   av.textContent = p.avg_rating == null ? '—' : (+p.avg_rating).toFixed(1);
   av.style.color = p.avg_rating == null ? '' : ratingColor(p.avg_rating);
   document.getElementById('compareLink').href = '/compare.html?name=' + encodeURIComponent(p.name);
+  document.getElementById('scoutLink').href = '/scoutreport.html?name=' + encodeURIComponent(p.name) +
+    (curSeason ? '&season=' + curSeason : '');
 
   // dual ratings (League + UCL, common-metric)
   const lg = p.ratings?.league, ucl = p.ratings?.ucl;

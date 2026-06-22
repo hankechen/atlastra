@@ -134,7 +134,11 @@ const NAV_MAIN = [
   ]],
   ['Search', 'search', '/search.html'],
 ];
-const NAV_ANALYTICS = [['Rankings & Awards', 'rankings', '/rankings.html']];
+const NAV_ANALYTICS = [
+  ['Rankings & Awards', 'rankings', '/rankings.html'],
+  ['Best XI on a Budget', 'teams', '/bestxi.html'],
+  ['Find the Next…', 'compare', '/findnext.html'],
+];
 
 // in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];
 // activeKey matches the value a page passes to renderSidebar().

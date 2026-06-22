@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Best XI on a Budget</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=14">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Best XI on a Budget</b></div>
+    <div class="page-head">
+      <div><h2>Best XI on a Budget</h2><p>You're the sporting director. Set a transfer budget and Atlastra builds the highest-rated legal XI it can afford — optimised on player ratings &amp; market values.</p></div>
+    </div>
+
+    <section class="card bxi-controls">
+      <div class="bxi-budget">
+        <label>Transfer budget</label>
+        <div class="bxi-brow">
+          <input type="range" id="budgetRange" min="50" max="1500" step="10" value="200">
+          <div class="bxi-bval">€<input type="number" id="budgetNum" min="20" max="3000" value="200">M</div>
+        </div>
+      </div>
+      <div class="bxi-form">
+        <label>Formation</label>
+        <div class="bxi-forms" id="forms"></div>
+      </div>
+      <button class="btn btn-primary" id="build">⚡ Build XI</button>
+    </section>
+
+    <div id="bxi-out"></div>
+  </main>
+</div>
+<script src="/js/api.js?v=5"></script>
+<script src="/js/bestxi.js?v=1"></script>
+</body>
+</html>

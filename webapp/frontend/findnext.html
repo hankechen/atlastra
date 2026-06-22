@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Find the Next…</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=14">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Find the Next…</b></div>
+    <div class="page-head">
+      <div><h2>Find the Next…</h2><p>Pick a legend and Atlastra finds the active players whose statistical style is the closest match — same shape-similarity as the live Similar Players engine.</p></div>
+    </div>
+
+    <section class="card"><div class="card-h"><h3>Choose a legend</h3></div><div id="legends" class="fn-legends"></div></section>
+    <div id="fn-out"></div>
+  </main>
+</div>
+<script src="/js/api.js?v=5"></script>
+<script src="/js/findnext.js?v=1"></script>
+</body>
+</html>

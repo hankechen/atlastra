@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from analytics.queries import SoccerDB  # noqa: E402
 from webapp import live_feed  # noqa: E402
+from webapp import scout_ai  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent / "frontend"
 PORT = 8000
@@ -56,6 +57,11 @@ def api(path: str, q: dict) -> dict | list:
         return live_feed.national_team(int(q.get("id", [0])[0]))
     if path == "/api/player_club":
         return live_feed.player_club(int(q.get("id", [0])[0]))
+    if path == "/api/scout_report":           # gather data (DB), then generate via Claude
+        with SoccerDB(read_only=True) as d:
+            data = d.web_player(q.get("name", ["Pedri"])[0], q.get("career_stat", ["xa"])[0],
+                                q.get("season", [None])[0])
+        return scout_ai.scout_report(data, refresh=q.get("refresh", ["0"])[0] == "1")
     with SoccerDB(read_only=True) as d:
         if path == "/api/overview":
             return d.web_overview()
@@ -99,6 +105,13 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_search(q.get("q", [""])[0])
         if path == "/api/match_search":
             return d.web_match_search(q.get("a", [""])[0], q.get("b", [""])[0])
+        if path == "/api/legends":
+            return d.web_legends()
+        if path == "/api/find_next":
+            return d.web_find_next(q.get("legend", ["xavi"])[0])
+        if path == "/api/best_xi":
+            return d.web_best_xi(float(q.get("budget", ["200"])[0]),
+                                 q.get("formation", ["4-3-3"])[0])
         if path == "/api/archetypes":
             return d.web_archetypes()
         if path == "/api/archetype":

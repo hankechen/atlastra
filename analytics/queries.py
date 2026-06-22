@@ -26,6 +26,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from archetype_defs import ARCHETYPES
 
+from legend_defs import LEGENDS, legend_list  # repo-root module (path set above)
+
 
 # small coercion helpers for the web bundles (JSON-friendly, NaN-safe)
 def _i(v):
@@ -1773,6 +1775,220 @@ class SoccerDB:
         return {"players": players, "stats": stat_rows,
                 "radar_axes": list(self.RADAR_AXES.keys()),
                 "season": _fmt_season(season)}
+
+    # ---------------------------------------------------------------- use case 8
+    #  "Find the Next X" -- match a legend's style template against current players
+    #  in the same percentile space the live similarity engine uses.
+    def web_legends(self) -> list[dict]:
+        return legend_list()
+
+    def web_find_next(self, legend_key: str, limit: int = 12,
+                      min_minutes: int = 900, min_rating: int = 60) -> dict:
+        import math
+        legend = LEGENDS.get(legend_key)
+        if not legend:
+            return {"available": False, "error": "Unknown legend."}
+        axes = list(self.RADAR_AXES)
+        groups = legend["match_groups"]
+        ph = ",".join(["?"] * len(groups))
+        df = self.con.execute(
+            f"SELECT player_id, metric_label, percentile FROM player_radar_metrics "
+            f"WHERE season = ? AND position_group IN ({ph})",
+            [FOCUS_SEASON, *groups]).df()
+        if df.empty:
+            return {"available": False, "error": "No comparison pool for this position."}
+        label2axis = {}
+        for ax, keys in self.RADAR_AXES.items():
+            for k in keys:
+                label2axis[k[0] if isinstance(k, tuple) else k] = ax
+        df["axis"] = df["metric_label"].map(label2axis)
+        df = df.dropna(subset=["axis"])
+        piv = df.groupby(["player_id", "axis"])["percentile"].mean().unstack("axis")
+        for ax in axes:
+            if ax not in piv.columns:
+                piv[ax] = 50.0
+        piv = piv[axes].fillna(50.0)
+
+        L = [float(legend["axes"][ax]) for ax in axes]
+        Lc = [v - 50 for v in L]
+        Ln = math.sqrt(sum(v * v for v in Lc)) or 1e-9
+
+        ids = [int(i) for i in piv.index]
+        mph = ",".join(["?"] * len(ids))
+        meta = self.con.execute(
+            f"""SELECT c.player_id, pl.player_name, c.rating, c.minutes,
+                       COALESCE(f.detailed_position, f.main_position, c.position_group) pos,
+                       f.team, f.market_value_eur AS mv, pe.fpid
+                FROM player_ratings_combined c JOIN players pl USING(player_id)
+                LEFT JOIN v_player_profile_full f ON f.player_id = c.player_id
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id = c.player_id
+                WHERE c.scope='league' AND c.season=? AND c.minutes>=? AND c.rating>=?
+                  AND c.player_id IN ({mph})""",
+            [FOCUS_SEASON, min_minutes, min_rating, *ids]).df()
+        metam = {int(r.player_id): r for r in meta.itertuples()}
+
+        rows = []
+        for pid, row in piv.iterrows():
+            pid = int(pid)
+            m = metam.get(pid)
+            if m is None:
+                continue
+            P = [float(row[ax]) for ax in axes]
+            Pc = [v - 50 for v in P]
+            Pn = math.sqrt(sum(v * v for v in Pc))
+            if Pn == 0:
+                continue
+            cos = sum(a * b for a, b in zip(Lc, Pc)) / (Ln * Pn)
+            rows.append({"player": m.player_name, "team": m.team, "position": m.pos,
+                         "rating": _i(m.rating),
+                         "market_value_eur": None if pd.isna(m.mv) else float(m.mv),
+                         "similarity": int(round(max(0.0, cos) * 100)), "_cos": cos,
+                         "photo": self.player_photo(m.fpid),
+                         "axes": [{"axis": ax, "value": _i(P[i])} for i, ax in enumerate(axes)]})
+        rows.sort(key=lambda r: -r["_cos"])
+        for r in rows:
+            r.pop("_cos", None)
+        return {"available": True,
+                "legend": {"key": legend_key, "name": legend["name"], "club": legend["club"],
+                           "era": legend["era"], "pos": legend["pos"], "blurb": legend["blurb"],
+                           "axes": [{"axis": ax, "value": legend["axes"][ax]} for ax in axes]},
+                "axes_order": axes, "groups": groups, "matches": rows[:limit]}
+
+    # ---------------------------------------------------------------- use case 4
+    #  "Best XI on a Budget" -- maximise total rating across a formation's positional
+    #  slots subject to a market-value cap (a sporting-director simulator).
+    _FORMATIONS = {
+        "4-3-3": {"GK": 1, "CB": 2, "FB": 2, "MID": 3, "W": 2, "ST": 1},
+        "4-4-2": {"GK": 1, "CB": 2, "FB": 2, "MID": 2, "W": 2, "ST": 2},
+        "3-5-2": {"GK": 1, "CB": 3, "FB": 2, "MID": 3, "W": 0, "ST": 2},
+        "3-4-3": {"GK": 1, "CB": 3, "FB": 2, "MID": 2, "W": 2, "ST": 1},
+    }
+    _GRP2CAT = {"GK": "GK", "CB": "CB", "FB": "FB", "DM": "MID", "CM": "MID",
+                "AM": "MID", "W": "W", "ST": "ST"}
+    _CAT_ORDER = ["GK", "CB", "FB", "MID", "W", "ST"]
+    _CAT_LABEL = {"GK": "Goalkeeper", "CB": "Centre-Back", "FB": "Full-Back",
+                  "MID": "Midfield", "W": "Winger", "ST": "Striker"}
+
+    def web_best_xi(self, budget_m: float, formation: str = "4-3-3",
+                    min_minutes: int = 600) -> dict:
+        form = self._FORMATIONS.get(formation)
+        if not form:
+            return {"available": False, "error": "Unknown formation."}
+        B = min(int(round(budget_m)), 3000)
+        if B <= 0:
+            return {"available": False, "error": "Budget must be positive."}
+
+        df = self.con.execute(
+            """SELECT c.player_id, pl.player_name, c.position_group grp, c.rating,
+                      f.team, f.market_value_eur AS mv,
+                      COALESCE(f.detailed_position, f.main_position, c.position_group) pos, pe.fpid
+               FROM player_ratings_combined c JOIN players pl USING(player_id)
+               LEFT JOIN v_player_profile_full f ON f.player_id = c.player_id
+               LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                          WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                      ON pe.player_id = c.player_id
+               WHERE c.scope='league' AND c.season=? AND c.minutes>=?
+                 AND f.market_value_eur IS NOT NULL AND f.market_value_eur > 0""",
+            [FOCUS_SEASON, min_minutes]).df()
+
+        pools = {cat: [] for cat in self._CAT_ORDER}
+        meta = {}
+        for r in df.itertuples():
+            cat = self._GRP2CAT.get(r.grp)
+            if not cat or form.get(cat, 0) == 0:
+                continue
+            cost = max(1, int(round(r.mv / 1e6)))
+            pid = int(r.player_id)
+            pools[cat].append((pid, int(r.rating), cost))
+            meta[pid] = {"player": r.player_name, "team": r.team, "position": r.pos,
+                         "rating": int(r.rating), "value_eur": float(r.mv), "value_m": cost,
+                         "cat": cat, "photo": self.player_photo(r.fpid)}
+
+        cats = [c for c in self._CAT_ORDER if form.get(c, 0) > 0]
+        min_cost, short = 0, []
+        for cat in cats:
+            k = form[cat]
+            cheap = sorted(pools[cat], key=lambda x: x[2])
+            if len(cheap) < k:
+                short.append(cat)
+            else:
+                min_cost += sum(c for _, _, c in cheap[:k])
+        if short:
+            return {"available": False,
+                    "error": "Not enough priced players for: "
+                             + ", ".join(self._CAT_LABEL[c] for c in short) + "."}
+        if B < min_cost:
+            return {"available": False, "min_budget": min_cost,
+                    "error": f"Budget too low — this formation needs at least "
+                             f"€{min_cost}M of priced players."}
+
+        # Spending beyond the cost of the unconstrained best XI can't raise the
+        # rating, so cap the DP budget there -> stays fast even at huge budgets.
+        maxneeded = sum(sum(c for _, _, c in sorted(pools[cat], key=lambda x: -x[1])[:form[cat]])
+                        for cat in cats)
+        budget = B               # what the user actually set (for display)
+        B = min(B, maxneeded)    # DP bound
+        NEG = -1
+
+        def cat_dp(pool, k):
+            rating = [[NEG] * (B + 1) for _ in range(k + 1)]
+            picks = [[None] * (B + 1) for _ in range(k + 1)]
+            rating[0][0] = 0
+            picks[0][0] = ()
+            for pid, rt, cost in pool:
+                if cost > B:
+                    continue
+                for j in range(k - 1, -1, -1):
+                    rj, pj, rj1, pj1 = rating[j], picks[j], rating[j + 1], picks[j + 1]
+                    for c in range(B - cost, -1, -1):
+                        if rj[c] == NEG:
+                            continue
+                        v = rj[c] + rt
+                        c2 = c + cost
+                        if v > rj1[c2]:
+                            rj1[c2] = v
+                            pj1[c2] = pj[c] + (pid,)
+            return rating[k], picks[k]
+
+        comb_r = [NEG] * (B + 1)
+        comb_p = [None] * (B + 1)
+        comb_r[0] = 0
+        comb_p[0] = ()
+        for cat in cats:
+            Ec, Ep = cat_dp(pools[cat], form[cat])
+            nr = [NEG] * (B + 1)
+            npk = [None] * (B + 1)
+            for a in range(B + 1):
+                if comb_r[a] == NEG:
+                    continue
+                ra, pa = comb_r[a], comb_p[a]
+                for b in range(B - a + 1):
+                    if Ec[b] == NEG:
+                        continue
+                    v = ra + Ec[b]
+                    c = a + b
+                    if v > nr[c]:
+                        nr[c] = v
+                        npk[c] = pa + Ep[b]
+            comb_r, comb_p = nr, npk
+
+        best_c = max(range(B + 1), key=lambda c: comb_r[c])
+        if comb_r[best_c] == NEG or comb_p[best_c] is None:
+            return {"available": False,
+                    "error": "Could not assemble a valid XI within that budget."}
+        xi = [meta[pid] for pid in comb_p[best_c]]
+        xi.sort(key=lambda p: self._CAT_ORDER.index(p["cat"]))
+        total = sum(p["rating"] for p in xi)
+        spent_m = sum(p["value_m"] for p in xi)
+        return {"available": True, "formation": formation, "budget_m": budget,
+                "spent_m": spent_m, "remaining_m": budget - spent_m,
+                "spent_eur": sum(p["value_eur"] for p in xi),
+                "total_rating": total, "avg_rating": round(total / len(xi), 1),
+                "min_budget": min_cost,
+                "slots": [{"cat": c, "label": self._CAT_LABEL[c], "count": form[c]} for c in cats],
+                "xi": xi}
 
     def _player_age(self, datamb_name: str) -> int | None:
         r = self.con.execute(
