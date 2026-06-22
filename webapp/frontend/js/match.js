@@ -234,9 +234,10 @@ async function openPlayerModal(id) {
   api('/api/player_club?id=' + id).then(cl => {
     const ce = wrap.querySelector('#pmClub');
     if (!ce || !cl || !cl.team) return;
+    const crest = cl.logo ? `<img class="pm-club-crest" src="${cl.logo}" alt="" onerror="this.replaceWith(document.createTextNode('🛡'))">` : '🛡';
     ce.innerHTML = cl.national
-      ? `🛡 ${esc(cl.team)}`
-      : `🛡 Club: <a onclick="event.stopPropagation();location.href='/team.html?name=${encodeURIComponent(cl.team)}'">${esc(cl.team)}</a>`;
+      ? `${crest}<span>${esc(cl.team)}</span>`
+      : `${crest}<span class="pm-club-lbl">Club:</span> <a onclick="event.stopPropagation();location.href='/team.html?name=${encodeURIComponent(cl.team)}'">${esc(cl.team)}</a>`;
   }).catch(() => {});
   try {
     const h = await A('/api/match/heatmap?player_id=' + id);

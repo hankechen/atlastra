@@ -326,7 +326,32 @@ def player_club(pid: int) -> dict:
     if not tm.get("name"):
         return {"available": False}
     return {"available": True, "team": tm.get("name"), "team_id": tm.get("id"),
-            "national": bool(tm.get("national"))}
+            "national": bool(tm.get("national")),
+            "logo": f"/api/sofa_team_img?id={tm['id']}" if tm.get("id") else None}
+
+
+_IMG_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def team_image(team_id: int):
+    """Fetch a SofaScore team crest (bytes, content-type) via the TLS bypass and
+    cache it -- the browser can't hit SofaScore directly, so the webapp proxies it."""
+    key = f"img:{team_id}"
+    now = time.time()
+    with _LOCK:
+        hit = _IMG_CACHE.get(key)
+        if hit and now - hit[0] < 86400:
+            return hit[1]
+    res = None
+    try:
+        r = tls_requests.get(f"{SOFASCORE_BASE}/team/{int(team_id)}/image", timeout=15)
+        if r.status_code == 200 and (r.headers.get("content-type") or "").startswith("image/"):
+            res = (r.content, r.headers["content-type"])
+    except Exception:  # noqa: BLE001
+        res = None
+    with _LOCK:
+        _IMG_CACHE[key] = (now, res)
+    return res
 
 
 def national_team(team_id: int) -> dict:

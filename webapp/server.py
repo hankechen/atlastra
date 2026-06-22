@@ -195,6 +195,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, b"", "text/plain")
             return
+        if u.path == "/api/sofa_team_img":             # SofaScore crest via TLS bypass
+            tid = parse_qs(u.query).get("id", [""])[0]
+            res = live_feed.team_image(int(tid)) if tid.isdigit() else None
+            if res:
+                self._send(200, res[0], res[1])
+            else:
+                self._send(404, b"", "text/plain")
+            return
         if u.path.startswith("/api/"):
             try:
                 data = api(u.path, parse_qs(u.query))
