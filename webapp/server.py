@@ -139,6 +139,8 @@ def api(path: str, q: dict) -> dict | list:
                                  q.get("formation", ["4-3-3"])[0])
         if path == "/api/card":
             return d.web_card(q.get("name", ["Pedri"])[0], q.get("season", [None])[0])
+        if path == "/api/preview":
+            return d.web_match_preview(q.get("home", ["Arsenal"])[0], q.get("away", ["Chelsea"])[0])
         if path == "/api/dna_map":
             return d.web_dna_map(int(q.get("min_minutes", ["900"])[0]))
         if path == "/api/archetypes":

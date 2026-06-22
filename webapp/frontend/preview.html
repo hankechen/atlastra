@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Match Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=20">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Match Preview</b></div>
+    <div class="page-head">
+      <div><h2>Match Preview</h2><p>Pick two teams for a data-driven preview — recent xG form, key player matchups, head-to-head, and an xG-based projection.</p></div>
+    </div>
+
+    <section class="card pv-pick">
+      <div class="pv-pick-team"><label>Home</label><div class="card-search"><input id="homeSearch" placeholder="Home team…"><div class="card-dd" id="homeDD"></div></div></div>
+      <div class="pv-pick-vs">vs</div>
+      <div class="pv-pick-team"><label>Away</label><div class="card-search"><input id="awaySearch" placeholder="Away team…"><div class="card-dd" id="awayDD"></div></div></div>
+    </section>
+
+    <div id="pv-out"></div>
+  </main>
+</div>
+<script src="/js/api.js?v=11"></script>
+<script src="/js/preview.js?v=1"></script>
+</body>
+</html>

@@ -2077,6 +2077,112 @@ class SoccerDB:
                 "axes": {"x": "Goal threat", "y": "Passing & defensive volume"},
                 "points": pts}
 
+    # ---------------------------------------------------------------- use case 19
+    #  Data-driven match preview: form + recent xG, key player matchups, head-to-head,
+    #  and an xG-based Poisson win/draw/win + scoreline projection.
+    _AREA = {"ST": "ATT", "W": "ATT", "AM": "MID", "CM": "MID", "DM": "MID",
+             "CB": "DEF", "FB": "DEF", "GK": "GK"}
+
+    def _team_key_players(self, team: str) -> dict:
+        rows = self.con.execute(
+            """SELECT pl.player_name, c.position_group AS grp, c.rating,
+                      COALESCE(v.goals, 0) AS goals, COALESCE(v.assists, 0) AS assists, pe.fpid
+               FROM player_ratings_combined c JOIN players pl USING(player_id)
+               JOIN v_player_profile_full f ON f.player_id = c.player_id
+               LEFT JOIN v_player_season_stats v ON v.player_id = c.player_id AND v.season = ?
+               LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                          WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                      ON pe.player_id = c.player_id
+               WHERE c.scope='league' AND c.season = ? AND f.team = ?
+               ORDER BY c.rating DESC""", [FOCUS_SEASON, FOCUS_SEASON, team]).df()
+        out = {}
+        for r in rows.itertuples():
+            area = self._AREA.get(r.grp, "MID")
+            if area not in out:
+                out[area] = {"player": r.player_name, "position": r.grp, "rating": int(r.rating),
+                             "goals": int(r.goals or 0), "assists": int(r.assists or 0),
+                             "photo": self.player_photo(r.fpid)}
+        return out
+
+    @staticmethod
+    def _poisson_pred(hs: dict, ats: dict) -> dict:
+        import math
+
+        def rate(s, k):
+            p = s.get("played") or 0
+            return (s.get(k, 0) / p) if p else 1.2
+        hxgf, hxga = rate(hs, "xg_for"), rate(hs, "xg_against")
+        axgf, axga = rate(ats, "xg_for"), rate(ats, "xg_against")
+        HOME = 1.10
+        lh = max(0.2, (hxgf + axga) / 2 * HOME)
+        la = max(0.2, (axgf + hxga) / 2 / HOME)
+        pm = lambda l, k: math.exp(-l) * l ** k / math.factorial(k)
+        ph = pd = pa = 0.0
+        best = (1, 1, -1.0)
+        for i in range(9):
+            for j in range(9):
+                p = pm(lh, i) * pm(la, j)
+                if i > j:
+                    ph += p
+                elif i == j:
+                    pd += p
+                else:
+                    pa += p
+                if p > best[2]:
+                    best = (i, j, p)
+        tot = (ph + pd + pa) or 1
+        return {"home_win": round(ph / tot * 100), "draw": round(pd / tot * 100),
+                "away_win": round(pa / tot * 100), "xg_home": round(lh, 2), "xg_away": round(la, 2),
+                "scoreline": f"{best[0]}-{best[1]}"}
+
+    def _h2h_summary(self, home: str, away: str) -> dict:
+        m = self.web_match_search(home, away)
+        matches = m.get("matches") or []
+        hw = dw = aw = gh = ga = 0
+        for x in matches:
+            if x["home"] == home:
+                hg, ag = x["home_goals"], x["away_goals"]
+            else:
+                hg, ag = x["away_goals"], x["home_goals"]
+            gh += hg or 0; ga += ag or 0
+            if hg > ag:
+                hw += 1
+            elif hg == ag:
+                dw += 1
+            else:
+                aw += 1
+        return {"played": len(matches), "home_wins": hw, "draws": dw, "away_wins": aw,
+                "goals_home": gh, "goals_away": ga, "recent": matches[:6]}
+
+    def web_match_preview(self, home: str, away: str) -> dict:
+        ht, at = self.web_team(home), self.web_team(away)
+        if not ht.get("team") or not at.get("team"):
+            return {"available": False, "error": "Couldn't find one of those teams."}
+
+        def pack(t):
+            s = t.get("stats") or {}
+            played = s.get("played") or 0
+            res = (t.get("results") or [])[:6]
+            n = len(res) or 1
+            return {
+                "name": t["team"], "logo": t.get("team_logo"), "league": t.get("league"),
+                "position": s.get("position"), "played": played, "points": s.get("points"),
+                "wins": s.get("wins"), "draws": s.get("draws"), "losses": s.get("losses"),
+                "gf": s.get("goals_for"), "ga": s.get("goals_against"),
+                "xgf_pg": round(s["xg_for"] / played, 2) if played and s.get("xg_for") is not None else None,
+                "xga_pg": round(s["xg_against"] / played, 2) if played and s.get("xg_against") is not None else None,
+                "rec_xgf": round(sum(r["xg_for"] for r in res) / n, 2) if res else None,
+                "rec_xga": round(sum(r["xg_against"] for r in res) / n, 2) if res else None,
+                "form": t.get("form") or [],
+                "recent": [{"opponent": r["opponent"], "venue": r["venue"], "gf": r["gf"],
+                            "ga": r["ga"], "result": r["result"], "xg_for": r["xg_for"],
+                            "xg_against": r["xg_against"]} for r in res],
+                "key": self._team_key_players(t["team"]),
+            }
+        return {"available": True, "home": pack(ht), "away": pack(at),
+                "prediction": self._poisson_pred(ht.get("stats") or {}, at.get("stats") or {}),
+                "h2h": self._h2h_summary(home, away)}
+
     def _player_age(self, datamb_name: str) -> int | None:
         r = self.con.execute(
             "SELECT age FROM player_wyscout WHERE player = ? AND age IS NOT NULL LIMIT 1",
