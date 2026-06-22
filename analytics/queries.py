@@ -2183,6 +2183,100 @@ class SoccerDB:
                 "prediction": self._poisson_pred(ht.get("stats") or {}, at.get("stats") or {}),
                 "h2h": self._h2h_summary(home, away)}
 
+    # ---------------------------------------------------------------- use case 2
+    #  Big Game Index — split a player's output vs top-half ("big games") and
+    #  bottom-half opposition, to flag big-game players vs flat-track bullies.
+    @staticmethod
+    def _per90(v, mins):
+        return round(v / mins * 90, 2) if mins else 0.0
+
+    def _big_game_badge(self, big90, weak90, big_min, weak_min):
+        if big_min < 360 or weak_min < 360:
+            return None
+        if big90 - weak90 >= 0.10 and big90 >= 0.30:
+            return "Big-Game Player"
+        if weak90 >= 0.45 and big90 <= weak90 * 0.55:
+            return "Flat-Track Bully"
+        return None
+
+    def _big_game_rows(self, season, min_split_minutes=360, name=None):
+        where = "WHERE l.season = ?"
+        args = [season]
+        if name:
+            pid = self.find_player_id(name, season)
+            if not pid:
+                return []
+            where += " AND l.player_id = ?"
+            args.append(pid)
+        df = self.con.execute(f"""
+            WITH agg AS (
+              SELECT l.player_id,
+                SUM(CASE WHEN opp_top_half THEN minutes ELSE 0 END) AS big_min,
+                SUM(CASE WHEN opp_top_half THEN goals+assists ELSE 0 END) AS big_ga,
+                SUM(CASE WHEN opp_top_half THEN xg+xa ELSE 0 END) AS big_xgi,
+                SUM(CASE WHEN opp_top_half THEN 1 ELSE 0 END) AS big_apps,
+                SUM(CASE WHEN NOT opp_top_half THEN minutes ELSE 0 END) AS weak_min,
+                SUM(CASE WHEN NOT opp_top_half THEN goals+assists ELSE 0 END) AS weak_ga,
+                SUM(CASE WHEN NOT opp_top_half THEN xg+xa ELSE 0 END) AS weak_xgi,
+                SUM(CASE WHEN NOT opp_top_half THEN 1 ELSE 0 END) AS weak_apps
+              FROM player_match_log l {where} GROUP BY l.player_id)
+            SELECT a.*, pl.player_name,
+                   COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position,
+                   f.team, c.rating, pe.fpid
+            FROM agg a JOIN players pl USING(player_id)
+            LEFT JOIN v_player_profile_full f ON f.player_id = a.player_id
+            LEFT JOIN player_ratings_combined c
+                   ON c.player_id = a.player_id AND c.scope='league' AND c.season = ?
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = a.player_id
+        """, [*args, season]).df()
+        out = []
+        for r in df.itertuples():
+            if not name and (r.big_min < min_split_minutes or r.weak_min < min_split_minutes):
+                continue
+            big90, weak90 = self._per90(r.big_ga, r.big_min), self._per90(r.weak_ga, r.weak_min)
+            out.append({
+                "player": r.player_name, "team": r.team, "position": r.position,
+                "rating": None if pd.isna(r.rating) else int(r.rating),
+                "photo": self.player_photo(r.fpid),
+                "big": {"apps": int(r.big_apps), "minutes": int(r.big_min), "ga": int(r.big_ga),
+                        "ga90": big90, "xgi90": self._per90(r.big_xgi, r.big_min)},
+                "weak": {"apps": int(r.weak_apps), "minutes": int(r.weak_min), "ga": int(r.weak_ga),
+                         "ga90": weak90, "xgi90": self._per90(r.weak_xgi, r.weak_min)},
+                "delta": round(big90 - weak90, 2),
+                "badge": self._big_game_badge(big90, weak90, r.big_min, r.weak_min),
+            })
+        return out
+
+    def web_big_game_board(self, season: str = FOCUS_SEASON, limit: int = 18) -> dict:
+        if not self._table_exists("player_match_log"):
+            return {"available": False, "error": "Match-log data not loaded yet."}
+        rows = [r for r in self._big_game_rows(season) if r["team"]]   # current-squad players only
+        if not rows:
+            return {"available": False, "error": "No match-log data for this season yet."}
+        # big-game players: meaningful big output AND step up; bullies: fade vs strong
+        clutch = [r for r in rows if r["badge"] == "Big-Game Player"]
+        clutch.sort(key=lambda r: (-r["delta"], -r["big"]["ga90"]))
+        bully = [r for r in rows if r["badge"] == "Flat-Track Bully" and r["weak"]["ga"] >= 3]
+        bully.sort(key=lambda r: (r["delta"], -r["weak"]["ga90"]))
+        return {"available": True, "season": season, "count": len(rows),
+                "clutch": clutch[:limit], "bully": bully[:limit]}
+
+    def web_big_game_player(self, name: str, season: str = FOCUS_SEASON) -> dict:
+        if not self._table_exists("player_match_log"):
+            return {"available": False}
+        rows = self._big_game_rows(season, name=name)
+        if not rows:
+            return {"available": False}
+        r = rows[0]
+        enough = r["big"]["minutes"] >= 270 and r["weak"]["minutes"] >= 270
+        return {"available": enough, **r, "season": season}
+
+    def _table_exists(self, name: str) -> bool:
+        return bool(self.con.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name = ?", [name]).fetchone())
+
     def _player_age(self, datamb_name: str) -> int | None:
         r = self.con.execute(
             "SELECT age FROM player_wyscout WHERE player = ? AND age IS NOT NULL LIMIT 1",

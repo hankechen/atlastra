@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atlastra — Rankings</title>
+<title>Atlastra — Big Game Index</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=9">
+<link rel="stylesheet" href="/css/styles.css?v=21">
 </head>
 <body>
 <div class="app">
@@ -16,17 +16,15 @@
       <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
     </div>
 
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Big Game Index</b></div>
     <div class="page-head">
-      <div><h2>Rankings</h2><p id="rankNote">Top 20 by Atlastra rating — by position, or the best individual seasons of all time.</p></div>
+      <div><h2>Big Game Index</h2><p>Goal involvements per 90 split by opponent quality — vs <b>top-half</b> ("big games") and <b>bottom-half</b> sides. Who steps up against the best, and who feasts on weak opposition.</p></div>
     </div>
 
-    <div class="dir-scope" id="modeTabs"></div>
-    <div class="dir-scope" id="posScope" style="margin-top:8px"></div>
-    <div class="filters" id="posTabs"></div>
-    <div id="rankList"></div>
+    <div id="bg-out"></div>
   </main>
 </div>
 <script src="/js/api.js?v=12"></script>
-<script src="/js/rankings.js?v=5"></script>
+<script src="/js/biggame.js?v=1"></script>
 </body>
 </html>

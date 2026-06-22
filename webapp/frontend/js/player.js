@@ -149,6 +149,22 @@ async function load(name, careerStat = 'xa', season = null) {
   wb.onclick = () => { Store.toggle('watchlist', item); syncW(); };
   syncF(); syncW();
 
+  // Big Game Index card (only if match-log data is available for this player)
+  api('/api/big_game?name=' + encodeURIComponent(p.name)).then((b) => {
+    if (!b || !b.available) return;
+    const badge = b.badge === 'Big-Game Player' ? '<span class="bgp-badge big">⭐ Big-Game Player</span>'
+      : b.badge === 'Flat-Track Bully' ? '<span class="bgp-badge bully">🛑 Flat-Track Bully</span>'
+        : '<span class="bgp-badge neutral">Consistent across opposition</span>';
+    const MAX = Math.max(0.4, b.big.ga90, b.weak.ga90);
+    const bar = (v, cls) => `<div class="bgp-bar"><i class="${cls}" style="width:${Math.min(100, v / MAX * 100)}%"></i></div>`;
+    document.getElementById('bigGame').innerHTML = `<div class="bgp">${badge}
+      <div class="bgp-split">
+        <div class="bgp-row"><label>vs Top-half · ${b.big.apps} apps <b>${b.big.ga90.toFixed(2)} G+A/90</b></label>${bar(b.big.ga90, 'big')}</div>
+        <div class="bgp-row"><label>vs Bottom-half · ${b.weak.apps} apps <b>${b.weak.ga90.toFixed(2)} G+A/90</b></label>${bar(b.weak.ga90, 'weak')}</div>
+      </div></div>`;
+    document.getElementById('bigGameCard').style.display = '';
+  }).catch(() => {});
+
   // dual ratings (League + UCL, common-metric)
   const lg = p.ratings?.league, ucl = p.ratings?.ucl;
   document.getElementById('rLeague').textContent = lg?.rating ?? '—';

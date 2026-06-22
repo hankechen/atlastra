@@ -34,6 +34,7 @@ Phase One use cases are live in a web UI (**Atlastra**), alongside the following
 21. **Football DNA Map** — every outfielder placed on a 2D style map (PCA on z-scored per-90 features) where distance = dissimilarity; pan/zoom and spotlight a player's nearest matches.
 22. **User profile & follows** — follow players and teams, a watchlist and saved comparisons, an editable identity profile (picture, bio, favourite clubs/players, location, member-since), and in-app/desktop **notifications** when followed teams/players kick off, go live, score, or finish — all stored locally in the browser (no account needed).
 23. **Match Preview** — pick two teams for a data-driven preview: recent xG form, season profile comparison, key player matchups by area, head-to-head record, and an xG-based Poisson win/draw/win + projected scoreline.
+24. **Big Game Index** — each player's goal involvements per 90 split by opponent quality (vs top-half "big games" vs bottom-half sides), flagging **Big-Game Players** who step up against the best vs **Flat-Track Bullies** who feast on weak sides. Built from a per-player per-match log (`player_match_log`, scraped from Understat); shown as a leaderboard and a per-profile badge.
 
 ## Data sources
 The suggested APIs (Football API, Sportmonks, RapidAPI) were not used; the data is assembled by scraping/ingesting public sources into the DuckDB warehouse:

@@ -100,9 +100,16 @@
       <section class="card"><div class="card-h"><h3>Season Heatmap</h3><span class="muted" id="heatNote" style="font-size:12px"></span></div>
         <canvas id="heat" width="380" height="246"></canvas></section>
     </div>
+
+    <!-- Big Game Index (use case 2) — shown only when match-log data exists -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card" id="bigGameCard" style="display:none">
+        <div class="card-h"><h3>Big Game Index ⓘ</h3><a class="see" href="/biggame.html">Leaderboard →</a></div>
+        <div id="bigGame"></div></section>
+    </div>
   </main>
 </div>
-<script src="/js/api.js?v=11"></script>
-<script src="/js/player.js?v=11"></script>
+<script src="/js/api.js?v=12"></script>
+<script src="/js/player.js?v=12"></script>
 </body>
 </html>

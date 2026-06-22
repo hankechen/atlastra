@@ -1115,3 +1115,41 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .pv-h2h-row>span:first-child{color:var(--muted);font-size:11.5px}
 .pv-h2h-row b:nth-of-type(1){text-align:right}.pv-h2h-row b:nth-of-type(2){text-align:left}
 .pv-h2h-sc{font-weight:800;background:var(--bg);padding:2px 9px;border-radius:6px}
+
+/* ===== Big Game Index (use case 2) ===== */
+.bg-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:980px){.bg-grid{grid-template-columns:1fr}}
+.bg-col{padding:14px}
+.bg-col h3.ok{color:#2fbf71}.bg-col h3.bad{color:#e5616a}
+.bg-row{display:grid;grid-template-columns:24px 38px 1fr 200px 54px;align-items:center;gap:11px;
+  padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text)}
+.bg-row:last-child{border-bottom:none}.bg-row:hover{background:var(--card2)}
+.bg-rank{color:var(--muted);font-weight:700;font-size:12px;text-align:center}
+.bg-ph{width:38px;height:38px;border-radius:50%;position:relative;overflow:hidden;background:#1b2436;flex:none}
+.bg-ph img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.bg-ph .ini{display:flex;width:100%;height:100%;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#aab3c6}
+.bg-id{min-width:0}.bg-id b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bg-id span{font-size:11px;color:var(--muted)}
+.bg-split{display:flex;flex-direction:column;gap:6px}
+.bg-sb label{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin-bottom:2px;font-weight:600}
+.bg-sb label i{font-style:normal;color:var(--text);font-weight:700}
+.bg-bar{display:block;height:6px;border-radius:4px;background:var(--border2);overflow:hidden}
+.bg-bar i{display:block;height:100%;border-radius:4px}
+.bg-bar i.big{background:linear-gradient(90deg,#2fbf71,#7ee0a6)}
+.bg-bar i.weak{background:#8a93a6}
+.bg-delta{font-size:14px;font-weight:800;text-align:right}
+.bg-delta.up{color:#2fbf71}.bg-delta.down{color:#e5616a}
+.bg-note{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.6;max-width:900px}
+/* profile big-game card */
+.bgp{display:flex;flex-direction:column;gap:10px}
+.bgp-badge{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:5px 12px;border-radius:20px;
+  font-size:12px;font-weight:800}
+.bgp-badge.big{background:rgba(47,191,113,.16);color:#7ee0a6}
+.bgp-badge.bully{background:rgba(229,97,106,.16);color:#f0a0a5}
+.bgp-badge.neutral{background:var(--card2);color:var(--muted)}
+.bgp-split{display:flex;flex-direction:column;gap:9px;margin-top:2px}
+.bgp-row label{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:3px}
+.bgp-row label b{color:var(--text)}
+.bgp-bar{height:8px;border-radius:5px;background:var(--border2);overflow:hidden}
+.bgp-bar i{display:block;height:100%;border-radius:5px}
+.bgp-bar i.big{background:linear-gradient(90deg,#2fbf71,#7ee0a6)}.bgp-bar i.weak{background:#8a93a6}
