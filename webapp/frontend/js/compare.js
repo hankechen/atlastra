@@ -66,11 +66,13 @@ async function render() {
   renderChips();
   refreshPicker();
   const board = document.getElementById('board'), empty = document.getElementById('empty');
+  document.getElementById('saveCmp').style.display = names.length >= 2 ? '' : 'none';
   if (names.length < 2) {
     board.style.display = 'none'; empty.style.display = '';
     empty.textContent = 'Add at least two players to compare.';
     return;
   }
+  syncSaveBtn();
   const qs = names.map(n => 'name=' + encodeURIComponent(n))
     .concat(addedStats.map(s => 'stat=' + encodeURIComponent(s))).join('&');
   const d = await api('/api/compare?' + qs);
@@ -158,5 +160,19 @@ function drawRadar(d) {
 document.getElementById('searchBox').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.value.trim()) { addPlayer(e.target.value); e.target.value = ''; }
 });
+
+// save / unsave the current comparison (localStorage via Store)
+const cmpId = () => names.slice().sort().join(' vs ');
+function syncSaveBtn() {
+  const b = document.getElementById('saveCmp');
+  const on = Store.has('comparisons', cmpId());
+  b.classList.toggle('on', on);
+  b.textContent = on ? '✓ Saved' : '★ Save comparison';
+}
+document.getElementById('saveCmp').onclick = () => {
+  if (names.length < 2) return;
+  Store.toggle('comparisons', { id: cmpId(), names: names.slice(), stats: addedStats.slice(), label: names.join('  vs  ') });
+  syncSaveBtn();
+};
 
 render();

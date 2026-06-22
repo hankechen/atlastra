@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Player Card</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=16">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/players.html">Players</a> › <b id="crumb">Player Card</b></div>
+    <div class="page-head">
+      <div><h2>Player Card</h2><p>A collectible card for any player — rating, archetype and top-five percentile stats. Download it or share it.</p></div>
+    </div>
+
+    <section class="card card-host">
+      <div class="card-stage">
+        <div class="card-canvas-wrap"><canvas id="card" width="680" height="972"></canvas></div>
+        <div class="card-side">
+          <label class="cs-label">Pick a player</label>
+          <div class="card-search">
+            <input id="cardSearch" placeholder="Type a name… e.g. Bellingham">
+            <div class="card-dd" id="cardDD"></div>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-primary" id="dl">⬇ Download PNG</button>
+            <button class="btn btn-ghost" id="sh">↗ Share</button>
+          </div>
+          <a class="card-profile-link" id="profileLink" href="#">View full profile →</a>
+          <p class="cs-hint">Stats are percentile ranks vs the same position in the top-5 leagues. The big number is the position-fair common-metric rating.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=9"></script>
+<script src="/js/card.js?v=1"></script>
+</body>
+</html>

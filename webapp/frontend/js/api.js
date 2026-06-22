@@ -4,6 +4,180 @@ async function api(path) {
   if (!r.ok) throw new Error((await r.json()).error || r.statusText);
   return r.json();
 }
+
+// ---- Store: client-side personalization (no backend) -------------------------
+// Follows, watchlist and saved comparisons persist in localStorage. Lists hold
+// items keyed by a stable `id`; toggle() flips membership and returns the new
+// state. An 'atla-store' event lets open views refresh live.
+const ATLA_KEY = 'atlastra_store_v1';
+const Store = {
+  _read() { try { return JSON.parse(localStorage.getItem(ATLA_KEY)) || {}; } catch { return {}; } },
+  _write(s) { try { localStorage.setItem(ATLA_KEY, JSON.stringify(s)); } catch { /* quota */ }
+    window.dispatchEvent(new Event('atla-store')); },
+  list(k) { return this._read()[k] || []; },
+  has(k, id) { return this.list(k).some(x => x.id === id); },
+  count(k) { return this.list(k).length; },
+  toggle(k, item) {
+    const s = this._read(), a = s[k] || [];
+    const i = a.findIndex(x => x.id === item.id);
+    let added;
+    if (i >= 0) { a.splice(i, 1); added = false; } else { a.unshift({ ...item, ts: Date.now() }); added = true; }
+    s[k] = a; this._write(s); return added;
+  },
+  remove(k, id) { const s = this._read(); s[k] = (s[k] || []).filter(x => x.id !== id); this._write(s); },
+  // full user profile (identity). memberSince is stamped once, silently.
+  profile() {
+    const s = this._read(); s.profile = s.profile || {};
+    if (s.profile.name == null && s.profileName) s.profile.name = s.profileName;   // migrate legacy
+    if (!s.profile.memberSince) {
+      s.profile.memberSince = Date.now();
+      try { localStorage.setItem(ATLA_KEY, JSON.stringify(s)); } catch { /* quota */ }
+    }
+    return Object.assign({ name: 'Guest Scout', username: '', bio: '', picture: '',
+      country: '', city: '', favClubs: [], favPlayers: [], memberSince: s.profile.memberSince }, s.profile);
+  },
+  setProfile(patch) { const s = this._read(); s.profile = Object.assign({}, s.profile, patch); this._write(s); },
+  name() { return this.profile().name || 'Guest Scout'; },
+  setName(n) { this.setProfile({ name: (n || '').trim() || 'Guest Scout' }); },
+};
+
+// ---- Notifications: poll the live feed, alert on followed teams/players --------
+// No push backend — a client-side engine polls /api/live (+ /api/match/timeline
+// for live scorers) every 45s, diffs against followed teams/players, and raises
+// in-app notifications (and real desktop ones if the user opts in). State + the
+// notification log live in localStorage so they survive across pages/reloads.
+const NOTIF_KEY = 'atlastra_notifs_v1';
+const Notif = {
+  _read() { try { return JSON.parse(localStorage.getItem(NOTIF_KEY)) || {}; } catch { return {}; } },
+  _write(s) { try { localStorage.setItem(NOTIF_KEY, JSON.stringify(s)); } catch { /* quota */ } },
+  items() { return this._read().items || []; },
+  unread() { return this.items().filter(i => !i.read).length; },
+  add(it) {
+    const s = this._read(); s.items = s.items || [];
+    if (s.items.some(i => i.id === it.id)) return false;
+    s.items.unshift({ ...it, read: false }); s.items = s.items.slice(0, 80); this._write(s); return true;
+  },
+  markRead() { const s = this._read(); (s.items || []).forEach(i => i.read = true); this._write(s); },
+  clear() { const s = this._read(); s.items = []; this._write(s); },
+  state() { return this._read().state || {}; },
+  saveState(st) { const s = this._read(); s.state = st; this._write(s); },
+  desktop() { return !!this._read().desktop; },
+  setDesktop(v) { const s = this._read(); s.desktop = !!v; this._write(s); },
+};
+
+function timeAgo(ts) {
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+let _notifTimer = null;
+async function notifTick() {
+  const teams = new Set(Store.list('teams').map(t => t.name));
+  const players = Store.list('players');
+  players.forEach(p => { if (p.team) teams.add(p.team); });
+  const followedPlayers = new Set(players.map(p => p.name));
+  if (!teams.size) { updateNotifBadge(); return; }
+  let d; try { d = await api('/api/live?recent=60&upcoming=60'); } catch { return; }
+  const st = Notif.state(); st.status = st.status || {}; st.kick = st.kick || {}; st.goals = st.goals || {};
+  const firstRun = !st.seeded;
+  const now = Date.now() / 1000;
+  const all = [...(d.live || []), ...(d.upcoming || []), ...(d.recent || [])];
+  const mine = all.filter(m => teams.has(m.home) || teams.has(m.away));
+  const fresh = [];
+  for (const m of mine) {
+    const eid = m.event_id, vs = `${m.home} vs ${m.away}`, href = `/match.html?id=${eid}`;
+    const prev = st.status[eid];
+    if (m.status === 'notstarted' && m.kickoff_ts && m.kickoff_ts > now && m.kickoff_ts - now < 7200 && !st.kick[eid]) {
+      st.kick[eid] = 1;
+      fresh.push({ id: 'k' + eid, ts: Date.now(), icon: '⏰', title: vs + ' — kicks off soon',
+        body: 'Kickoff ' + new Date(m.kickoff_ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), href });
+    }
+    if (m.status === 'inprogress' && prev !== 'inprogress') {
+      const sc = m.home_score != null ? ` (${m.home_score}-${m.away_score}${m.minute ? ", " + m.minute + "'" : ''})` : '';
+      fresh.push({ id: 'live' + eid, ts: Date.now(), icon: '🟢', title: vs + ' is live' + sc, body: m.competition || '', href });
+    }
+    if (m.status === 'finished' && prev && prev !== 'finished') {
+      fresh.push({ id: 'ft' + eid, ts: Date.now(), icon: '🏁', title: `FT: ${m.home} ${m.home_score}-${m.away_score} ${m.away}`, body: m.competition || '', href });
+    }
+    st.status[eid] = m.status;
+  }
+  // live scorers (with names) via the timeline — only for live matches we care about
+  for (const m of mine.filter(x => x.status === 'inprogress')) {
+    let tl; try { tl = await api('/api/match/timeline?id=' + m.event_id); } catch { continue; }
+    for (const ev of (tl.events || [])) {
+      if (ev.type !== 'goal') continue;
+      const key = m.event_id + '-' + ev.minute + '-' + (ev.player || '');
+      if (st.goals[key]) continue;
+      st.goals[key] = 1;
+      if (firstRun) continue;                 // seed silently — don't replay past goals
+      const followed = ev.player && followedPlayers.has(ev.player);
+      const team = ev.side === 'home' ? m.home : m.away;
+      fresh.push({ id: 'g' + key, ts: Date.now(), icon: followed ? '⭐' : '⚽',
+        title: followed ? `${ev.player} scored!` : `Goal — ${team}`,
+        body: `${m.home} ${ev.home_score}-${ev.away_score} ${m.away} · ${ev.minute}'`,
+        href: `/match.html?id=${m.event_id}`, big: followed });
+    }
+  }
+  st.seeded = 1; Notif.saveState(st);
+  for (const f of fresh) {
+    if (Notif.add(f) && Notif.desktop() && 'Notification' in window && Notification.permission === 'granted') {
+      try { new Notification('Atlastra · ' + f.title, { body: f.body }); } catch { /* */ }
+    }
+  }
+  updateNotifBadge();
+  const panel = document.getElementById('npanel');
+  if (panel && panel.classList.contains('open')) renderNotifPanel();
+}
+
+function updateNotifBadge() {
+  const b = document.getElementById('nbadge'); if (!b) return;
+  const n = Notif.unread(); b.textContent = n > 9 ? '9+' : n; b.style.display = n ? 'flex' : 'none';
+}
+
+function renderNotifPanel() {
+  const p = document.getElementById('npanel'); if (!p) return;
+  const items = Notif.items();
+  const permBtn = ('Notification' in window && Notification.permission !== 'granted')
+    ? `<button class="npanel-perm" id="nperm">🔔 Enable desktop alerts</button>` : '';
+  const list = items.length ? items.map(i => `
+    <a class="nitem ${i.read ? '' : 'unread'} ${i.big ? 'big' : ''}" href="${i.href || '#'}">
+      <span class="nitem-ic">${i.icon || '🔔'}</span>
+      <span class="nitem-tx"><b>${i.title}</b><span>${i.body || ''}</span></span>
+      <span class="nitem-ago">${timeAgo(i.ts)}</span></a>`).join('')
+    : `<div class="npanel-empty">No alerts yet.<br>Follow players and teams to get notified when they play or score.</div>`;
+  p.innerHTML = `<div class="npanel-h"><b>Notifications</b>${items.length ? '<button id="nclear">Clear</button>' : ''}</div>
+    ${permBtn}<div class="npanel-list">${list}</div>`;
+  const pb = document.getElementById('nperm');
+  if (pb) pb.onclick = (e) => { e.preventDefault(); Notification.requestPermission().then(r => { if (r === 'granted') Notif.setDesktop(true); renderNotifPanel(); }); };
+  const cl = document.getElementById('nclear');
+  if (cl) cl.onclick = (e) => { e.preventDefault(); Notif.clear(); renderNotifPanel(); updateNotifBadge(); };
+}
+
+function initNotifications() {
+  const icons = document.querySelector('.tb-icons');
+  if (!icons || document.getElementById('nbell')) return;
+  [...icons.children].forEach(c => { if ((c.textContent || '').trim() === '🔔') c.remove(); });
+  const wrap = document.createElement('div'); wrap.className = 'nbell-wrap';
+  wrap.innerHTML = `<button class="nbell" id="nbell" title="Notifications">🔔<i class="nbadge" id="nbadge"></i></button><div class="npanel" id="npanel"></div>`;
+  icons.prepend(wrap);
+  const panel = document.getElementById('npanel');
+  document.getElementById('nbell').onclick = (e) => {
+    e.stopPropagation();
+    const open = panel.classList.toggle('open');
+    if (open) { renderNotifPanel(); Notif.markRead(); updateNotifBadge(); }
+  };
+  document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) panel.classList.remove('open'); });
+  updateNotifBadge();
+  notifTick();
+  if (_notifTimer) clearInterval(_notifTimer);
+  _notifTimer = setInterval(notifTick, 45000);
+  window.addEventListener('atla-store', () => notifTick());
+}
+if (document.readyState !== 'loading') initNotifications();
+else document.addEventListener('DOMContentLoaded', initNotifications);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 const initials = (n) => n.replace(/[^A-Za-z .'-]/g, '').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 const eurM = (v) => v == null ? '—' : '€' + (v / 1e6).toFixed(0) + 'M';
@@ -138,6 +312,8 @@ const NAV_ANALYTICS = [
   ['Rankings & Awards', 'rankings', '/rankings.html'],
   ['Best XI on a Budget', 'teams', '/bestxi.html'],
   ['Find the Next…', 'compare', '/findnext.html'],
+  ['Player Cards', 'players', '/card.html'],
+  ['Football DNA Map', 'archetypes', '/dnamap.html'],
 ];
 
 // in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];
@@ -158,11 +334,12 @@ function renderSubtabs(active) {
     `<a href="${href}" class="${key === active ? 'active' : ''}">${label}</a>`).join('');
 }
 const NAV_MINE = [
-  ['My Profile', 'profile', '#'], ['My Players', 'myplayers', '#'],
-  ['My Comparisons', 'compare', '#'], ['Watchlist', 'watchlist', '#'],
+  ['My Profile', 'profile', '/profile.html'], ['My Players', 'myplayers', '/profile.html?tab=players'],
+  ['My Comparisons', 'compare', '/profile.html?tab=comparisons'], ['Watchlist', 'watchlist', '/profile.html?tab=watchlist'],
 ];
-const LEAGUES = [['Premier League', '#e23a3a'], ['La Liga', '#e8a33d'], ['Serie A', '#2d8fd5'],
-                 ['Bundesliga', '#d12a2a'], ['Ligue 1', '#edc23a']];
+// name, FotMob league id (for the crest), colour fallback if the logo 404s
+const LEAGUES = [['Premier League', 47, '#3d195b'], ['La Liga', 87, '#e8a33d'],
+                 ['Serie A', 55, '#0067b1'], ['Bundesliga', 54, '#d20515'], ['Ligue 1', 53, '#091c3e']];
 
 function renderSidebar(active) {
   const item = ([n, ic, href, trail, children]) => {
@@ -177,8 +354,8 @@ function renderSidebar(active) {
   };
   const section = (label, items, extra = '') =>
     `<div class="nav-label">${label}${extra}</div><nav class="nav">${items.map(item).join('')}</nav>`;
-  const leagues = LEAGUES.map(([n, c]) =>
-    `<a href="#" class="navi league"><span class="sq" style="background:${c}"></span><span class="t">${n}</span></a>`).join('');
+  const leagues = LEAGUES.map(([n, id, c]) =>
+    `<a href="/teams.html" class="navi league"><span class="lglogo"><img src="https://images.fotmob.com/image_resources/logo/leaguelogo/${id}.png" alt="" loading="lazy" onerror="this.parentElement.style.background='${c}';this.remove()"></span><span class="t">${n}</span></a>`).join('');
   document.getElementById('sidebar').innerHTML = `
     <div class="brand"><svg class="logo" viewBox="0 0 32 32"><path d="M16 3 L29 28 H3 Z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5570f0"/><stop offset="1" stop-color="#7d5cf5"/></linearGradient></defs></svg>ATLASTRA</div>
     <div class="sb-scroll">
@@ -194,8 +371,8 @@ function renderSidebar(active) {
     <div class="pro"><span class="pro-ic">${svg('pro')}</span>
       <div class="pro-tx"><h4>ATLASTRA PRO</h4><p>Unlock advanced stats and features.</p></div>
       <span class="chev">${svg('chevR')}</span></div>
-    <a href="#" class="sb-user"><span class="ava">JD<i class="on"></i></span>
-      <span class="u-tx"><b>John Doe</b><span>View Profile</span></span><span class="chev">${svg('chevR')}</span></a>`;
+    <a href="/profile.html" class="sb-user"><span class="ava"${Store.profile().picture ? ` style="background-image:url('${Store.profile().picture}');background-size:cover;background-position:center;color:transparent"` : ''}>${initials(Store.name())}<i class="on"></i></span>
+      <span class="u-tx"><b>${Store.name()}</b><span>View Profile</span></span><span class="chev">${svg('chevR')}</span></a>`;
   renderSubtabs(active);
 }
 

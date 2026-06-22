@@ -11,9 +11,34 @@ Run:  python -m webapp.server     ->  http://localhost:8000
 """
 import json
 import sys
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+
+# Same-origin image proxy for the player-card canvas: drawing a remote CDN image
+# onto a canvas taints it and blocks toBlob()/toDataURL() (the download). Serving
+# the bytes from our own origin keeps the canvas exportable. Host-allowlisted to
+# the two CDNs we actually use (no open SSRF).
+ALLOWED_IMG_HOSTS = ("fotmob.com", "wikimedia.org")
+
+
+def fetch_image(url: str):
+    try:
+        h = urlparse(url)
+        if h.scheme not in ("http", "https"):
+            return None
+        host = h.hostname or ""
+        if not any(host == d or host.endswith("." + d) for d in ALLOWED_IMG_HOSTS):
+            return None
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 Atlastra"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            ctype = r.headers.get("Content-Type", "image/png")
+            if not ctype.startswith("image/"):
+                return None
+            return r.read(6_000_000), ctype
+    except Exception:  # noqa: BLE001
+        return None
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -112,6 +137,10 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/best_xi":
             return d.web_best_xi(float(q.get("budget", ["200"])[0]),
                                  q.get("formation", ["4-3-3"])[0])
+        if path == "/api/card":
+            return d.web_card(q.get("name", ["Pedri"])[0], q.get("season", [None])[0])
+        if path == "/api/dna_map":
+            return d.web_dna_map(int(q.get("min_minutes", ["900"])[0]))
         if path == "/api/archetypes":
             return d.web_archetypes()
         if path == "/api/archetype":
@@ -147,6 +176,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/api/img":                       # binary image proxy (not JSON)
+            res = fetch_image(parse_qs(u.query).get("u", [""])[0])
+            if res:
+                self._send(200, res[0], res[1])
+            else:
+                self._send(404, b"", "text/plain")
+            return
         if u.path.startswith("/api/"):
             try:
                 data = api(u.path, parse_qs(u.query))

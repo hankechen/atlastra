@@ -137,6 +137,17 @@ async function load(name, careerStat = 'xa', season = null) {
   document.getElementById('compareLink').href = '/compare.html?name=' + encodeURIComponent(p.name);
   document.getElementById('scoutLink').href = '/scoutreport.html?name=' + encodeURIComponent(p.name) +
     (curSeason ? '&season=' + curSeason : '');
+  document.getElementById('cardLink').href = '/card.html?name=' + encodeURIComponent(p.name);
+
+  // follow / watchlist (localStorage via Store)
+  const item = { id: p.name, name: p.name, team: p.team,
+    position: p.detailed_position || p.position_group, rating: p.rating, photo: p.photo };
+  const fb = document.getElementById('followBtn'), wb = document.getElementById('watchBtn');
+  const syncF = () => { const on = Store.has('players', p.name); fb.classList.toggle('on', on); fb.textContent = on ? '✓ Following' : '★ Follow'; };
+  const syncW = () => { const on = Store.has('watchlist', p.name); wb.classList.toggle('on', on); wb.textContent = on ? '🔖 On watchlist' : '🔖 Watch'; };
+  fb.onclick = () => { Store.toggle('players', item); syncF(); };
+  wb.onclick = () => { Store.toggle('watchlist', item); syncW(); };
+  syncF(); syncW();
 
   // dual ratings (League + UCL, common-metric)
   const lg = p.ratings?.league, ucl = p.ratings?.ucl;

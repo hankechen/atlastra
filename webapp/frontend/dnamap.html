@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Football DNA Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=17">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Football DNA Map</b></div>
+    <div class="page-head">
+      <div><h2>Football DNA Map</h2><p>Every top-5-league outfielder placed by playing style — the closer two players sit, the more alike they play. Drag to pan, scroll to zoom, click a player to light up their closest matches.</p></div>
+    </div>
+
+    <section class="card dna-card">
+      <div class="dna-bar">
+        <div class="dna-find">
+          <input id="dnaSearch" placeholder="Find a player on the map…">
+          <div class="card-dd" id="dnaDD"></div>
+        </div>
+        <button class="btn btn-ghost" id="dnaReset">⟲ Reset view</button>
+        <div class="dna-legend" id="dnaLegend"></div>
+      </div>
+      <div class="dna-stage" id="dnaStage">
+        <canvas id="dna"></canvas>
+        <div class="dna-tip" id="dnaTip"></div>
+        <div class="dna-axis dna-axis-x" id="axX"></div>
+        <div class="dna-axis dna-axis-y" id="axY"></div>
+      </div>
+      <div class="dna-foot" id="dnaFoot"></div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=9"></script>
+<script src="/js/dnamap.js?v=1"></script>
+</body>
+</html>

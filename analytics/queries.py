@@ -1990,6 +1990,93 @@ class SoccerDB:
                 "slots": [{"cat": c, "label": self._CAT_LABEL[c], "count": form[c]} for c in cats],
                 "xi": xi}
 
+    # ---------------------------------------------------------------- use case 24
+    #  Collectible player card -- compact payload the frontend renders to a
+    #  shareable/downloadable image (rating, top-5 percentile stats, archetype).
+    _AXIS_CODE = {"Chance Creation": "CRE", "Progression": "PRG", "Passing": "PAS",
+                  "Finishing": "FIN", "Defending": "DEF", "Dribbling": "DRI"}
+
+    def web_card(self, name: str, season: str | None = None) -> dict:
+        p = self.web_player(name, season=season)
+        if not p or not p.get("name"):
+            return {"available": False, "error": "Player not found."}
+        radar = sorted(p.get("radar") or [], key=lambda a: -a["value"])
+        stats = [{"code": self._AXIS_CODE.get(a["axis"], a["axis"][:3].upper()),
+                  "label": a["axis"], "value": int(a["value"])} for a in radar[:5]]
+        ratings = p.get("ratings") or {}
+        card_rating = ((ratings.get("league") or {}).get("rating")
+                       or (ratings.get("ucl") or {}).get("rating") or p.get("rating"))
+        arch = p.get("archetype") or {}
+        return {"available": True, "name": p["name"],
+                "position": p.get("detailed_position") or p.get("position_group"),
+                "team": p.get("team"), "nationality": p.get("nationality"),
+                "rating": int(card_rating) if card_rating else None,
+                "composite": p.get("rating"), "classification": p.get("classification"),
+                "archetype": arch.get("archetype"), "fit": arch.get("fit"),
+                "photo": p.get("photo"), "market_value_eur": p.get("market_value_eur"),
+                "season": p.get("season"), "stats": stats}
+
+    # ---------------------------------------------------------------- Football DNA Map
+    #  Project every outfielder onto a 2D "style map" so distance == dissimilarity.
+    #  Position-agnostic per-90 features, z-scored globally, then PCA to 2 axes
+    #  (oriented so x = goal threat, y = passing/defensive volume).
+    def web_dna_map(self, min_minutes: int = 900) -> dict:
+        import numpy as np
+        df = self.con.execute(
+            """SELECT v.player_id, pl.player_name AS pname, c.position_group AS grp, c.rating,
+                      v.minutes, v.xg_per90, v.xa_per90, v.shots, v.key_passes, v.chances_created,
+                      v.dribbles_completed, v.tackles, v.interceptions, v.recoveries,
+                      v.passes_completed, v.duels_won, v.pass_accuracy_pct, v.duels_won_pct,
+                      v.team, a.archetype, pe.fpid
+               FROM v_player_season_stats v
+               JOIN player_ratings_combined c
+                 ON c.player_id = v.player_id AND c.scope='league' AND c.season = v.season
+               JOIN players pl ON pl.player_id = v.player_id
+               LEFT JOIN player_archetypes a ON a.player_id = v.player_id
+               LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                          WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                      ON pe.player_id = v.player_id
+               WHERE v.season = ? AND v.minutes >= ? AND c.position_group <> 'GK'""",
+            [FOCUS_SEASON, min_minutes]).df()
+        if df.empty:
+            return {"available": False, "error": "No data for the map."}
+
+        def p90(col):
+            return (df[col] / df["minutes"] * 90).to_numpy(float)
+        feats = np.column_stack([
+            df["xg_per90"].to_numpy(float), df["xa_per90"].to_numpy(float),
+            p90("shots"), p90("key_passes"), p90("chances_created"), p90("dribbles_completed"),
+            p90("tackles"), p90("interceptions"), p90("recoveries"), p90("passes_completed"),
+            p90("duels_won"), df["pass_accuracy_pct"].to_numpy(float) / 100,
+            df["duels_won_pct"].to_numpy(float) / 100,
+        ])
+        feats = np.nan_to_num(feats)
+        Z = (feats - feats.mean(0)) / (feats.std(0) + 1e-9)
+        Z = Z - Z.mean(0)
+        U, Sg, _ = np.linalg.svd(Z, full_matrices=False)
+        coords = U[:, :2] * Sg[:2]
+        var = [float(Sg[i] ** 2 / (Sg ** 2).sum() * 100) for i in range(2)]
+        # deterministic orientation: x -> goal threat, y -> passing/defensive volume
+        attack = Z[:, 0] + Z[:, 2] + Z[:, 1]                  # xg + shots + xa
+        build = Z[:, 9] + Z[:, 6] + Z[:, 7]                   # passes + tackles + interceptions
+        if np.corrcoef(coords[:, 0], attack)[0, 1] < 0:
+            coords[:, 0] *= -1
+        if np.corrcoef(coords[:, 1], build)[0, 1] < 0:
+            coords[:, 1] *= -1
+
+        pts = []
+        for i, r in enumerate(df.itertuples()):
+            pts.append({"name": r.pname, "x": round(float(coords[i, 0]), 2),
+                        "y": round(float(coords[i, 1]), 2),
+                        "group": r.grp, "group_label": self.GROUP_LABELS.get(r.grp, r.grp),
+                        "rating": int(r.rating), "team": r.team,
+                        "archetype": None if pd.isna(r.archetype) else r.archetype,
+                        "fpid": None if pd.isna(r.fpid) else int(r.fpid)})
+        return {"available": True, "count": len(pts),
+                "variance": [round(v, 1) for v in var],
+                "axes": {"x": "Goal threat", "y": "Passing & defensive volume"},
+                "points": pts}
+
     def _player_age(self, datamb_name: str) -> int | None:
         r = self.con.execute(
             "SELECT age FROM player_wyscout WHERE player = ? AND age IS NOT NULL LIMIT 1",
