@@ -1182,9 +1182,12 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .pv-rec-row b{color:var(--text);min-width:34px}
 .pv-vs small{display:block}
 
-/* club crest in the lineup player modal */
-.pm-club{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:15px;margin-top:8px}
-.pm-club-crest{width:28px;height:28px;object-fit:contain;flex:none}
+/* club crest beside the rating; club name as plain left-aligned text */
+.pm-headtxt{min-width:0}
+.pm-headright{display:flex;align-items:center;gap:10px;flex:none}
+.pm-crest{display:inline-flex;align-items:center}
+.pm-club{font-size:14px;margin-top:8px;color:var(--muted)}
+.pm-club-crest{width:30px;height:30px;object-fit:contain;flex:none}
 .pm-club-lbl{color:var(--muted)}
 .pm-club a{color:var(--text);font-weight:700}
 .pm-club a:hover{color:var(--accent)}
