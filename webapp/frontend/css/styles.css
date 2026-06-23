@@ -338,10 +338,10 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .cmp-stat .rm:hover{color:var(--red)}
 
 /* ---- player photos + team crests ---- */
-.prow .pic,.pcard .photo,.ph .photo,.cmp-photo,.spot .s .pic{position:relative;overflow:hidden}
-.prow .pic>img,.pcard .photo>img,.ph .photo>img,.cmp-photo>img,.spot .s .pic>img{
+.prow .pic,.pcard .photo,.ph .photo,.cmp-photo,.spot .s .pic,.ll-ph{position:relative;overflow:hidden}
+.prow .pic>img,.pcard .photo>img,.ph .photo>img,.cmp-photo>img,.spot .s .pic>img,.ll-ph>img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:var(--card2)}
-.prow .pic .ini,.pcard .photo .ini,.ph .photo .ini,.cmp-photo .ini,.spot .s .pic .ini{
+.prow .pic .ini,.pcard .photo .ini,.ph .photo .ini,.cmp-photo .ini,.spot .s .pic .ini,.ll-ph .ini{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   font-weight:700;color:var(--muted)}
 .ph .photo .ini{font-size:30px}
@@ -1286,8 +1286,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .ll-card{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px 12px 10px}
 .ll-h{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px}
 .ll-lead{display:flex;align-items:center;gap:10px}
-.ll-ph{width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none;background:var(--elev)}
-.ll-ph .avatar,.ll-ph img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.ll-ph{width:40px;height:40px;border-radius:50%;flex:none;background:var(--elev);font-size:13px}
 .ll-nm{display:flex;flex-direction:column;min-width:0;flex:1}
 .ll-nm b{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ll-nm small{color:var(--muted);font-size:11.5px}
