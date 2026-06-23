@@ -1320,3 +1320,57 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .lg-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
 .lg-bar .lg-subtabs{margin:0}
 .lg-season{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:7px}
+
+/* Champions League hub: champion banner + knockout bracket */
+.ucl-champ{display:flex;align-items:center;gap:16px;background:linear-gradient(160deg,var(--accent-soft),var(--card2));
+  border:1px solid var(--border2);border-radius:var(--radius);padding:16px 20px;margin-bottom:18px}
+.ucl-trophy{font-size:34px;line-height:1}
+.ucl-champ-x{display:flex;flex-direction:column;gap:4px}
+.ucl-champ-x small{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)}
+.ucl-champ-x a{display:flex;align-items:center;gap:10px;color:var(--text);font-size:20px;font-weight:800}
+.ucl-champ-x a:hover{color:var(--accent2)}
+/* UCL match rows carry no per-match xG, so drop the fixtures' 4th column */
+.ucl-fx .fx-row{grid-template-columns:1fr 74px 1fr}
+@media(max-width:640px){.ucl-fx .fx-row{grid-template-columns:1fr 60px 1fr}}
+
+/* knockout bracket: round columns, ties auto-centred between their two feeders */
+.bkt{display:flex;align-items:stretch;overflow-x:auto;padding:2px 0 8px}
+.bkt-col{display:flex;flex-direction:column;flex:1 1 0;min-width:172px}
+.bkt-rh{text-align:center;font-size:11.5px;letter-spacing:1px;text-transform:uppercase;
+  font-weight:800;color:var(--muted);padding-bottom:10px}
+.bkt-col-body{flex:1;display:flex;flex-direction:column}
+.bkt-tie-wrap{flex:1;min-height:58px;display:flex;align-items:center;position:relative;padding:0 16px}
+.bkt-tie{width:100%;position:relative;background:var(--card2);border:1px solid var(--border);
+  border-radius:9px;overflow:hidden;cursor:pointer;transition:border-color .12s,transform .12s}
+.bkt-tie:hover{border-color:var(--accent);transform:translateY(-1px)}
+.bkt-row{display:flex;align-items:center;gap:7px;padding:6px 9px;font-size:13px;color:var(--text)}
+.bkt-row+.bkt-row{border-top:1px solid var(--border)}
+.bkt-row.win{font-weight:800}
+.bkt-row.lose{opacity:.5}
+.bkt-row.tbd{color:var(--muted2);font-style:italic}
+.bkt-tm{display:flex;align-items:center;gap:7px;min-width:0;color:inherit}
+.bkt-tm .tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bkt-tie:hover .bkt-tm .tn{color:var(--accent2)}
+.bkt-row b{margin-left:auto;padding-left:8px;font-variant-numeric:tabular-nums}
+/* connector lines: outgoing stub (right), incoming vertical + stub (left) */
+.bkt-col:not(:last-child) .bkt-tie-wrap::after{content:'';position:absolute;top:50%;right:0;
+  width:16px;height:2px;background:var(--line)}
+.bkt-col:not(:first-child) .bkt-tie-wrap::before{content:'';position:absolute;left:0;top:25%;bottom:25%;
+  width:2px;background:var(--line)}
+.bkt-col:not(:first-child) .bkt-tie::before{content:'';position:absolute;top:50%;left:-16px;
+  width:16px;height:2px;background:var(--line)}
+
+/* World Cup hub: flags, champion name, group-standings grid */
+.wc-flag{font-size:16px;line-height:1;flex:none}
+.fifa-rank{flex:none;display:inline-block;vertical-align:middle;margin:0 3px;font-size:10px;font-weight:700;
+  color:var(--muted2);background:var(--card2);border:1px solid var(--border);border-radius:5px;padding:0 4px;line-height:15px}
+.bkt-row .fifa-rank{font-size:9px;padding:0 3px;line-height:13px}
+.wc-pens{display:block;font-size:10px;font-weight:600;color:var(--muted2);letter-spacing:0;margin-top:1px}
+.bkt-row .wc-flag{font-size:15px}
+.wc-champ-nm{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:800}
+.wc-champ-nm .wc-flag{font-size:24px}
+.wc-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+.wc-grp{padding:14px 16px}
+.wc-grp .card-h{margin-bottom:8px}
+.wc-grp .ltbl td,.wc-grp .ltbl th{padding:5px 6px}
+.wc-grp .ltbl .tcell{display:flex;align-items:center;gap:8px}

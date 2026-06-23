@@ -434,6 +434,8 @@ const ICONS = {
   archetypes: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
   scout: '<circle cx="11" cy="11" r="7"/><path d="M11 7v8M7 11h8M20.5 20.5 16 16"/>',
   styles: '<path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9z"/><path d="M12 8l4 2.2v4.4L12 17l-4-2.4v-4.4z"/>',
+  ucl: '<path d="M7 4h10v3a5 5 0 01-10 0z"/><path d="M7 5H4v1a3 3 0 003 3M17 5h3v1a3 3 0 01-3 3"/><path d="M12 12v4M9 20h6M10 16h4l1 4H9z"/>',
+  worldcup: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.5 6.2c2 1.4 11 1.4 13 0M5.5 17.8c2-1.4 11-1.4 13 0"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -449,6 +451,8 @@ const NAV_MAIN = [
   ['Teams', 'teams', '/teams.html', null, [
     ['Team Styles', 'styles', '/styles.html'],
   ]],
+  ['Champions League', 'ucl', '/ucl.html'],
+  ['World Cup', 'worldcup', '/worldcup.html'],
   ['Search', 'search', '/search.html'],
 ];
 const NAV_ANALYTICS = [
@@ -537,6 +541,10 @@ function teamBadge(m, side) {
   if (f) return `<span class="nflag">${f}</span>`;
   return crestHTML(m[side + '_logo'], 'crest') || '<span class="crest"></span>';
 }
+// FIFA World Ranking badge (e.g. #4) for a national team, or '' when unknown.
+function rankBadge(r) {
+  return r != null ? `<span class="fifa-rank" title="FIFA World Ranking">#${r}</span>` : '';
+}
 // Left "minute" cell: running clock for live, 'HT' on the break, 'FT' for results,
 // local kickoff time for upcoming.
 function matchClock(m) {
@@ -557,9 +565,9 @@ function matchRow(m) {
   const href = m.event_id != null ? ` onclick="location.href='/match.html?id=${m.event_id}'" style="cursor:pointer"` : '';
   return `<div class="match"${href}>
     <span class="${clk}">${matchClock(m)}</span>
-    <span class="tm${bold('home')}">${teamBadge(m, 'home')}<span class="nm">${m.home}</span></span>
+    <span class="tm${bold('home')}">${teamBadge(m, 'home')}<span class="nm">${m.home}</span>${rankBadge(m.home_rank)}</span>
     <span class="sc">${score}</span>
-    <span class="tm away${bold('away')}"><span class="nm">${m.away}</span>${teamBadge(m, 'away')}</span>
+    <span class="tm away${bold('away')}">${rankBadge(m.away_rank)}<span class="nm">${m.away}</span>${teamBadge(m, 'away')}</span>
     ${tag}</div>`;
 }
 

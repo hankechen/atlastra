@@ -140,6 +140,18 @@ def api(path: str, q: dict) -> dict | list:
                                          int(q.get("limit", ["20"])[0]))
         if path == "/api/national_teams":
             return d.web_national_teams()
+        if path == "/api/ucl_seasons":
+            return d.web_ucl_seasons()
+        if path == "/api/ucl":
+            return d.web_ucl_competition(_season(q))
+        if path == "/api/ucl_leaders":
+            return d.web_ucl_leaders(_season(q))
+        if path == "/api/wc_seasons":
+            return d.web_wc_seasons()
+        if path == "/api/worldcup":
+            return d.web_worldcup(q.get("season", ["2026"])[0])
+        if path == "/api/wc_leaders":
+            return d.web_wc_leaders(q.get("season", ["2026"])[0])
         if path == "/api/players":
             return d.web_players(q.get("group", ["all"])[0],
                                  (q.get("search", [""])[0] or None),

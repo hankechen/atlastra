@@ -80,6 +80,20 @@ class SoccerDB:
         self.con = duckdb.connect(str(db_path or DB_PATH), read_only=read_only)
         self._logo_map = None
         self._wiki_photos = None
+        self._fifa_ranks = None
+
+    def fifa_rank(self, team_name):
+        """FIFA World Ranking position for a national team (by SofaScore name), or
+        None. Backed by the fifa_rankings snapshot (load_fifa_rankings)."""
+        if self._fifa_ranks is None:
+            try:
+                rows = self.con.execute(
+                    "SELECT team_name, ranking FROM fifa_rankings "
+                    "WHERE ranking IS NOT NULL").fetchall()
+            except Exception:  # noqa: BLE001 -- table not built yet
+                rows = []
+            self._fifa_ranks = {n: int(r) for n, r in rows}
+        return self._fifa_ranks.get(team_name)
 
     def team_logo(self, name):
         """Crest URL for a team display name, or None. Resolves by normalized name
@@ -834,6 +848,7 @@ class SoccerDB:
         form = {r.team: list(r.form) for r in formdf.itertuples()}
         rows = [{
             "team": r.team, "country_code": r.cc, "team_id": _i(r.team_id),
+            "fifa_rank": self.fifa_rank(r.team),
             "played": _i(r.played), "w": _i(r.w), "d": _i(r.d), "l": _i(r.l),
             "gf": _i(r.gf), "ga": _i(r.ga), "gd": _i(r.gf) - _i(r.ga),
             "points": _i(r.w) * 3 + _i(r.d),
@@ -843,6 +858,421 @@ class SoccerDB:
         } for r in agg.itertuples()]
         rows.sort(key=lambda x: (-x["points"], -x["gd"], x["team"]))
         return rows
+
+    # ---- Champions League hub (use of ucl_matches + v_stats_ucl) ----
+    def web_ucl_seasons(self) -> list[dict]:
+        """Seasons available for the Champions League hub, newest first."""
+        rows = self.con.execute(
+            "SELECT DISTINCT season FROM ucl_matches ORDER BY season DESC").fetchall()
+        return [{"value": r[0], "label": _fmt_season(r[0])} for r in rows]
+
+    @staticmethod
+    def _ucl_round_meta(rnd: str):
+        """Raw round name -> (phase, display label). phase is one of
+        'knockout' / 'league' / 'qualifying' so the UI can split the bracket from
+        the league/group phase and the qualifiers."""
+        ko = {"Round of 16": "Round of 16", "Quarterfinals": "Quarter-finals",
+              "Semifinals": "Semi-finals", "Final": "Final"}
+        if rnd in ko:
+            return "knockout", ko[rnd]
+        low = (rnd or "").lower()
+        if "qualif" in low or "playoff" in low:
+            return "qualifying", rnd
+        if low.startswith("round "):           # group stage / new league phase
+            return "league", "Matchday " + rnd.split()[-1]
+        return "league", rnd
+
+    @staticmethod
+    def _ucl_round_ties(matches: list[dict]) -> list[dict]:
+        """Fold a knockout round's matches into ties (pairing the two legs of a
+        two-legged tie), summing each team's goals across legs. Ties keep the order
+        their first leg was played."""
+        ties, idx = [], {}
+        for m in matches:
+            key = frozenset((m["home"], m["away"]))
+            if key not in idx:
+                idx[key] = len(ties)
+                ties.append({"a": m["home"], "b": m["away"], "legs": [], "agg": {}})
+            t = ties[idx[key]]
+            t["legs"].append(m)
+            if m["home_goals"] is not None:
+                t["agg"][m["home"]] = t["agg"].get(m["home"], 0) + m["home_goals"]
+                t["agg"][m["away"]] = t["agg"].get(m["away"], 0) + m["away_goals"]
+        return ties
+
+    @staticmethod
+    def _order_ko_ties(ko_ties: dict, present: list) -> dict:
+        """Order each round's ties so a left-to-right bracket aligns: the deepest
+        round present seeds the order, then each earlier round is sorted by the
+        display position of the later-round tie it feeds — which keeps the two
+        feeders of any tie adjacent (and centred between them in the UI)."""
+        team_idx = {r: {} for r in present}        # team -> its tie index in round r
+        for r in present:
+            for i, t in enumerate(ko_ties[r]):
+                team_idx[r][t["a"]] = i
+                team_idx[r][t["b"]] = i
+        order = {present[-1]: list(range(len(ko_ties[present[-1]])))}
+        for r, later in zip(reversed(present[:-1]), reversed(present)):
+            pos = {ti: p for p, ti in enumerate(order[later])}
+            def feeder_key(i, _r=r, _later=later, _pos=pos):
+                t = ko_ties[_r][i]
+                for tm in (t["a"], t["b"]):
+                    j = team_idx[_later].get(tm)
+                    if j is not None:
+                        return (_pos.get(j, 999), i)
+                return (999, i)
+            order[r] = sorted(range(len(ko_ties[r])), key=feeder_key)
+        return {r: [ko_ties[r][i] for i in order[r]] for r in present}
+
+    @staticmethod
+    def _build_bracket(ko_ties: dict, seq: list, labels: dict, decorate) -> list[dict]:
+        """Generic knockout-bracket assembler shared by the UCL & World Cup hubs.
+
+        ko_ties: round name -> list of ties (from _ucl_round_ties). seq: full round
+        order. labels: round -> display label. decorate(team_or_None) -> dict of
+        per-team display fields (e.g. {'logo': url} or {'cc': 'BR'}), merged in as
+        a_<key>/b_<key>/winner_<key>.
+
+        Each tie's winner is whoever ADVANCED (appears in the next round) — robust to
+        away-goals / extra-time / penalties; the last round falls back to scoreline.
+        Rounds past the deepest played are shown as a skeleton through the Final,
+        seeded with the teams that have already advanced (else TBD)."""
+        present = [r for r in seq if r in ko_ties]
+        if not present:
+            return []
+        ordered = SoccerDB._order_ko_ties(ko_ties, present)
+
+        def side(prefix, team, agg):
+            d = {prefix: team, prefix + "_agg": agg}
+            for k, v in (decorate(team) or {}).items():
+                d[prefix + "_" + k] = v
+            return d
+
+        def tie_dict(a, b, ga, gb, winner, legs):
+            wt = a if winner == "a" else b if winner == "b" else None
+            d = {"winner": winner, "winner_team": wt, "two_legs": len(legs) > 1,
+                 "legs": [{"home": l["home"], "away": l["away"],
+                           "home_goals": l["home_goals"], "away_goals": l["away_goals"]}
+                          for l in legs],
+                 "event_id": legs[-1]["event_id"] if legs else None}
+            d.update(side("a", a, ga))
+            d.update(side("b", b, gb))
+            for k, v in (decorate(wt) or {}).items():
+                d["winner_" + k] = v
+            return d
+
+        result = {}                                  # round -> display ties
+        for i, rnd in enumerate(present):
+            nxt = present[i + 1] if i + 1 < len(present) else None
+            next_teams = (set().union(*({t["a"], t["b"]} for t in ko_ties[nxt]))
+                          if nxt else set())
+            out = []
+            for t in ordered[rnd]:
+                a, b, agg = t["a"], t["b"], t["agg"]
+                ga, gb = agg.get(a), agg.get(b)
+                if nxt:                              # winner = whoever advanced
+                    winner = "a" if a in next_teams else "b" if b in next_teams else None
+                elif ga is not None and gb is not None and ga != gb:
+                    winner = "a" if ga > gb else "b"
+                else:
+                    winner = None
+                out.append(tie_dict(a, b, ga, gb, winner, t["legs"]))
+            result[rnd] = out
+
+        # extend the skeleton from the deepest played round through the Final
+        for rnd in seq[seq.index(present[-1]) + 1:]:
+            prev = result[seq[seq.index(rnd) - 1]]
+            out = []
+            for j in range(0, len(prev), 2):
+                w1 = prev[j]["winner_team"]
+                w2 = prev[j + 1]["winner_team"] if j + 1 < len(prev) else None
+                out.append(tie_dict(w1, w2, None, None, None, []))
+            result[rnd] = out
+
+        full = seq[seq.index(present[0]):]           # earliest present → Final
+        return [{"round": r, "label": labels[r], "ties": result[r]} for r in full]
+
+    def _ucl_bracket(self, df, logos: dict, phase_start) -> list[dict]:
+        """Champions League knockout bracket (Round of 16 → Final): single/two-legged
+        ties decorated with club crests. See _build_bracket for the shared logic."""
+        seq = ["Round of 16", "Quarterfinals", "Semifinals", "Final"]
+        ko_ties = {}
+        for rnd in seq:
+            sub = df[(df["round"] == rnd) & (df["date"] >= phase_start)]
+            if sub.empty:
+                continue
+            ms = [{"home": r.home, "away": r.away, "event_id": _i(r.event_id),
+                   "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals)}
+                  for r in sub.sort_values("date").itertuples()]
+            ko_ties[rnd] = self._ucl_round_ties(ms)
+        labels = {"Round of 16": "Round of 16", "Quarterfinals": "Quarter-finals",
+                  "Semifinals": "Semi-finals", "Final": "Final"}
+        return self._build_bracket(ko_ties, seq, labels,
+                                   lambda t: {"logo": logos.get(t)} if t else {})
+
+    def web_ucl_competition(self, season: str = FOCUS_SEASON) -> dict:
+        """Champions League bundle for one season: every match grouped by round in
+        chronological order, each round tagged knockout / league / qualifying, plus
+        the champion (winner of the Final, once decided). Crests resolve for the
+        top-5 clubs we track; everyone else falls back to initials in the UI."""
+        df = self.con.execute("""
+            SELECT event_id, match_date::DATE AS date, round, home_name AS home, away_name AS away,
+                   home_goals, away_goals
+            FROM ucl_matches WHERE season = ?
+            ORDER BY match_date, round
+        """, [season]).df()
+        if df.empty:
+            return {"available": False, "season": _fmt_season(season),
+                    "season_code": season, "rounds": [], "champion": None}
+        names = set(df["home"]) | set(df["away"])
+        logos = {n: self.team_logo(n) for n in names}
+        meta = {rnd: self._ucl_round_meta(rnd) for rnd in df["round"].unique()}
+        # Older seasons' source data mislabels a few pre-season minnow qualifiers with
+        # main-round names (e.g. a June match tagged "Semifinals"). Real knockout ties
+        # only happen after the group/league phase kicks off, so use that as a floor.
+        league_dates = [d for r, d in zip(df["round"], df["date"]) if meta[r][0] == "league"]
+        phase_start = min(league_dates) if league_dates else df["date"].min()
+        # canonical display order: qualifying -> league phase (by matchday) -> knockout
+        ko_order = {"Round of 16": 0, "Quarterfinals": 1, "Semifinals": 2, "Final": 3}
+        def sort_key(rnd):
+            phase = meta[rnd][0]
+            if phase == "knockout":
+                return (2, ko_order.get(rnd, 9), 0)
+            if phase == "league":
+                digits = "".join(c for c in rnd if c.isdigit())
+                return (1, int(digits) if digits else 0, 0)
+            return (0, 0, df[df["round"] == rnd]["date"].min().toordinal())
+        rounds = []
+        for rnd in sorted(df["round"].unique(), key=sort_key):
+            phase, label = meta[rnd]
+            sub = df[df["round"] == rnd]
+            if phase == "knockout":
+                sub = sub[sub["date"] >= phase_start]   # drop mislabeled qualifier noise
+            if sub.empty:
+                continue
+            rounds.append({"round": rnd, "label": label, "phase": phase,
+                           "matches": [{"date": str(r.date), "home": r.home, "away": r.away,
+                                        "event_id": _i(r.event_id),
+                                        "home_logo": logos.get(r.home), "away_logo": logos.get(r.away),
+                                        "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals),
+                                        "is_result": pd.notna(r.home_goals)} for r in sub.itertuples()]})
+        # champion: the Final's higher-scoring side, only once a decisive result exists
+        champion = None
+        fin = df[df["round"] == "Final"]
+        if not fin.empty:
+            r = fin.iloc[-1]
+            if pd.notna(r.home_goals) and pd.notna(r.away_goals) and r.home_goals != r.away_goals:
+                w = r.home if r.home_goals > r.away_goals else r.away
+                champion = {"team": w, "team_logo": logos.get(w)}
+        return {"available": True, "season": _fmt_season(season), "season_code": season,
+                "rounds": rounds, "champion": champion,
+                "bracket": self._ucl_bracket(df, logos, phase_start)}
+
+    # stat -> (label, format). UCL leaders mirror the league-leaders board over v_stats_ucl.
+    _UCL_LEADER_STATS = [
+        ("goals", "Goals", "int"), ("assists", "Assists", "int"),
+        ("ga", "Goal Involvements", "int"), ("xg", "Expected Goals (xG)", "dec"),
+        ("xa", "Expected Assists (xA)", "dec"), ("chances_created", "Chances Created", "int"),
+        ("big_chances_created", "Big Chances Created", "int"), ("shots", "Shots", "int"),
+        ("dribbles_completed", "Dribbles", "int"), ("tackles", "Tackles", "int"),
+        ("interceptions", "Interceptions", "int"), ("duels_won", "Duels Won", "int"),
+        ("clearances", "Clearances", "int"), ("passes_completed", "Passes Completed", "int"),
+        ("rating", "Avg Match Rating", "dec"),
+    ]
+
+    def web_ucl_leaders(self, season: str = FOCUS_SEASON, top: int = 3,
+                        min_minutes: int = 270) -> dict:
+        """Top players in every stat for a Champions League season (top scorers,
+        assisters, creators, …) from v_stats_ucl — top N per stat, modest minutes
+        floor since UCL samples are small. Rows link to the player profile."""
+        df = self.con.execute("""
+            SELECT pl.player_name AS player, u.team, u.minutes, u.goals, u.assists,
+                   (u.goals + u.assists) AS ga, u.xg, u.xa, u.chances_created,
+                   u.big_chances_created, u.shots, u.dribbles_completed, u.tackles,
+                   u.interceptions, u.duels_won, u.clearances, u.passes_completed,
+                   u.rating, pe.fpid
+            FROM v_stats_ucl u
+            JOIN players pl USING(player_id)
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = u.player_id
+            WHERE u.season = ? AND u.minutes >= ?
+        """, [season, min_minutes]).df()
+        if df.empty:
+            return {"available": False, "leaders": []}
+
+        def fmt(v, kind):
+            return (str(int(round(v))) if kind == "int"
+                    else f"{v:.1f}" if kind == "dec" else f"{round(v)}%")
+        leaders = []
+        for key, label, kind in self._UCL_LEADER_STATS:
+            if key not in df.columns:
+                continue
+            sub = df.dropna(subset=[key])
+            if key != "rating":                 # everyone has a rating; only show positive counts
+                sub = sub[sub[key] > 0]
+            sub = sub.sort_values(key, ascending=False).head(top)
+            if sub.empty:
+                continue
+            leaders.append({"key": key, "label": label,
+                            "top": [{"player": r.player, "team": r.team,
+                                     "photo": self.player_photo(int(r.fpid) if pd.notna(r.fpid) else None),
+                                     "value": fmt(getattr(r, key), kind)} for r in sub.itertuples()]})
+        return {"available": True, "leaders": leaders}
+
+    # ---- World Cup hub (wc_matches + wc_standings, snapshotted by load_wc) ----
+    def web_wc_seasons(self) -> list[dict]:
+        """World Cups available for the hub, newest first (e.g. 2026, 2022, …)."""
+        rows = self.con.execute(
+            "SELECT DISTINCT season FROM wc_matches ORDER BY season DESC").fetchall()
+        return [{"value": r[0], "label": r[0]} for r in rows]
+
+    # raw round -> (phase, display label). World Cup knockout order, group matchdays
+    # as 'Round N'. The third-place play-off is knockout-phase but NOT in the bracket.
+    _WC_KO = {"Round of 32": (0, "Round of 32"), "Round of 16": (1, "Round of 16"),
+              "Quarterfinals": (2, "Quarter-finals"), "Semifinals": (3, "Semi-finals"),
+              "Match for 3rd place": (4, "Third-place play-off"), "Final": (5, "Final")}
+
+    @classmethod
+    def _wc_round_meta(cls, rnd: str):
+        if rnd in cls._WC_KO:
+            return "knockout", cls._WC_KO[rnd][1]
+        low = (rnd or "").lower()
+        if low.startswith("round "):
+            return "group", "Matchday " + rnd.split()[-1]
+        return "group", rnd
+
+    def web_worldcup(self, season: str) -> dict:
+        """World Cup bundle for one edition: matches grouped by round (group
+        matchdays → knockout, chronological), the knockout bracket (R32/R16 → Final),
+        the group standings tables, and the champion once the Final is decided.
+        National teams render via their ISO country code (flag)."""
+        df = self.con.execute("""
+            SELECT event_id, match_date::DATE AS date, round,
+                   home_name AS home, home_cc, away_name AS away, away_cc,
+                   home_goals, away_goals, home_pens, away_pens, winner_code
+            FROM wc_matches WHERE season = ?
+            ORDER BY match_date, round
+        """, [season]).df()
+        if df.empty:
+            return {"available": False, "season": season, "rounds": [],
+                    "bracket": [], "groups": [], "champion": None}
+        cc = {}
+        for r in df.itertuples():
+            cc.setdefault(r.home, r.home_cc)
+            cc.setdefault(r.away, r.away_cc)
+
+        # rounds for the Results tab: group matchdays first (by number), then knockout
+        def sort_key(rnd):
+            phase = self._wc_round_meta(rnd)[0]
+            if phase == "knockout":
+                return (1, self._WC_KO.get(rnd, (9,))[0])
+            digits = "".join(ch for ch in rnd if ch.isdigit())
+            return (0, int(digits) if digits else 0)
+        rounds = []
+        for rnd in sorted(df["round"].dropna().unique(), key=sort_key):
+            phase, label = self._wc_round_meta(rnd)
+            sub = df[df["round"] == rnd]
+            rounds.append({"round": rnd, "label": label, "phase": phase,
+                           "matches": [{"date": str(r.date), "home": r.home, "away": r.away,
+                                        "home_cc": r.home_cc, "away_cc": r.away_cc,
+                                        "home_rank": self.fifa_rank(r.home), "away_rank": self.fifa_rank(r.away),
+                                        "event_id": _i(r.event_id),
+                                        "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals),
+                                        "home_pens": _i(r.home_pens), "away_pens": _i(r.away_pens),
+                                        "is_result": pd.notna(r.home_goals)} for r in sub.itertuples()]})
+
+        # bracket (single-leg ties): reuse the shared assembler, decorating with flags
+        seq = ["Round of 32", "Round of 16", "Quarterfinals", "Semifinals", "Final"]
+        ko_ties = {}
+        for rnd in seq:
+            sub = df[df["round"] == rnd]
+            if sub.empty:
+                continue
+            ms = [{"home": r.home, "away": r.away, "event_id": _i(r.event_id),
+                   "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals)}
+                  for r in sub.sort_values("date").itertuples()]
+            ko_ties[rnd] = self._ucl_round_ties(ms)
+        labels = {r: self._WC_KO[r][1] for r in seq}
+        bracket = self._build_bracket(ko_ties, seq, labels,
+                                      lambda t: {"cc": cc.get(t), "rank": self.fifa_rank(t)} if t else {})
+
+        # group standings tables (Group A, B, … then any extra ranking table last)
+        sdf = self.con.execute("""
+            SELECT group_name, position, team, cc, played, w, d, l, gf, ga, pts
+            FROM wc_standings WHERE season = ? ORDER BY group_name, position
+        """, [season]).df()
+        groups = []
+        for gname in sorted(sdf["group_name"].unique(),
+                            key=lambda g: (not g.startswith("Group"), g)):
+            sub = sdf[sdf["group_name"] == gname]
+            groups.append({"name": gname, "rows": [
+                {"position": _i(r.position), "team": r.team, "cc": r.cc,
+                 "rank": self.fifa_rank(r.team),
+                 "played": _i(r.played), "w": _i(r.w), "d": _i(r.d), "l": _i(r.l),
+                 "gf": _i(r.gf), "ga": _i(r.ga), "gd": _i(r.gf) - _i(r.ga), "pts": _i(r.pts)}
+                for r in sub.itertuples()]})
+
+        # champion via winner_code (handles a Final settled on penalties, where the
+        # 90-min scoreline is level); also patch the bracket's Final highlight.
+        champion = None
+        fin = df[df["round"] == "Final"]
+        if not fin.empty:
+            r = fin.iloc[-1]
+            w = r.home if r.winner_code == 1 else r.away if r.winner_code == 2 else None
+            if w:
+                champion = {"team": w, "cc": cc.get(w)}
+                last = bracket[-1] if bracket else None
+                if last and last["round"] == "Final" and last["ties"]:
+                    t = last["ties"][0]
+                    if t["winner"] is None and w in (t["a"], t["b"]):
+                        t["winner"] = "a" if w == t["a"] else "b"
+                        t["winner_team"] = w
+        return {"available": True, "season": season, "rounds": rounds,
+                "bracket": bracket, "groups": groups, "champion": champion}
+
+    # stat_key -> (label, format). Order = display order on the World Cup leaders tab.
+    _WC_LEADER_STATS = [
+        ("rating", "Avg Match Rating", "dec"), ("goals", "Goals", "int"),
+        ("assists", "Assists", "int"), ("goalsAssistsSum", "Goal Involvements", "int"),
+        ("expectedGoals", "Expected Goals (xG)", "dec"),
+        ("expectedAssists", "Expected Assists (xA)", "dec"),
+        ("bigChancesCreated", "Big Chances Created", "int"), ("totalShots", "Shots", "int"),
+        ("shotsOnTarget", "Shots on Target", "int"), ("keyPasses", "Key Passes", "int"),
+        ("successfulDribbles", "Dribbles", "int"), ("tackles", "Tackles", "int"),
+        ("interceptions", "Interceptions", "int"), ("clearances", "Clearances", "int"),
+        ("saves", "Saves", "int"),
+    ]
+
+    def web_wc_leaders(self, season: str, top: int = 3) -> dict:
+        """World Cup tournament stat leaders (top scorers, assisters, creators, …) for
+        one edition, from the SofaScore top-players snapshot in wc_leaders. Each player
+        carries their national flag (country code resolved from wc_matches)."""
+        df = self.con.execute("""
+            SELECT l.stat_key, l.rank, l.player, l.team, l.value, l.appearances,
+                   COALESCE(m.home_cc, m2.away_cc) AS cc
+            FROM wc_leaders l
+            LEFT JOIN (SELECT DISTINCT season, home_name, home_cc FROM wc_matches) m
+                   ON m.season = l.season AND m.home_name = l.team
+            LEFT JOIN (SELECT DISTINCT season, away_name, away_cc FROM wc_matches) m2
+                   ON m2.season = l.season AND m2.away_name = l.team
+            WHERE l.season = ? AND l.rank <= ?
+            ORDER BY l.stat_key, l.rank
+        """, [season, top]).df()
+        if df.empty:
+            return {"available": False, "leaders": []}
+
+        def fmt(v, kind):
+            return str(int(round(v))) if kind == "int" else f"{v:.1f}"
+        leaders = []
+        for key, label, kind in self._WC_LEADER_STATS:
+            sub = df[df["stat_key"] == key]
+            if sub.empty:
+                continue
+            leaders.append({"key": key, "label": label,
+                            "top": [{"player": r.player, "team": r.team, "cc": r.cc,
+                                     "value": fmt(r.value, kind)} for r in sub.itertuples()]})
+        return {"available": True, "leaders": leaders}
 
     # tab groups for the Players directory -> rating position_groups
     PLAYER_GROUPS = {"FWD": ["ST", "W"], "MID": ["AM", "CM", "DM"],
@@ -1062,10 +1492,10 @@ class SoccerDB:
                 "status": r.status_type, "status_desc": none(r.status_desc),
                 "minute": None if pd.isna(r.minute) else int(r.minute),
                 "home": r.home_team, "home_logo": self.team_logo(r.home_team),
-                "home_country": none(r.home_country),
+                "home_country": none(r.home_country), "home_rank": self.fifa_rank(r.home_team),
                 "home_score": None if pd.isna(r.home_score) else int(r.home_score),
                 "away": r.away_team, "away_logo": self.team_logo(r.away_team),
-                "away_country": none(r.away_country),
+                "away_country": none(r.away_country), "away_rank": self.fifa_rank(r.away_team),
                 "away_score": None if pd.isna(r.away_score) else int(r.away_score),
                 "winner": None if pd.isna(r.winner_code) else int(r.winner_code),
             }

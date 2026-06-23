@@ -113,7 +113,7 @@ async function loadNational() {
     const flag = (HOME_NATION[t.team] ? flagEmoji(HOME_NATION[t.team]) : flagISO2(t.country_code)) || '🏳';
     return `<div class="nt-card"${click}>
       <span class="nt-flag">${flag}</span>
-      <span class="nt-x"><div class="nt-nm">${t.team}</div><div class="nt-sub">${rec}</div></span>
+      <span class="nt-x"><div class="nt-nm">${t.team}${rankBadge(t.fifa_rank)}</div><div class="nt-sub">${rec}</div></span>
       <span class="nt-form">${formPills(t.form)}</span></div>`;
   };
   document.getElementById('teamsBody').innerHTML = rows.length
