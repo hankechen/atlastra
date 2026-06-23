@@ -1542,13 +1542,19 @@ class SoccerDB:
         per90 = ["goals", "assists", "xg", "xa", "chances_created", "big_chances_created",
                  "dribbles_completed", "duels_won", "tackles", "interceptions"]
         rate = ["duels_won_pct", "pass_accuracy_pct"]
+
+        # value relative to the PEAK (best in position) -> peak = 100, others
+        # proportional. Both bases so the tile matches what it shows.
+        def frac(col):
+            mx = float(col.max())
+            return int(round(min(100, max(0, col[me_mask].iloc[0] / mx * 100)))) if mx > 0 else 0
         out = {}
         for k in per90:
-            col = df[k].fillna(0) / mins * 90
-            out[k] = int(round((col <= col[me_mask].iloc[0]).mean() * 100))
-        for k in rate:
-            col = df[k].fillna(0)
-            out[k] = int(round((col <= col[me_mask].iloc[0]).mean() * 100))
+            raw = df[k].fillna(0)
+            out[k] = {"tot": frac(raw), "p90": frac(raw / mins * 90)}
+        for k in rate:                                   # rates are the same either way
+            v = frac(df[k].fillna(0))
+            out[k] = {"tot": v, "p90": v}
         return out
 
     def web_player(self, name: str, career_stat: str = "xa",
