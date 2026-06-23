@@ -50,7 +50,7 @@ const ordinal = (n) => { const v = n % 100, s = ['th', 'st', 'nd', 'rd']; return
 function pctBar(key) {
   const p = tilePct[key];
   if (p == null || key === 'games') return '';
-  return `<div class="tpctw" title="Percentile vs position peers (100 = best in position)">
+  return `<div class="tpctw" title="${ordinal(p)} percentile vs same position across all top-5 leagues (100 = best in position)">
     <div class="tpct"><i style="width:${p}%;background:${pctColor(p)}"></i></div>
     <span class="tpctn" style="color:${pctColor(p)}">${ordinal(p)}</span></div>`;
 }
