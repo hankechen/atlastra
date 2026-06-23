@@ -55,6 +55,13 @@ FOTMOB_PLAYER_IMG = "https://images.fotmob.com/image_resources/playerimages/{}.p
 FOTMOB_TEAM_IMG = "https://images.fotmob.com/image_resources/logo/teamlogo/{}.png"
 
 
+def _fold(s):
+    """Accent-folded lowercase string (e.g. 'Dembélé' -> 'dembele')."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(s or ""))
+    return "".join(c for c in s if not unicodedata.combining(c)).lower()
+
+
 def _norm_team(s):
     """Accent/punctuation-folded team name for logo lookup (mirrors load_team_logos)."""
     import unicodedata
@@ -163,7 +170,37 @@ class SoccerDB:
             """,
             [name, name, name],
         ).fetchone()
-        return None if df is None else int(df[0])
+        if df is not None:
+            return int(df[0])
+        return self._find_by_surname(name)
+
+    def _find_by_surname(self, name: str) -> int | None:
+        """Fallback when the full name isn't a substring of ours (e.g. SofaScore
+        'Dayot Upamecano' vs our 'Dayotchanculle Upamecano'). Match on the surname
+        as a whole word; if several share it, disambiguate by the first name (one
+        is a prefix of the other). Only return on a unique result -- never guess."""
+        parts = name.strip().split()
+        if len(parts) < 2:
+            return None
+        first, surname = _fold(parts[0]), parts[-1]
+        cands = self.con.execute(
+            """
+            SELECT p.player_id, p.player_name, sum(ps.minutes) AS mins
+            FROM players p JOIN player_season_stats ps USING(player_id)
+            WHERE (' ' || replace(strip_accents(lower(p.player_name)), '-', ' ') || ' ')
+                  LIKE '% ' || strip_accents(lower(?)) || ' %'
+            GROUP BY 1, 2 ORDER BY mins DESC
+            """,
+            [surname],
+        ).fetchall()
+        if len(cands) == 1:
+            return int(cands[0][0])
+        if not cands:
+            return None
+        hits = [c for c in cands
+                if any(w.startswith(first) or first.startswith(w)
+                       for w in _fold(c[1]).split())]
+        return int(hits[0][0]) if len(hits) == 1 else None
 
     # common shorthands users type that aren't substrings of the canonical name
     _TEAM_ALIASES = {
