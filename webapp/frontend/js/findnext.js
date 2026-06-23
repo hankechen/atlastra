@@ -53,7 +53,7 @@ function drawRadar(axesOrder, legend, match) {
       plugins: { legend: { labels: { color: '#cfd6e6', boxWidth: 12, font: { size: 11 } } } },
       scales: { r: {
         min: 0, max: 100, ticks: { display: false, stepSize: 25 },
-        grid: { color: 'rgba(255,255,255,.08)' }, angleLines: { color: 'rgba(255,255,255,.08)' },
+        grid: { color: 'rgba(0,0,0,.1)' }, angleLines: { color: 'rgba(0,0,0,.1)' },
         pointLabels: { color: '#9aa3b8', font: { size: 10 } } } },
     },
   });
