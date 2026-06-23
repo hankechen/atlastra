@@ -125,27 +125,31 @@ def _lineup_side(side: dict) -> dict:
 
 
 def season_estimate(player_id: int) -> int | None:
-    """Estimate an Atlastra-scale rating (~30–92) for a player NOT in our warehouse,
-    from their best recent SofaScore season average rating. Cached (1 day)."""
+    """Estimate a CONSTANT, overall Atlastra-scale rating (~30–92) for a player not
+    in our warehouse. It is NOT a single match/tournament: we appearance-weight the
+    player's average SofaScore rating across their recent competitions (league, cup,
+    continental, national team), so one game can't swing it. Cached 7 days."""
     if not player_id:
         return None
-    seas = _get(f"/player/{player_id}/statistics/seasons", ttl=86400)
-    best = (0.0, 0)                                   # (sofa rating, appearances)
-    for blk in ((seas or {}).get("uniqueTournamentSeasons") or [])[:2]:
+    seas = _get(f"/player/{player_id}/statistics/seasons", ttl=604800)
+    tot_r, tot_a = 0.0, 0                             # appearance-weighted sums
+    for blk in ((seas or {}).get("uniqueTournamentSeasons") or [])[:5]:
         ut = (blk.get("uniqueTournament") or {}).get("id")
         sns = blk.get("seasons") or []
         if not ut or not sns:
             continue
         ov = _get(f"/player/{player_id}/unique-tournament/{ut}/season/{sns[0]['id']}/statistics/overall",
-                  ttl=86400)
+                  ttl=604800)
         st = (ov or {}).get("statistics") or {}
         rt, ap = st.get("rating"), st.get("appearances") or 0
-        if rt and ap >= 2 and ap > best[1]:
-            best = (float(rt), ap)
-    if best[1] == 0:
+        if rt and ap >= 2:
+            tot_r += float(rt) * ap
+            tot_a += ap
+    if tot_a < 5:                                     # not enough of a sample to estimate
         return None
-    # SofaScore season ratings cluster ~6.0–8.0; map to our wider scale, then clamp.
-    return max(30, min(92, round((best[0] - 6.0) * 28 + 40)))
+    sofa = tot_r / tot_a                              # career-level average rating
+    # SofaScore ratings cluster ~6.0–8.0; map to our wider scale, then clamp.
+    return max(30, min(92, round((sofa - 6.0) * 28 + 40)))
 
 
 def lineups(eid: int) -> dict:
