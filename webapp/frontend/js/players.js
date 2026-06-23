@@ -23,8 +23,23 @@ filtersEl.querySelectorAll('.pill').forEach(p => p.onclick = () => {
   p.classList.add('active'); group = p.dataset.g; render();
 });
 
+// classification -> colour tier (gold/violet/blue/green/slate/bronze). Check
+// "above"/"below" before "average" since both contain it.
+function clsTier(c) {
+  c = (c || '').toLowerCase();
+  if (!c) return '';
+  if (c.includes('best in')) return 'bip';
+  if (c.includes('world')) return 'wc';
+  if (c.includes('elite')) return 'elite';
+  if (c.includes('above')) return 'aa';
+  if (c.includes('below')) return 'ba';
+  if (c.includes('average')) return 'avg';
+  return '';
+}
+const tierClass = (p) => { const t = clsTier(p.classification); return t ? ' t-' + t : ''; };
+
 const card = (p) => `
-  <div class="pcard" onclick="location.href='/player.html?name=${encodeURIComponent(p.player)}'">
+  <div class="pcard${tierClass(p)}" onclick="location.href='/player.html?name=${encodeURIComponent(p.player)}'">
     <div class="top">
       <div class="photo">${avatarHTML(p.photo, p.player)}</div>
       <div class="rt">${p.rating ?? '—'}</div>
@@ -42,7 +57,7 @@ const card = (p) => `
 // Former players: peak former season + advanced stats; click deep-links to that
 // season on the profile (the season selector reads ?season=).
 const formerCard = (p) => `
-  <div class="pcard" onclick="location.href='/player.html?name=${encodeURIComponent(p.player)}&season=${p.season_code}'">
+  <div class="pcard${tierClass(p)}" onclick="location.href='/player.html?name=${encodeURIComponent(p.player)}&season=${p.season_code}'">
     <div class="top">
       <div class="photo">${avatarHTML(p.photo, p.player)}</div>
       <div class="rt">${p.rating ?? '—'}</div>

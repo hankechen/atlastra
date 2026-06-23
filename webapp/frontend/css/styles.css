@@ -1191,3 +1191,18 @@ select{background:var(--card2);border:1px solid var(--border2);color:var(--text)
 .pm-club-lbl{color:var(--muted)}
 .pm-club a{color:var(--text);font-weight:700}
 .pm-club a:hover{color:var(--accent)}
+
+/* ===== Player-card classification colour tiers ===== */
+.pcard.t-bip{--c1:#f6d36b;--c2:#e0a23a;--ct:#3a2a05}
+.pcard.t-wc{--c1:#c07cff;--c2:#7d5cf5;--ct:#fff}
+.pcard.t-elite{--c1:#5aa6ff;--c2:#3a6ad6;--ct:#fff}
+.pcard.t-aa{--c1:#4fd99b;--c2:#2aa86f;--ct:#06200f}
+.pcard.t-avg{--c1:#aab4c6;--c2:#7f8b9f;--ct:#161b24}
+.pcard.t-ba{--c1:#d59a72;--c2:#b06a44;--ct:#fff}
+.pcard[class*=" t-"]::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;
+  background:linear-gradient(90deg,var(--c1),var(--c2))}
+.pcard[class*=" t-"] .cls{background:linear-gradient(135deg,var(--c1),var(--c2));color:var(--ct);
+  box-shadow:0 2px 8px color-mix(in srgb,var(--c2) 45%,transparent)}
+.pcard[class*=" t-"] .rt{border-color:var(--c1);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--c1) 18%,transparent)}
+.pcard[class*=" t-"]:hover{border-color:var(--c1)}
