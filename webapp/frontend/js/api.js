@@ -500,7 +500,7 @@ function renderSidebar(active) {
   const section = (label, items, extra = '') =>
     `<div class="nav-label">${label}${extra}</div><nav class="nav">${items.map(item).join('')}</nav>`;
   const leagues = LEAGUES.map(([n, id, c]) =>
-    `<a href="/teams.html" class="navi league"><span class="lglogo"><img src="https://images.fotmob.com/image_resources/logo/leaguelogo/${id}.png" alt="" loading="lazy" onerror="this.parentElement.style.background='${c}';this.remove()"></span><span class="t">${n}</span></a>`).join('');
+    `<a href="/teams.html?league=${encodeURIComponent(n)}" class="navi league"><span class="lglogo"><img src="https://images.fotmob.com/image_resources/logo/leaguelogo/${id}.png" alt="" loading="lazy" onerror="this.parentElement.style.background='${c}';this.remove()"></span><span class="t">${n}</span></a>`).join('');
   document.getElementById('sidebar').innerHTML = `
     <div class="brand"><svg class="logo" viewBox="0 0 32 32"><path d="M16 3 L29 28 H3 Z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5570f0"/><stop offset="1" stop-color="#7d5cf5"/></linearGradient></defs></svg>ATLASTRA</div>
     <div class="sb-scroll">

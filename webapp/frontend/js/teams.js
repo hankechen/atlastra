@@ -81,20 +81,24 @@ async function loadNational() {
   const leagues = await api('/api/leagues');
   const tabsEl = document.getElementById('leagueTabs');
   const tabs = [...leagues.map(l => [l.key, l.name]), ['__national', 'National Teams']];
-  tabsEl.innerHTML = tabs.map(([k, name], i) =>
-    `<span class="tab ${i ? '' : 'active'}" data-k="${k}">${name}</span>`).join('');
+  // open the requested tab: ?tab=national, ?league=<key|name>, else first league
+  const params = new URLSearchParams(location.search);
+  let activeKey = leagues[0].key;
+  if (params.get('tab') === 'national') {
+    activeKey = '__national';
+  } else if (params.get('league')) {
+    const want = params.get('league').toLowerCase();
+    const m = tabs.find(([k, name]) => k.toLowerCase() === want || name.toLowerCase() === want);
+    if (m) activeKey = m[0];
+  }
+  tabsEl.innerHTML = tabs.map(([k, name]) =>
+    `<span class="tab ${k === activeKey ? 'active' : ''}" data-k="${k}">${name}</span>`).join('');
   tabsEl.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     tabsEl.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
     if (t.dataset.k === '__national') loadNational(); else loadTable(t.dataset.k);
   });
-  // ?tab=national deep-links the National Teams tab
-  if (new URLSearchParams(location.search).get('tab') === 'national') {
-    tabsEl.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.k === '__national'));
-    loadNational();
-  } else {
-    loadTable(leagues[0].key);
-  }
+  if (activeKey === '__national') loadNational(); else loadTable(activeKey);
 })();
 
 // search -> jump to a team page on Enter
