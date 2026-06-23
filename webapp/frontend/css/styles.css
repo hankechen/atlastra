@@ -1239,3 +1239,6 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .tile.pair .tsub{flex:1;padding:14px 10px;text-align:center;min-width:0}
 .tile.pair .tsub:first-child{border-right:1px solid var(--border)}
 .tiles.compact .tile.pair .tsub{padding:10px 8px}
+
+/* head-to-head record summary */
+.h2h-sum{text-align:center;font-size:14px;margin:0 0 14px;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:10px}

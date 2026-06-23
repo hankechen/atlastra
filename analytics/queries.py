@@ -513,25 +513,36 @@ class SoccerDB:
             [query],
         ).df()
 
-    def search_matches(self, team_a: str, team_b: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
-        """Head-to-head fixtures between two teams, most recent first."""
+    @staticmethod
+    def _season_n_back(n: int, ref: str = FOCUS_SEASON) -> str:
+        """Season code n seasons back (inclusive) from ref, e.g. 6 from '2526' -> '2021'."""
+        start = int(ref[:2]) - (n - 1)
+        return f"{start % 100:02d}{(start + 1) % 100:02d}"
+
+    def search_matches(self, team_a: str, team_b: str, since: str | None = None) -> pd.DataFrame:
+        """Head-to-head fixtures between two teams, most recent first.
+
+        `since` is a lower-bound season code; defaults to the last 6 seasons.
+        """
         ta, tb = self.find_team_id(team_a), self.find_team_id(team_b)
         if ta is None or tb is None:
             return pd.DataFrame()
+        if since is None:
+            since = self._season_n_back(12)   # all 12 seasons in `matches` (1415–2526)
         return self.con.execute(
             """
-            SELECT m.match_date::DATE AS date, h.team_name AS home, a.team_name AS away,
+            SELECT m.match_date::DATE AS date, m.season, h.team_name AS home, a.team_name AS away,
                    m.home_goals, m.away_goals, round(m.home_xg,2) AS home_xg,
                    round(m.away_xg,2) AS away_xg
             FROM matches m
             JOIN teams h ON h.team_id = m.home_team_id
             JOIN teams a ON a.team_id = m.away_team_id
-            WHERE m.season = ?
+            WHERE m.season >= ?
               AND ((m.home_team_id=? AND m.away_team_id=?) OR (m.home_team_id=? AND m.away_team_id=?))
               AND m.is_result
             ORDER BY m.match_date DESC
             """,
-            [season, ta, tb, tb, ta],
+            [since, ta, tb, tb, ta],
         ).df()
 
     # ----- web UI bundles (Atlastra frontend) ----------------------------- #
@@ -1136,16 +1147,20 @@ class SoccerDB:
                        "team_logo": self.team_logo(r.team_name)} for r in tdf.itertuples()],
         }
 
-    def web_match_search(self, team_a: str, team_b: str, season: str = FOCUS_SEASON) -> dict:
-        """Use case 8: head-to-head fixtures between two teams, most recent first."""
+    def web_match_search(self, team_a: str, team_b: str, since: str | None = None) -> dict:
+        """Use case 8: head-to-head fixtures between two teams, most recent first.
+
+        Spans all 12 seasons (1415–2526) by default.
+        """
         ta, tb = self.find_team_id(team_a), self.find_team_id(team_b)
         if ta is None or tb is None:
             return {"team_a": team_a if ta else None, "team_b": team_b if tb else None,
                     "matches": []}
         names = dict(self.con.execute(
             "SELECT team_id, team_name FROM teams WHERE team_id IN (?, ?)", [ta, tb]).fetchall())
-        df = self.search_matches(names[ta], names[tb], season)
-        matches = [{"date": str(r.date), "home": r.home, "away": r.away,
+        df = self.search_matches(names[ta], names[tb], since)
+        matches = [{"date": str(r.date), "season": _fmt_season(r.season),
+                    "home": r.home, "away": r.away,
                     "home_logo": self.team_logo(r.home), "away_logo": self.team_logo(r.away),
                     "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals),
                     "home_xg": _r(r.home_xg, 2), "away_xg": _r(r.away_xg, 2)}

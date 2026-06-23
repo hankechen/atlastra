@@ -49,19 +49,30 @@ async function runH2H() {
   if (!d.team_a || !d.team_b) {
     out.innerHTML = `<div class="empty">Couldn’t find ${!d.team_a ? a : b}.</div>`; return;
   }
+  // record from team_a's perspective, across all returned meetings
+  const A = d.team_a.name;
+  let w = 0, dr = 0, l = 0, gf = 0, ga = 0;
+  d.matches.forEach(m => {
+    if (m.home_goals == null || m.away_goals == null) return;
+    const aHome = m.home === A, af = aHome ? m.home_goals : m.away_goals, bf = aHome ? m.away_goals : m.home_goals;
+    gf += af; ga += bf;
+    if (af > bf) w++; else if (af < bf) l++; else dr++;
+  });
+  const summary = d.matches.length ? `<div class="h2h-sum">
+    <b>${A}</b>: ${w}W · ${dr}D · ${l}L <span class="muted">in ${d.matches.length} meetings (${gf}–${ga} goals)</span></div>` : '';
   const head = `<div class="h2h-head">
     <a class="h2h-team" href="${teamHref(d.team_a.name)}">${crestHTML(d.team_a.logo, 'crest-md')}${d.team_a.name}</a>
     <span class="vs">vs</span>
     <a class="h2h-team" href="${teamHref(d.team_b.name)}">${crestHTML(d.team_b.logo, 'crest-md')}${d.team_b.name}</a></div>`;
   const rows = d.matches.length ? d.matches.map(m => `
     <div class="mrow">
-      <span class="mdate">${m.date.slice(0, 10)}</span>
+      <span class="mdate">${m.date.slice(0, 10)}<small class="muted"> · ${m.season}</small></span>
       <span class="mteam home">${m.home}${crestHTML(m.home_logo, 'crest-sm')}</span>
       <span class="mscore"><b>${m.home_goals}–${m.away_goals}</b></span>
       <span class="mteam away">${crestHTML(m.away_logo, 'crest-sm')}${m.away}</span>
       <span class="mxg muted">xG ${m.home_xg} – ${m.away_xg}</span>
-    </div>`).join('') : '<div class="empty">No fixtures between these teams this season.</div>';
-  out.innerHTML = head + rows;
+    </div>`).join('') : '<div class="empty">No fixtures between these teams in the last 12 seasons.</div>';
+  out.innerHTML = head + summary + rows;
 }
 document.getElementById('h2hBtn').onclick = runH2H;
 ['teamA', 'teamB'].forEach(id => document.getElementById(id)
