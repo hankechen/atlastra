@@ -2,6 +2,7 @@ renderSidebar('Teams');
 
 const formPills = (form) => (form || []).map(f => `<span class="form-pill form-${f}">${f}</span>`).join('');
 const teamHref = (name) => '/team.html?name=' + encodeURIComponent(name);
+const _content = () => document.getElementById('leagueContent');
 
 // promotion/relegation tint by position (top 4 = UCL-ish, bottom 3 = drop)
 function posClass(pos, n) {
@@ -10,10 +11,11 @@ function posClass(pos, n) {
   return '';
 }
 
-async function loadTable(key) {
+// ---- per-league sub-tab: Standings ----
+async function loadStandings(key) {
   const rows = await api('/api/league_table?league=' + encodeURIComponent(key));
   const n = rows.length;
-  document.getElementById('teamsBody').innerHTML = `<section class="card"><div class="ltbl-wrap">
+  _content().innerHTML = `<section class="card"><div class="ltbl-wrap">
     <table class="ltbl"><thead><tr>
       <th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th>
       <th>GF</th><th>GA</th><th>GD</th><th>xG</th><th>xGA</th><th>xPts</th><th>Pts</th><th>Form</th>
@@ -28,15 +30,34 @@ async function loadTable(key) {
         <td><b>${t.pts}</b></td>
         <td class="formcell">${formPills(t.form)}</td>
       </tr>`).join('')}</tbody></table></div></section>`;
-  loadLeaders(key);
 }
 
-// per-league leaders in every stat: top scorer, assister, creator, dribbler, …
+// ---- per-league sub-tab: Fixtures & Results ----
+async function loadFixtures(key) {
+  const d = await api('/api/league_fixtures?league=' + encodeURIComponent(key));
+  const el = _content();
+  if (!d.available || !d.matches.length) { el.innerHTML = '<div class="empty">No fixtures for this league.</div>'; return; }
+  let html = '', last = null;
+  for (const m of d.matches) {
+    const dt = new Date(m.date).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    if (dt !== last) { html += `<div class="fx-date">${m.is_result ? '' : 'Upcoming · '}${dt}</div>`; last = dt; }
+    const score = m.home_goals != null ? `${m.home_goals}<span class="fx-dash">-</span>${m.away_goals}` : '<span class="muted">vs</span>';
+    html += `<div class="fx-row">
+      <a class="fx-t home" href="${teamHref(m.home)}"><span class="tn">${m.home}</span>${crestHTML(m.home_logo, 'crest-sm')}</a>
+      <span class="fx-sc">${score}</span>
+      <a class="fx-t away" href="${teamHref(m.away)}">${crestHTML(m.away_logo, 'crest-sm')}<span class="tn">${m.away}</span></a>
+      <span class="fx-xg muted">${m.home_xg != null ? 'xG ' + m.home_xg + ' – ' + m.away_xg : ''}</span></div>`;
+  }
+  el.innerHTML = `<section class="card"><div class="card-h"><h3>Fixtures &amp; Results</h3>
+      <span class="see">${d.matches.length} matches · this season</span></div>
+    <div class="fx-list">${html}</div></section>`;
+}
+
+// ---- per-league sub-tab: League Leaders (top players in every stat) ----
 async function loadLeaders(key) {
-  let d;
-  try { d = await api('/api/league_leaders?league=' + encodeURIComponent(key)); }
-  catch { return; }
-  if (!d.available || !d.leaders.length) return;
+  const d = await api('/api/league_leaders?league=' + encodeURIComponent(key));
+  const el = _content();
+  if (!d.available || !d.leaders.length) { el.innerHTML = '<div class="empty">No leader data for this league.</div>'; return; }
   const ph = (p) => `/player.html?name=${encodeURIComponent(p.player)}`;
   const card = (b) => {
     const lead = b.top[0];
@@ -50,12 +71,26 @@ async function loadLeaders(key) {
         <span class="ll-v">${lead.value}</span></a>
       ${rest ? `<div class="ll-rest">${rest}</div>` : ''}</div>`;
   };
-  const sec = document.createElement('section');
-  sec.className = 'card ll-sec';
-  sec.innerHTML = `<div class="card-h"><h3>League Leaders</h3>
-      <span class="see">${d.league} · this season · top 3 per stat</span></div>
-    <div class="ll-grid">${d.leaders.map(card).join('')}</div>`;
-  document.getElementById('teamsBody').appendChild(sec);
+  el.innerHTML = `<section class="card ll-sec"><div class="card-h"><h3>League Leaders</h3>
+      <span class="see">top 3 per stat · this season</span></div>
+    <div class="ll-grid">${d.leaders.map(card).join('')}</div></section>`;
+}
+
+// open a league: render its sub-tabs (Standings / Fixtures / League Leaders)
+const LEAGUE_SUBS = [['standings', 'Standings', loadStandings],
+  ['fixtures', 'Fixtures', loadFixtures], ['leaders', 'League Leaders', loadLeaders]];
+function openLeague(key, sub = 'standings') {
+  document.getElementById('teamsBody').innerHTML =
+    `<div class="tabs lg-subtabs" id="leagueSub">${LEAGUE_SUBS.map(([k, label]) =>
+      `<span class="tab ${k === sub ? 'active' : ''}" data-k="${k}">${label}</span>`).join('')}</div>
+     <div id="leagueContent"><section class="card"><div class="placeholder-note">Loading…</div></section></div>`;
+  const bar = document.getElementById('leagueSub');
+  bar.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+    bar.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    (LEAGUE_SUBS.find(s => s[0] === t.dataset.k)[2])(key);
+  });
+  (LEAGUE_SUBS.find(s => s[0] === sub)[2])(key);
 }
 
 // National teams (international feed): a grid of flag cards with recent record/form
@@ -64,7 +99,6 @@ async function loadNational() {
   const card = (t) => {
     const click = t.team_id != null ? ` onclick="location.href='/nat.html?id=${t.team_id}'" style="cursor:pointer"` : '';
     const rec = t.played ? `${t.w}-${t.d}-${t.l} · GF ${t.gf}/GA ${t.ga}` : 'no recent matches';
-    // ISO-2 codes from the feed; England/Scotland/Wales use name-based tag flags
     const flag = (HOME_NATION[t.team] ? flagEmoji(HOME_NATION[t.team]) : flagISO2(t.country_code)) || '🏳';
     return `<div class="nt-card"${click}>
       <span class="nt-flag">${flag}</span>
@@ -96,9 +130,9 @@ async function loadNational() {
   tabsEl.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     tabsEl.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    if (t.dataset.k === '__national') loadNational(); else loadTable(t.dataset.k);
+    if (t.dataset.k === '__national') loadNational(); else openLeague(t.dataset.k);
   });
-  if (activeKey === '__national') loadNational(); else loadTable(activeKey);
+  if (activeKey === '__national') loadNational(); else openLeague(activeKey);
 })();
 
 // search -> jump to a team page on Enter

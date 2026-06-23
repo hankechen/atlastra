@@ -1180,6 +1180,31 @@ class SoccerDB:
                                      "value": fmt(getattr(r, key), kind)} for r in sub.itertuples()]})
         return {"available": True, "league": nm[0] if nm else league_key, "leaders": leaders}
 
+    def web_league_fixtures(self, league_key: str, season: str = FOCUS_SEASON) -> dict:
+        """All fixtures/results for a league this season — upcoming first (if any),
+        then results most-recent-first."""
+        df = self.con.execute(
+            """SELECT m.match_date::DATE AS date, h.team_name AS home, a.team_name AS away,
+                      m.home_goals, m.away_goals, round(m.home_xg,2) AS home_xg,
+                      round(m.away_xg,2) AS away_xg, m.is_result
+               FROM matches m
+               JOIN teams h ON h.team_id = m.home_team_id
+               JOIN teams a ON a.team_id = m.away_team_id
+               WHERE m.league_key=? AND m.season=? ORDER BY m.match_date""",
+            [league_key, season]).df()
+        if df.empty:
+            return {"available": False, "matches": []}
+        names = set(df["home"]) | set(df["away"])
+        logos = {n: self.team_logo(n) for n in names}
+        rows = [{"date": str(r.date), "home": r.home, "away": r.away,
+                 "home_logo": logos.get(r.home), "away_logo": logos.get(r.away),
+                 "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals),
+                 "home_xg": _r(r.home_xg, 2), "away_xg": _r(r.away_xg, 2),
+                 "is_result": bool(r.is_result)} for r in df.itertuples()]
+        upcoming = [m for m in rows if not m["is_result"]]
+        results = [m for m in rows if m["is_result"]][::-1]
+        return {"available": True, "matches": upcoming + results}
+
     def web_team(self, name: str, season: str = FOCUS_SEASON) -> dict:
         """Team performance bundle (use case 6): standing, record, goals, xG/xPts,
         form, recent results and top scorers."""

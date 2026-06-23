@@ -1297,3 +1297,21 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .ll-rk{width:14px;text-align:center;font-weight:700;color:var(--muted2)}
 .ll-rn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ll-row b{color:var(--text)}
+
+/* ---- per-league sub-tabs + fixtures list ---- */
+.lg-subtabs{margin:2px 0 16px;gap:22px}
+.fx-list{display:flex;flex-direction:column}
+.fx-date{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted2);
+  padding:14px 2px 6px;border-bottom:1px solid var(--border)}
+.fx-row{display:grid;grid-template-columns:1fr 74px 1fr 120px;align-items:center;gap:10px;
+  padding:9px 4px;border-bottom:1px solid var(--border);font-size:14px}
+.fx-row:last-child{border-bottom:none}
+.fx-t{display:flex;align-items:center;gap:9px;min-width:0;color:var(--text)}
+.fx-t .tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fx-t.home{justify-content:flex-end;text-align:right}
+.fx-t.away{justify-content:flex-start}
+.fx-t:hover .tn{color:var(--accent2)}
+.fx-sc{text-align:center;font-weight:800;font-size:15px;letter-spacing:1px}
+.fx-dash{color:var(--muted2);margin:0 4px;font-weight:600}
+.fx-xg{font-size:12px;text-align:right;white-space:nowrap}
+@media(max-width:640px){.fx-row{grid-template-columns:1fr 60px 1fr}.fx-xg{display:none}}
