@@ -635,19 +635,19 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .lineup-pitch .lp-six{position:absolute;left:35%;width:30%;height:6%;border:2px solid rgba(255,255,255,.16)}
 .lineup-pitch .lp-six.top{top:-2px}
 .lineup-pitch .lp-six.bot{bottom:-2px}
-.luc{position:absolute;transform:translate(-50%,-50%);width:62px;text-align:center;cursor:pointer;z-index:2}
-.luc-dot{position:relative;display:flex;align-items:center;justify-content:center;width:34px;height:34px;margin:0 auto;
-  border-radius:50%;font-weight:700;font-size:13px;color:#fff;background:rgba(16,22,38,.94);border:2px solid #5570f0;transition:transform .1s}
+.luc{position:absolute;transform:translate(-50%,-50%);width:78px;text-align:center;cursor:pointer;z-index:2}
+.luc-dot{position:relative;display:flex;align-items:center;justify-content:center;width:46px;height:46px;margin:0 auto;
+  border-radius:50%;font-weight:700;font-size:17px;color:#fff;background:rgba(16,22,38,.94);border:2px solid #5570f0;transition:transform .1s}
 .luc.a .luc-dot{border-color:#e0556f}
 .luc:hover .luc-dot{transform:scale(1.12)}
-.luc-nm{display:block;margin-top:3px;font-size:10.5px;font-weight:600;color:#fff;text-shadow:0 1px 3px #000;
+.luc-nm{display:block;margin-top:4px;font-size:13px;font-weight:600;color:#fff;text-shadow:0 1px 3px #000;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.luc-ev{display:block;margin-top:1px;font-size:11px;line-height:1;white-space:nowrap}
+.luc-ev{display:block;margin-top:1px;font-size:12px;line-height:1;white-space:nowrap}
 .luc-ev .ev{margin:0 1px}
-.luc-ev .ev b{font-size:9px;font-weight:700;color:#fff;vertical-align:top;text-shadow:0 1px 2px #000}
+.luc-ev .ev b{font-size:10px;font-weight:700;color:#fff;vertical-align:top;text-shadow:0 1px 2px #000}
 .luc-ev .ev.a{filter:grayscale(.2)}
-.luc-rt{position:absolute;right:-9px;bottom:-5px;font-size:9px;font-weight:700;color:#06140a;border-radius:4px;padding:0 3px;font-style:normal}
-.luc-cap{position:absolute;left:-7px;top:-5px;font-size:8px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:13px;height:13px;line-height:13px;font-style:normal}
+.luc-rt{position:absolute;right:-11px;bottom:-6px;font-size:12px;font-weight:700;color:#06140a;border-radius:5px;padding:1px 5px;font-style:normal}
+.luc-cap{position:absolute;left:-8px;top:-6px;font-size:10px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:16px;height:16px;line-height:16px;font-style:normal}
 
 /* ---- match prediction (from bookmaker odds) ---- */
 .pr-head{font-size:15px;margin:4px 0 12px}
