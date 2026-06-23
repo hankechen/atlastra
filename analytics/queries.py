@@ -1516,6 +1516,41 @@ class SoccerDB:
             scopes["combined"] = dict(lg or ucl)
         return scopes
 
+    # per-stat percentile vs same-position peers (per-90 basis; rates as-is), so the
+    # tiles can show where a player sits — peak of the stat = 100th percentile.
+    def _tile_percentiles(self, pid: int, season: str) -> dict:
+        g = self.con.execute("SELECT position_group FROM players WHERE player_id=?", [pid]).fetchone()
+        if not g or not g[0]:
+            return {}
+        cols = ("v.player_id, v.minutes, v.goals, v.assists, v.xg, v.xa, v.chances_created, "
+                "v.big_chances_created, v.dribbles_completed, v.duels_won, v.duels_won_pct, "
+                "v.tackles, v.interceptions, v.pass_accuracy_pct")
+        df = self.con.execute(
+            f"SELECT {cols} FROM v_player_season_stats v JOIN players pl USING(player_id) "
+            "WHERE v.season=? AND pl.position_group=? AND v.minutes>=600", [season, g[0]]).df()
+        if pid not in set(df["player_id"]):
+            me = self.con.execute(
+                f"SELECT {cols} FROM v_player_season_stats v WHERE v.player_id=? AND v.season=?",
+                [pid, season]).df()
+            if me.empty:
+                return {}
+            df = pd.concat([df, me], ignore_index=True)
+        if len(df) < 5:
+            return {}
+        mins = df["minutes"].clip(lower=1)
+        me_mask = df["player_id"] == pid
+        per90 = ["goals", "assists", "xg", "xa", "chances_created", "big_chances_created",
+                 "dribbles_completed", "duels_won", "tackles", "interceptions"]
+        rate = ["duels_won_pct", "pass_accuracy_pct"]
+        out = {}
+        for k in per90:
+            col = df[k].fillna(0) / mins * 90
+            out[k] = int(round((col <= col[me_mask].iloc[0]).mean() * 100))
+        for k in rate:
+            col = df[k].fillna(0)
+            out[k] = int(round((col <= col[me_mask].iloc[0]).mean() * 100))
+        return out
+
     def web_player(self, name: str, career_stat: str = "xa",
                    season: str | None = None) -> dict:
         prof = self.player_profile(name)
@@ -1643,6 +1678,7 @@ class SoccerDB:
             "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
             "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
             "tiles": tiles, "radar": radar,
+            "tile_pct": self._tile_percentiles(pid, season),  # per-stat percentile vs position peers
             "stats_scopes": self._player_stat_scopes(pid, season),  # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9

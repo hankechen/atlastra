@@ -1228,3 +1228,12 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 
 /* light/dark toggle button in the top bar */
 .theme-toggle{background:none;border:none;cursor:pointer;font-size:16px;line-height:1;padding:4px;color:inherit}
+
+/* per-stat percentile bar + grouped (paired) stat tiles */
+.tile{position:relative}
+.tpct{height:4px;border-radius:3px;background:rgba(150,158,178,.18);overflow:hidden;margin-top:9px}
+.tpct i{display:block;height:100%;border-radius:3px}
+.tile.pair{grid-column:span 2;display:flex;padding:0;align-items:stretch}
+.tile.pair .tsub{flex:1;padding:14px 10px;text-align:center;min-width:0}
+.tile.pair .tsub:first-child{border-right:1px solid var(--border)}
+.tiles.compact .tile.pair .tsub{padding:10px 8px}

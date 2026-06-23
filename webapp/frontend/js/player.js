@@ -8,23 +8,32 @@ const setText = (id, t) => { const el = document.getElementById(id); if (el) el.
 
 // stat tiles read from a scope object {games,minutes,goals,...,pass_accuracy_pct}.
 // kind: 'count' shown as-is, 'per90' = v/min*90, 'pct' = v%, 'dec' = 1 decimal total.
+// A tile def is [icon,key,label,kind]; a nested [[def],[def]] renders one grouped
+// (double-wide) tile — goals+xG, assists+xA and duels+duels% are paired.
 const TOTAL_DEFS = [
-  ['👕', 'games', 'Apps', 'count'], ['⚽', 'goals', 'Goals', 'count'], ['🅰', 'assists', 'Assists', 'count'],
-  ['◎', 'xg', 'xG', 'dec'], ['⚲', 'xa', 'xA', 'dec'], ['💡', 'chances_created', 'Chances', 'count'],
-  ['★', 'big_chances_created', 'Big Chances', 'count'], ['⚡', 'dribbles_completed', 'Dribbles', 'count'],
-  ['💪', 'duels_won', 'Duels Won', 'count'], ['％', 'duels_won_pct', 'Duels %', 'pct'],
+  ['👕', 'games', 'Apps', 'count'],
+  [['⚽', 'goals', 'Goals', 'count'], ['◎', 'xg', 'xG', 'dec']],
+  [['🅰', 'assists', 'Assists', 'count'], ['⚲', 'xa', 'xA', 'dec']],
+  ['💡', 'chances_created', 'Chances', 'count'],
+  ['★', 'big_chances_created', 'Big Chances', 'count'],
+  ['⚡', 'dribbles_completed', 'Dribbles', 'count'],
+  [['💪', 'duels_won', 'Duels Won', 'count'], ['％', 'duels_won_pct', 'Duels %', 'pct']],
   ['🛡', 'tackles', 'Tackles', 'count'], ['✋', 'interceptions', 'Interceptions', 'count'],
   ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
 ];
 const PER90_DEFS = [
-  ['👕', 'games', 'Apps', 'count'], ['⚽', 'goals', 'Goals / 90', 'per90'], ['🅰', 'assists', 'Assists / 90', 'per90'],
-  ['◎', 'xg', 'xG / 90', 'per90'], ['⚲', 'xa', 'xA / 90', 'per90'], ['💡', 'chances_created', 'Chances / 90', 'per90'],
-  ['★', 'big_chances_created', 'Big Ch. / 90', 'per90'], ['⚡', 'dribbles_completed', 'Dribbles / 90', 'per90'],
-  ['💪', 'duels_won', 'Duels / 90', 'per90'], ['％', 'duels_won_pct', 'Duels %', 'pct'],
+  ['👕', 'games', 'Apps', 'count'],
+  [['⚽', 'goals', 'Goals / 90', 'per90'], ['◎', 'xg', 'xG / 90', 'per90']],
+  [['🅰', 'assists', 'Assists / 90', 'per90'], ['⚲', 'xa', 'xA / 90', 'per90']],
+  ['💡', 'chances_created', 'Chances / 90', 'per90'],
+  ['★', 'big_chances_created', 'Big Ch. / 90', 'per90'],
+  ['⚡', 'dribbles_completed', 'Dribbles / 90', 'per90'],
+  [['💪', 'duels_won', 'Duels / 90', 'per90'], ['％', 'duels_won_pct', 'Duels %', 'pct']],
   ['🛡', 'tackles', 'Tackles / 90', 'per90'], ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
 ];
 const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined']];
 let statScopes = {}, scopeTotals = 'combined', scopePer90 = 'combined';
+let tilePct = {};                                   // per-stat percentile vs position peers
 
 function fmtTile(def, s) {
   const [, key, , kind] = def, v = s ? s[key] : null;
@@ -35,10 +44,25 @@ function fmtTile(def, s) {
   const m = s.minutes || 0;                       // per90
   return m ? (v / m * 90).toFixed(2) : '—';
 }
+const pctColor = (p) => p >= 80 ? '#2fbf71' : p >= 60 ? '#7d9f3a' : p >= 40 ? '#c9a227' : '#c97a27';
+// percentile bar shown under a stat (skip Apps — no peer percentile)
+function pctBar(key) {
+  const p = tilePct[key];
+  if (p == null || key === 'games') return '';
+  return `<div class="tpct" title="${p}th percentile vs position peers (100 = best)">
+    <i style="width:${p}%;background:${pctColor(p)}"></i></div>`;
+}
+const oneTile = (def, s) =>
+  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${pctBar(def[1])}`;
+
 function renderTiles(elId, defs, scope) {
   const s = statScopes[scope];
-  document.getElementById(elId).innerHTML = defs.map(d =>
-    `<div class="tile"><div class="ic">${d[0]}</div><b>${fmtTile(d, s)}</b><span>${d[2]}</span></div>`).join('');
+  document.getElementById(elId).innerHTML = defs.map(d => {
+    if (Array.isArray(d[0])) {                      // grouped (double-wide) tile
+      return `<div class="tile pair">${d.map(sub => `<div class="tsub">${oneTile(sub, s)}</div>`).join('')}</div>`;
+    }
+    return `<div class="tile">${oneTile(d, s)}</div>`;
+  }).join('');
 }
 // Build a League/UCL/Combined toggle once; a delegated listener on the container
 // survives tile re-renders, and we only flip the .active class + redraw on click.
@@ -177,6 +201,7 @@ async function load(name, careerStat = 'xa', season = null) {
 
   // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
   statScopes = p.stats_scopes || {};
+  tilePct = p.tile_pct || {};
   const dflt = statScopes.combined ? 'combined' : Object.keys(statScopes)[0];
   if (!statScopes[scopeTotals]) scopeTotals = dflt;
   if (!statScopes[scopePer90]) scopePer90 = dflt;
