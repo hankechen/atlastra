@@ -458,6 +458,7 @@ const NAV_ANALYTICS = [
   ['Player Cards', 'players', '/card.html'],
   ['Football DNA Map', 'archetypes', '/dnamap.html'],
   ['Big Game Index', 'rankings', '/biggame.html'],
+  ['Stat Leaders', 'rankings', '/leaders.html'],
 ];
 
 // in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];

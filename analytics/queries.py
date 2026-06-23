@@ -1138,11 +1138,18 @@ class SoccerDB:
 
     def web_league_leaders(self, league_key: str, season: str = FOCUS_SEASON,
                            top: int = 3, min_minutes: int = 450) -> dict:
-        """Use case 1/6: per-league leaders in every stat (top scorers, assisters,
-        creators, dribblers, defenders, …) — top N players per stat for one league.
+        """Use case 1/6: leaders in every stat (top scorers, assisters, creators,
+        dribblers, defenders, …) — top N players per stat. Pass league_key='all'
+        (or empty) for the combined top-5 leagues.
         """
         import pandas as pd
-        nm = self.con.execute("SELECT league_name FROM leagues WHERE league_key=?", [league_key]).fetchone()
+        all5 = not league_key or league_key.lower() == "all"
+        if all5:
+            league_label, where, params = "Top 5 Leagues", "", [season, min_minutes]
+        else:
+            nm = self.con.execute("SELECT league_name FROM leagues WHERE league_key=?", [league_key]).fetchone()
+            league_label = nm[0] if nm else league_key
+            where, params = "p.league_key=? AND ", [league_key, season, min_minutes]
         cols = ", ".join(f"v.{k}" for k, *_ in self._LEADER_STATS if k not in ("ga",))
         df = self.con.execute(
             f"""SELECT v.player_id, pl.player_name, v.team, v.minutes, v.ga, {cols}, pe.fpid
@@ -1152,10 +1159,10 @@ class SoccerDB:
                 LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
                            WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
                        ON pe.player_id=v.player_id
-                WHERE p.league_key=? AND v.season=? AND v.minutes>=?""",
-            [league_key, season, min_minutes]).df()
+                WHERE {where}v.season=? AND v.minutes>=?""",
+            params).df()
         if df.empty:
-            return {"available": False, "league": nm[0] if nm else league_key, "leaders": []}
+            return {"available": False, "league": league_label, "leaders": []}
 
         # rate stats need a volume floor so a tiny-sample fluke (e.g. a keeper at
         # 100% on one dribble) can't top the chart.
@@ -1184,7 +1191,7 @@ class SoccerDB:
                             "top": [{"player": r.player_name, "team": r.team,
                                      "photo": self.player_photo(int(r.fpid) if pd.notna(r.fpid) else None),
                                      "value": fmt(getattr(r, key), kind)} for r in sub.itertuples()]})
-        return {"available": True, "league": nm[0] if nm else league_key, "leaders": leaders}
+        return {"available": True, "league": league_label, "leaders": leaders}
 
     def web_league_fixtures(self, league_key: str, season: str = FOCUS_SEASON) -> dict:
         """All fixtures/results for a league this season — upcoming first (if any),

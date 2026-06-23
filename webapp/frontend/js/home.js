@@ -65,6 +65,8 @@ document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `
                 ['Serie A', 'ITA-Serie A'], ['Bundesliga', 'GER-Bundesliga'], ['Ligue 1', 'FRA-Ligue 1']];
   const tabsEl = document.getElementById('leagueTabs');
   async function loadStandings(key) {
+    const link = document.getElementById('seeTable');
+    if (link) link.href = '/teams.html?league=' + encodeURIComponent(key);
     const rows = await api('/api/standings?league=' + encodeURIComponent(key));
     document.getElementById('standings').innerHTML = rows.map(r => `<tr class="ltbl-row"
       onclick="location.href='${tHref(r.team)}'">

@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atlastra — Live Matches</title>
+<title>Atlastra — Stat Leaders</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=38">
+<link rel="stylesheet" href="/css/styles.css?v=42">
 </head>
 <body>
 <div class="app">
@@ -17,15 +17,17 @@
     </div>
 
     <div class="page-head">
-      <div><h2>Live Matches</h2><p>Live scores, today's fixtures and recent results across the top-5 leagues, the Champions League and major international tournaments. <span id="updated" class="muted"></span></p></div>
-      <button id="refresh" class="btn btn-ghost">↻ Refresh</button>
+      <div><h2>Stat Leaders</h2><p>Who leads every stat across Europe's big five leagues — top scorers, creators, dribblers, defenders and more.</p></div>
     </div>
 
-    <div class="tabs" id="stateTabs"></div>
-    <div id="feed"></div>
+    <div class="lg-bar">
+      <div class="subtabs" id="scopeTabs"></div>
+      <label class="lg-season">Season <select id="ldSeason" class="season-sel"></select></label>
+    </div>
+    <div id="ld-out"></div>
   </main>
 </div>
 <script src="/js/api.js?v=17"></script>
-<script src="/js/live.js?v=4"></script>
+<script src="/js/leaders.js?v=3"></script>
 </body>
 </html>
