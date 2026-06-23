@@ -1105,6 +1105,12 @@ class SoccerDB:
     def web_leagues(self) -> list[dict]:
         return [{"key": k, "name": n} for k, n in self.LEAGUE_TABS]
 
+    def web_seasons(self) -> list[dict]:
+        """Seasons available for league standings/fixtures/leaders, newest first."""
+        rows = self.con.execute(
+            "SELECT DISTINCT season FROM team_season_stats ORDER BY season DESC").fetchall()
+        return [{"value": r[0], "label": _fmt_season(r[0])} for r in rows]
+
     def web_league_table(self, league_key: str, season: str = FOCUS_SEASON) -> list[dict]:
         """Full league standings (use case 6) — every team, with crest, xG/xPts
         and recent form. Rows link to the team page."""

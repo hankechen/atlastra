@@ -44,7 +44,13 @@ def fetch_image(url: str):
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from analytics.queries import SoccerDB  # noqa: E402
+from config import FOCUS_SEASON  # noqa: E402
 from webapp import auth  # noqa: E402
+
+
+def _season(q):
+    """Season code from the query string, defaulting to the current season."""
+    return (q.get("season", [FOCUS_SEASON])[0] or FOCUS_SEASON)
 from webapp import live_feed  # noqa: E402
 from webapp import scout_ai  # noqa: E402
 
@@ -156,12 +162,17 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_compare(names, stats)
         if path == "/api/leagues":
             return d.web_leagues()
+        if path == "/api/seasons":
+            return d.web_seasons()
         if path == "/api/league_table":
-            return d.web_league_table(q.get("league", ["ENG-Premier League"])[0])
+            return d.web_league_table(q.get("league", ["ENG-Premier League"])[0],
+                                      _season(q))
         if path == "/api/league_leaders":
-            return d.web_league_leaders(q.get("league", ["ENG-Premier League"])[0])
+            return d.web_league_leaders(q.get("league", ["ENG-Premier League"])[0],
+                                        _season(q))
         if path == "/api/league_fixtures":
-            return d.web_league_fixtures(q.get("league", ["ENG-Premier League"])[0])
+            return d.web_league_fixtures(q.get("league", ["ENG-Premier League"])[0],
+                                         _season(q))
         if path == "/api/team":
             return d.web_team(q.get("name", ["Arsenal"])[0])
         if path == "/api/search":

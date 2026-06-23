@@ -1315,3 +1315,8 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .fx-dash{color:var(--muted2);margin:0 4px;font-weight:600}
 .fx-xg{font-size:12px;text-align:right;white-space:nowrap}
 @media(max-width:640px){.fx-row{grid-template-columns:1fr 60px 1fr}.fx-xg{display:none}}
+
+/* per-league sub-tab bar + season picker */
+.lg-bar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.lg-bar .lg-subtabs{margin:0}
+.lg-season{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:7px}

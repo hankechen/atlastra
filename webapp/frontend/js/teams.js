@@ -3,6 +3,8 @@ renderSidebar('Teams');
 const formPills = (form) => (form || []).map(f => `<span class="form-pill form-${f}">${f}</span>`).join('');
 const teamHref = (name) => '/team.html?name=' + encodeURIComponent(name);
 const _content = () => document.getElementById('leagueContent');
+let SEASONS = [], curSeason = '', curKey = null, curSub = 'standings';
+const _seasonQS = () => curSeason ? '&season=' + encodeURIComponent(curSeason) : '';
 
 // promotion/relegation tint by position (top 4 = UCL-ish, bottom 3 = drop)
 function posClass(pos, n) {
@@ -13,7 +15,7 @@ function posClass(pos, n) {
 
 // ---- per-league sub-tab: Standings ----
 async function loadStandings(key) {
-  const rows = await api('/api/league_table?league=' + encodeURIComponent(key));
+  const rows = await api('/api/league_table?league=' + encodeURIComponent(key) + _seasonQS());
   const n = rows.length;
   _content().innerHTML = `<section class="card"><div class="ltbl-wrap">
     <table class="ltbl"><thead><tr>
@@ -34,7 +36,7 @@ async function loadStandings(key) {
 
 // ---- per-league sub-tab: Fixtures & Results ----
 async function loadFixtures(key) {
-  const d = await api('/api/league_fixtures?league=' + encodeURIComponent(key));
+  const d = await api('/api/league_fixtures?league=' + encodeURIComponent(key) + _seasonQS());
   const el = _content();
   if (!d.available || !d.matches.length) { el.innerHTML = '<div class="empty">No fixtures for this league.</div>'; return; }
   let html = '', last = null;
@@ -49,13 +51,13 @@ async function loadFixtures(key) {
       <span class="fx-xg muted">${m.home_xg != null ? 'xG ' + m.home_xg + ' – ' + m.away_xg : ''}</span></div>`;
   }
   el.innerHTML = `<section class="card"><div class="card-h"><h3>Fixtures &amp; Results</h3>
-      <span class="see">${d.matches.length} matches · this season</span></div>
+      <span class="see">${d.matches.length} matches · ${seasonLabel()}</span></div>
     <div class="fx-list">${html}</div></section>`;
 }
 
 // ---- per-league sub-tab: League Leaders (top players in every stat) ----
 async function loadLeaders(key) {
-  const d = await api('/api/league_leaders?league=' + encodeURIComponent(key));
+  const d = await api('/api/league_leaders?league=' + encodeURIComponent(key) + _seasonQS());
   const el = _content();
   if (!d.available || !d.leaders.length) { el.innerHTML = '<div class="empty">No leader data for this league.</div>'; return; }
   const ph = (p) => `/player.html?name=${encodeURIComponent(p.player)}`;
@@ -72,25 +74,34 @@ async function loadLeaders(key) {
       ${rest ? `<div class="ll-rest">${rest}</div>` : ''}</div>`;
   };
   el.innerHTML = `<section class="card ll-sec"><div class="card-h"><h3>League Leaders</h3>
-      <span class="see">top 3 per stat · this season</span></div>
+      <span class="see">top 3 per stat · ${seasonLabel()}</span></div>
     <div class="ll-grid">${d.leaders.map(card).join('')}</div></section>`;
 }
 
 // open a league: render its sub-tabs (Standings / Fixtures / League Leaders)
 const LEAGUE_SUBS = [['standings', 'Standings', loadStandings],
   ['fixtures', 'Fixtures', loadFixtures], ['leaders', 'League Leaders', loadLeaders]];
+const seasonLabel = () => (SEASONS.find(s => s.value === curSeason) || {}).label || 'this season';
+const runSub = () => (LEAGUE_SUBS.find(s => s[0] === curSub)[2])(curKey);
 function openLeague(key, sub = 'standings') {
+  curKey = key; curSub = sub;
+  const opts = SEASONS.map(s =>
+    `<option value="${s.value}"${s.value === curSeason ? ' selected' : ''}>${s.label}</option>`).join('');
   document.getElementById('teamsBody').innerHTML =
-    `<div class="tabs lg-subtabs" id="leagueSub">${LEAGUE_SUBS.map(([k, label]) =>
-      `<span class="tab ${k === sub ? 'active' : ''}" data-k="${k}">${label}</span>`).join('')}</div>
+    `<div class="lg-bar">
+       <div class="tabs lg-subtabs" id="leagueSub">${LEAGUE_SUBS.map(([k, label]) =>
+         `<span class="tab ${k === sub ? 'active' : ''}" data-k="${k}">${label}</span>`).join('')}</div>
+       <label class="lg-season">Season <select id="leagueSeason" class="season-sel">${opts}</select></label>
+     </div>
      <div id="leagueContent"><section class="card"><div class="placeholder-note">Loading…</div></section></div>`;
   const bar = document.getElementById('leagueSub');
   bar.querySelectorAll('.tab').forEach(t => t.onclick = () => {
     bar.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
     t.classList.add('active');
-    (LEAGUE_SUBS.find(s => s[0] === t.dataset.k)[2])(key);
+    curSub = t.dataset.k; runSub();
   });
-  (LEAGUE_SUBS.find(s => s[0] === sub)[2])(key);
+  document.getElementById('leagueSeason').onchange = (e) => { curSeason = e.target.value; runSub(); };
+  runSub();
 }
 
 // National teams (international feed): a grid of flag cards with recent record/form
@@ -112,7 +123,8 @@ async function loadNational() {
 }
 
 (async () => {
-  const leagues = await api('/api/leagues');
+  const [leagues, seasons] = await Promise.all([api('/api/leagues'), api('/api/seasons')]);
+  SEASONS = seasons; curSeason = (SEASONS[0] || {}).value || '';
   const tabsEl = document.getElementById('leagueTabs');
   const tabs = [...leagues.map(l => [l.key, l.name]), ['__national', 'National Teams']];
   // open the requested tab: ?tab=national, ?league=<key|name>, else first league
