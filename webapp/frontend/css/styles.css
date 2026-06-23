@@ -1,8 +1,10 @@
 :root{
-  --bg:#070a12; --bg2:#0a0e1a; --card:#0e1320; --card2:#121829;
-  --border:#1b2235; --border2:#232c44;
-  --text:#e8ecf5; --muted:#7f8aa3; --muted2:#5b6478;
-  --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#22305f;
+  /* layered dark: softer (not black) base, lifted card surfaces, lighter borders */
+  --bg:#0a0e19; --bg2:#0c1120; --card:#141b2c; --card2:#1b2338;
+  --elev:#222c44;                                  /* lighter "frosted" surface (search, hovers) */
+  --border:#242e46; --border2:#313d5a;
+  --text:#eef1f8; --muted:#8a95ad; --muted2:#646e86;
+  --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#26335c;
   --green:#34c46a; --red:#e5484d; --gold:#e8b04b;
   --radius:14px; --sb:248px;
 }
@@ -83,7 +85,7 @@ a{color:inherit;text-decoration:none}
 /* topbar */
 .topbar{display:flex;align-items:center;gap:18px;padding:18px 0;position:sticky;top:0;
   background:linear-gradient(var(--bg),rgba(7,10,18,.85));z-index:5;backdrop-filter:blur(6px)}
-.search{flex:1;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--border);
+.search{flex:1;display:flex;align-items:center;gap:10px;background:var(--elev);border:1px solid var(--border2);
   border-radius:12px;padding:11px 14px;color:var(--muted);max-width:760px}
 .search input{flex:1;background:none;border:none;color:var(--text);outline:none;font-size:14px;font-family:inherit}
 .search .kbd{border:1px solid var(--border2);border-radius:6px;padding:1px 7px;font-size:12px;color:var(--muted)}
@@ -94,7 +96,8 @@ a{color:inherit;text-decoration:none}
   color:#fff;font-size:10px;font-weight:700;border-radius:9px;padding:1px 5px}
 
 /* cards & grid */
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035), 0 6px 20px rgba(0,0,0,.28)}
 .card-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .card-h h3{font-size:12.5px;letter-spacing:1.1px;color:var(--muted);font-weight:700;text-transform:uppercase}
 .see{color:var(--accent);font-size:12.5px;font-weight:600}
