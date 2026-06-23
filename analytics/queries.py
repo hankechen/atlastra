@@ -246,6 +246,22 @@ class SoccerDB:
         """Subset of `names` that resolve to a player profile in our warehouse."""
         return {n for n in set(names) if n and self.find_player_id(n) is not None}
 
+    def ratings_by_name(self, names: list[str]) -> dict:
+        """Map each resolvable name -> our headline Atlastra rating (int)."""
+        out = {}
+        for n in set(names):
+            if not n:
+                continue
+            pid = self.find_player_id(n)
+            if pid is None:
+                continue
+            r = self.con.execute(
+                "SELECT rating FROM player_ratings WHERE player_id=? AND rating IS NOT NULL "
+                "ORDER BY (season=?) DESC, minutes DESC LIMIT 1", [pid, FOCUS_SEASON]).fetchone()
+            if r is not None:
+                out[n] = int(round(r[0]))
+        return out
+
     # ----- use case 1: player statistics ---------------------------------- #
     def player_statistics(self, player: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
         """Understat core stats + FotMob enrichment (dribbles, tackles,

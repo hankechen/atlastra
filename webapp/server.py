@@ -61,7 +61,18 @@ def match_api(path: str, q: dict) -> dict:
     if path == "/api/match/stats":
         return live_feed.statistics(eid)
     if path == "/api/match/lineups":
-        return live_feed.lineups(eid)
+        d = live_feed.lineups(eid)
+        players = []
+        for side in ("home", "away"):
+            s = d.get(side) or {}
+            players += (s.get("starting_xi") or []) + (s.get("substitutes") or [])
+        names = [p.get("name") for p in players]
+        if names:
+            with SoccerDB(read_only=True) as db:
+                rmap = db.ratings_by_name(names)
+            for p in players:
+                p["atlas_rating"] = rmap.get(p.get("name"))
+        return d
     if path == "/api/match/shotmap":
         return live_feed.shotmap(eid)
     if path == "/api/match/timeline":
