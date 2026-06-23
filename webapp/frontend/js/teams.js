@@ -28,6 +28,34 @@ async function loadTable(key) {
         <td><b>${t.pts}</b></td>
         <td class="formcell">${formPills(t.form)}</td>
       </tr>`).join('')}</tbody></table></div></section>`;
+  loadLeaders(key);
+}
+
+// per-league leaders in every stat: top scorer, assister, creator, dribbler, …
+async function loadLeaders(key) {
+  let d;
+  try { d = await api('/api/league_leaders?league=' + encodeURIComponent(key)); }
+  catch { return; }
+  if (!d.available || !d.leaders.length) return;
+  const ph = (p) => `/player.html?name=${encodeURIComponent(p.player)}`;
+  const card = (b) => {
+    const lead = b.top[0];
+    const rest = b.top.slice(1).map((p, i) => `<a class="ll-row" href="${ph(p)}">
+        <span class="ll-rk">${i + 2}</span><span class="ll-rn">${p.player}</span><b>${p.value}</b></a>`).join('');
+    return `<div class="ll-card">
+      <div class="ll-h">${b.label}</div>
+      <a class="ll-lead" href="${ph(lead)}">
+        <span class="ll-ph">${avatarHTML(lead.photo, lead.player)}</span>
+        <span class="ll-nm"><b>${lead.player}</b><small>${lead.team}</small></span>
+        <span class="ll-v">${lead.value}</span></a>
+      ${rest ? `<div class="ll-rest">${rest}</div>` : ''}</div>`;
+  };
+  const sec = document.createElement('section');
+  sec.className = 'card ll-sec';
+  sec.innerHTML = `<div class="card-h"><h3>League Leaders</h3>
+      <span class="see">${d.league} · this season · top 3 per stat</span></div>
+    <div class="ll-grid">${d.leaders.map(card).join('')}</div>`;
+  document.getElementById('teamsBody').appendChild(sec);
 }
 
 // National teams (international feed): a grid of flag cards with recent record/form

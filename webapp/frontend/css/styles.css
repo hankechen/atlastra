@@ -1279,3 +1279,22 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 #authForm input:focus{outline:none;border-color:var(--accent)}
 .auth-err{color:var(--red);font-size:12.5px;min-height:16px;font-weight:600}
 .auth-go{width:100%;justify-content:center}
+
+/* ---- league leaders (Teams page, per league) ---- */
+.ll-sec{margin-top:18px}
+.ll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:14px}
+.ll-card{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px 12px 10px}
+.ll-h{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:9px}
+.ll-lead{display:flex;align-items:center;gap:10px}
+.ll-ph{width:40px;height:40px;border-radius:50%;overflow:hidden;flex:none;background:var(--elev)}
+.ll-ph .avatar,.ll-ph img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.ll-nm{display:flex;flex-direction:column;min-width:0;flex:1}
+.ll-nm b{font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ll-nm small{color:var(--muted);font-size:11.5px}
+.ll-v{font-size:20px;font-weight:800;color:var(--accent2);flex:none}
+.ll-rest{margin-top:8px;border-top:1px solid var(--border);padding-top:6px;display:flex;flex-direction:column;gap:2px}
+.ll-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:2px 0;color:var(--muted)}
+.ll-row:hover{color:var(--text)}
+.ll-rk{width:14px;text-align:center;font-weight:700;color:var(--muted2)}
+.ll-rn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ll-row b{color:var(--text)}

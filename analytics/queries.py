@@ -1116,6 +1116,70 @@ class SoccerDB:
                  "xpts": _r(r.xpts, 1), "form": self._team_form(r.team, season)}
                 for r in df.itertuples()]
 
+    # stat -> (label, format, is_rate). Rates need a higher minutes floor.
+    _LEADER_STATS = [
+        ("goals", "Goals", "int", False), ("assists", "Assists", "int", False),
+        ("ga", "Goal Involvements", "int", False), ("xg", "Expected Goals (xG)", "dec", False),
+        ("xa", "Expected Assists (xA)", "dec", False), ("chances_created", "Chances Created", "int", False),
+        ("big_chances_created", "Big Chances Created", "int", False), ("key_passes", "Key Passes", "int", False),
+        ("shots", "Shots", "int", False), ("dribbles_completed", "Dribbles", "int", False),
+        ("tackles", "Tackles", "int", False), ("interceptions", "Interceptions", "int", False),
+        ("recoveries", "Recoveries", "int", False), ("duels_won", "Duels Won", "int", False),
+        ("passes_completed", "Passes Completed", "int", False),
+        ("goals_per90", "Goals per 90", "dec", True), ("duels_won_pct", "Duels Won %", "pct", True),
+        ("pass_accuracy_pct", "Pass Accuracy %", "pct", True), ("dribble_success_pct", "Dribble Success %", "pct", True),
+    ]
+
+    def web_league_leaders(self, league_key: str, season: str = FOCUS_SEASON,
+                           top: int = 3, min_minutes: int = 450) -> dict:
+        """Use case 1/6: per-league leaders in every stat (top scorers, assisters,
+        creators, dribblers, defenders, …) — top N players per stat for one league.
+        """
+        import pandas as pd
+        nm = self.con.execute("SELECT league_name FROM leagues WHERE league_key=?", [league_key]).fetchone()
+        cols = ", ".join(f"v.{k}" for k, *_ in self._LEADER_STATS if k not in ("ga",))
+        df = self.con.execute(
+            f"""SELECT v.player_id, pl.player_name, v.team, v.minutes, v.ga, {cols}, pe.fpid
+                FROM v_player_season_stats v
+                JOIN player_season_stats p ON p.player_id=v.player_id AND p.season=v.season
+                JOIN players pl ON pl.player_id=v.player_id
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id=v.player_id
+                WHERE p.league_key=? AND v.season=? AND v.minutes>=?""",
+            [league_key, season, min_minutes]).df()
+        if df.empty:
+            return {"available": False, "league": nm[0] if nm else league_key, "leaders": []}
+
+        # rate stats need a volume floor so a tiny-sample fluke (e.g. a keeper at
+        # 100% on one dribble) can't top the chart.
+        rate_min = {"goals_per90": ("goals", 5), "duels_won_pct": ("duels_won", 50),
+                    "pass_accuracy_pct": ("passes_completed", 500),
+                    "dribble_success_pct": ("dribbles_completed", 20)}
+
+        def fmt(v, kind):
+            return (str(int(round(v))) if kind == "int"
+                    else f"{v:.1f}" if kind == "dec" else f"{round(v)}%")
+        leaders = []
+        for key, label, kind, is_rate in self._LEADER_STATS:
+            if key not in df.columns:
+                continue
+            sub = df[df["minutes"] >= 900] if is_rate else df
+            if key in rate_min:
+                vcol, vmin = rate_min[key]
+                sub = sub[sub[vcol] >= vmin]
+            sub = sub.dropna(subset=[key])
+            if not is_rate:
+                sub = sub[sub[key] > 0]
+            sub = sub.sort_values(key, ascending=False).head(top)
+            if sub.empty:
+                continue
+            leaders.append({"key": key, "label": label, "unit": "" if kind != "pct" else "%",
+                            "top": [{"player": r.player_name, "team": r.team,
+                                     "photo": self.player_photo(int(r.fpid) if pd.notna(r.fpid) else None),
+                                     "value": fmt(getattr(r, key), kind)} for r in sub.itertuples()]})
+        return {"available": True, "league": nm[0] if nm else league_key, "leaders": leaders}
+
     def web_team(self, name: str, season: str = FOCUS_SEASON) -> dict:
         """Team performance bundle (use case 6): standing, record, goals, xG/xPts,
         form, recent results and top scorers."""

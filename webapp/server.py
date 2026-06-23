@@ -158,6 +158,8 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_leagues()
         if path == "/api/league_table":
             return d.web_league_table(q.get("league", ["ENG-Premier League"])[0])
+        if path == "/api/league_leaders":
+            return d.web_league_leaders(q.get("league", ["ENG-Premier League"])[0])
         if path == "/api/team":
             return d.web_team(q.get("name", ["Arsenal"])[0])
         if path == "/api/search":
