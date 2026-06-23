@@ -2032,11 +2032,21 @@ class SoccerDB:
     # ---------------------------------------------------------------- use case 4
     #  "Best XI on a Budget" -- maximise total rating across a formation's positional
     #  slots subject to a market-value cap (a sporting-director simulator).
+    # Each formation is an ordered list of OUTFIELD lines, back -> front, every line
+    # listing its slot categories left -> right (GK is implicit at the back). This
+    # drives BOTH selection counts and the pitch layout, so wingers sit on the right
+    # line per formation (front line in 4-3-3, midfield line in 4-4-2, etc.).
     _FORMATIONS = {
-        "4-3-3": {"GK": 1, "CB": 2, "FB": 2, "MID": 3, "W": 2, "ST": 1},
-        "4-4-2": {"GK": 1, "CB": 2, "FB": 2, "MID": 2, "W": 2, "ST": 2},
-        "3-5-2": {"GK": 1, "CB": 3, "FB": 2, "MID": 3, "W": 0, "ST": 2},
-        "3-4-3": {"GK": 1, "CB": 3, "FB": 2, "MID": 2, "W": 2, "ST": 1},
+        "4-3-3":   [["FB", "CB", "CB", "FB"], ["MID", "MID", "MID"], ["W", "ST", "W"]],
+        "4-4-2":   [["FB", "CB", "CB", "FB"], ["W", "MID", "MID", "W"], ["ST", "ST"]],
+        "4-2-3-1": [["FB", "CB", "CB", "FB"], ["MID", "MID"], ["W", "MID", "W"], ["ST"]],
+        "4-1-4-1": [["FB", "CB", "CB", "FB"], ["MID"], ["W", "MID", "MID", "W"], ["ST"]],
+        "4-3-1-2": [["FB", "CB", "CB", "FB"], ["MID", "MID", "MID"], ["MID"], ["ST", "ST"]],
+        "4-5-1":   [["FB", "CB", "CB", "FB"], ["W", "MID", "MID", "MID", "W"], ["ST"]],
+        "3-5-2":   [["CB", "CB", "CB"], ["FB", "MID", "MID", "MID", "FB"], ["ST", "ST"]],
+        "3-4-3":   [["CB", "CB", "CB"], ["FB", "MID", "MID", "FB"], ["W", "ST", "W"]],
+        "3-4-2-1": [["CB", "CB", "CB"], ["FB", "MID", "MID", "FB"], ["W", "W"], ["ST"]],
+        "5-3-2":   [["FB", "CB", "CB", "CB", "FB"], ["MID", "MID", "MID"], ["ST", "ST"]],
     }
     _GRP2CAT = {"GK": "GK", "CB": "CB", "FB": "FB", "DM": "MID", "CM": "MID",
                 "AM": "MID", "W": "W", "ST": "ST"}
@@ -2046,9 +2056,13 @@ class SoccerDB:
 
     def web_best_xi(self, budget_m: float, formation: str = "4-3-3",
                     min_minutes: int = 600) -> dict:
-        form = self._FORMATIONS.get(formation)
-        if not form:
+        lines_def = self._FORMATIONS.get(formation)
+        if not lines_def:
             return {"available": False, "error": "Unknown formation."}
+        form = {"GK": 1}                          # slot counts per category (GK implicit)
+        for line in lines_def:
+            for cat in line:
+                form[cat] = form.get(cat, 0) + 1
         B = min(int(round(budget_m)), 3000)
         if B <= 0:
             return {"available": False, "error": "Budget must be positive."}
@@ -2152,7 +2166,22 @@ class SoccerDB:
             return {"available": False,
                     "error": "Could not assemble a valid XI within that budget."}
         xi = [meta[pid] for pid in comb_p[best_c]]
-        xi.sort(key=lambda p: self._CAT_ORDER.index(p["cat"]))
+        # group the picked players by category (best first) and lay them out onto the
+        # formation's lines, back -> front, so the pitch shape matches the formation.
+        by_cat: dict[str, list] = {}
+        for pid in comb_p[best_c]:
+            by_cat.setdefault(meta[pid]["cat"], []).append(pid)
+        for cat in by_cat:
+            by_cat[cat].sort(key=lambda pid: -meta[pid]["rating"])
+        lines = [[meta[by_cat["GK"].pop()]]]      # GK line at the back
+        for line in lines_def:
+            row = []
+            for cat in line:
+                if by_cat.get(cat):
+                    p = meta[by_cat[cat].pop()]
+                    p["x"] = (len(row) + 0.5) / len(line)   # 0..1 across the pitch
+                    row.append(p)
+            lines.append(row)
         total = sum(p["rating"] for p in xi)
         spent_m = sum(p["value_m"] for p in xi)
         return {"available": True, "formation": formation, "budget_m": budget,
@@ -2160,7 +2189,7 @@ class SoccerDB:
                 "spent_eur": sum(p["value_eur"] for p in xi),
                 "total_rating": total, "avg_rating": round(total / len(xi), 1),
                 "min_budget": min_cost,
-                "slots": [{"cat": c, "label": self._CAT_LABEL[c], "count": form[c]} for c in cats],
+                "lines": lines,                   # back -> front, GK first
                 "xi": xi}
 
     # ---------------------------------------------------------------- use case 24

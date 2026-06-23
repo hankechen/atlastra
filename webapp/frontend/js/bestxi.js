@@ -1,7 +1,8 @@
 renderSidebar('Best XI on a Budget');
 attachSearchDropdown(document.getElementById('searchBox'));
 
-const FORMATIONS = ['4-3-3', '4-4-2', '3-5-2', '3-4-3'];
+const FORMATIONS = ['4-3-3', '4-4-2', '4-2-3-1', '4-1-4-1', '4-3-1-2', '4-5-1',
+  '3-5-2', '3-4-3', '3-4-2-1', '5-3-2'];
 const PRESETS = [100, 250, 500, 1000];
 let formation = '4-3-3';
 
@@ -54,12 +55,10 @@ function tok(p) {
   </a>`;
 }
 
-const ROWS = ['ST', 'W', 'MID', 'DEF', 'GK'];
-function pitch(xi) {
-  const by = { ST: [], W: [], MID: [], DEF: [], GK: [] };
-  for (const p of xi) by[p.cat === 'CB' || p.cat === 'FB' ? 'DEF' : p.cat].push(p);
-  by.DEF.sort((a, b) => (a.cat === 'FB') - (b.cat === 'FB'));   // centre-backs central, full-backs wide
-  const rows = ROWS.filter(r => by[r].length).map(r => `<div class="bxi-row">${by[r].map(tok).join('')}</div>`).join('');
+// d.lines is back -> front (GK first); render with the attacking line on top.
+function pitch(d) {
+  const lines = (d.lines || []).slice().reverse();
+  const rows = lines.map(line => `<div class="bxi-row">${line.map(tok).join('')}</div>`).join('');
   return `<div class="bxi-pitch">
     <div class="bxi-markings">
       <span class="m-half"></span><span class="m-circle"></span><span class="m-spot"></span>
@@ -105,7 +104,7 @@ async function build() {
         <div class="bxi-spend"><div class="bxi-spend-bar" style="width:${pct}%"></div></div>
       </div>
     </section>
-    <section class="card bxi-pitchcard">${pitch(d.xi)}</section>`;
+    <section class="card bxi-pitchcard">${pitch(d)}</section>`;
 }
 
 renderForms();
