@@ -46,20 +46,16 @@ function fmtTile(def, s) {
 }
 const pctColor = (p) => p >= 80 ? '#2fbf71' : p >= 60 ? '#7d9f3a' : p >= 40 ? '#c9a227' : '#c97a27';
 const ordinal = (n) => { const v = n % 100, s = ['th', 'st', 'nd', 'rd']; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
-// bar + number shown under a stat = the value relative to the position peak
-// (best in position across the top-5 leagues = 100). basis matches the tile.
-function pctBar(key, kind) {
-  if (key === 'games') return '';
-  const rec = tilePct[key];
-  const p = rec && rec[kind === 'per90' ? 'p90' : 'tot'];
-  if (p == null) return '';
-  const what = kind === 'per90' ? 'per 90' : 'total';
-  return `<div class="tpctw" title="${p}% of the best ${what} in this position (top-5 leagues)">
+// percentile bar + number shown under a stat (skip Apps — no peer percentile)
+function pctBar(key) {
+  const p = tilePct[key];
+  if (p == null || key === 'games') return '';
+  return `<div class="tpctw" title="${ordinal(p)} percentile vs same position across all top-5 leagues (100 = best in position)">
     <div class="tpct"><i style="width:${p}%;background:${pctColor(p)}"></i></div>
-    <span class="tpctn" style="color:${pctColor(p)}">${p}</span></div>`;
+    <span class="tpctn" style="color:${pctColor(p)}">${ordinal(p)}</span></div>`;
 }
 const oneTile = (def, s) =>
-  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${pctBar(def[1], def[3])}`;
+  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${pctBar(def[1])}`;
 
 function renderTiles(elId, defs, scope) {
   const s = statScopes[scope];
