@@ -1,5 +1,6 @@
 renderSidebar('Compare');
 Chart.defaults.color = '#7f8aa3';
+Chart.defaults.borderColor = 'rgba(150,158,178,.22)';
 Chart.defaults.font.family = 'Inter';
 
 // per-player overlay colours (rgb so we can vary alpha)
@@ -147,8 +148,8 @@ function drawRadar(d) {
       scales: {
         r: {
           min: 0, max: 100, ticks: { display: false, stepSize: 25 },
-          grid: { color: '#1b2236' }, angleLines: { color: '#1b2236' },
-          pointLabels: { color: '#cdd4e6', font: { size: 11 } },
+          grid: { color: 'rgba(150,158,178,.22)' }, angleLines: { color: 'rgba(150,158,178,.22)' },
+          pointLabels: { color: '#8a93a6', font: { size: 11 } },
         },
       },
     },

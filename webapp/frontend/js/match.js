@@ -385,7 +385,7 @@ function heatColor(v) {
   return `hsla(${hue},100%,${light}%,${alpha})`;
 }
 function drawPitch(ctx, W, H) {
-  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(150,158,178,.38)'; ctx.lineWidth = 1.2;
   ctx.strokeRect(2, 2, W - 4, H - 4);
   ctx.beginPath(); ctx.moveTo(W / 2, 2); ctx.lineTo(W / 2, H - 2); ctx.stroke();
   ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.13, 0, 2 * Math.PI); ctx.stroke();

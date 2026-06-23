@@ -1,3 +1,6 @@
+// apply the saved theme ASAP (default dark; .light flips CSS vars)
+if (localStorage.getItem('atla_theme') === 'light') document.documentElement.classList.add('light');
+
 // shared helpers + sidebar for the Atlastra UI
 async function api(path) {
   const r = await fetch(path);
@@ -176,9 +179,27 @@ function initTopbarUser() {
   av.onclick = () => { location.href = '/profile.html'; };
 }
 
+// light / dark toggle button in the top bar (persists to localStorage)
+function initThemeToggle() {
+  const icons = document.querySelector('.tb-icons');
+  if (!icons || document.getElementById('themeToggle')) return;
+  [...icons.children].forEach(c => { if (['🌙', '☀️', '🌗', '🌞'].includes((c.textContent || '').trim())) c.remove(); });
+  const btn = document.createElement('button');
+  btn.className = 'theme-toggle'; btn.id = 'themeToggle'; btn.title = 'Toggle light / dark';
+  const sync = () => { btn.textContent = document.documentElement.classList.contains('light') ? '🌙' : '☀️'; };
+  btn.onclick = () => {
+    const light = document.documentElement.classList.toggle('light');
+    localStorage.setItem('atla_theme', light ? 'light' : 'dark');
+    sync();
+  };
+  sync();
+  icons.prepend(btn);
+}
+
 function initNotifications() {
   const icons = document.querySelector('.tb-icons');
   if (!icons || document.getElementById('nbell')) return;
+  initThemeToggle();
   initTopbarUser();
   [...icons.children].forEach(c => { if ((c.textContent || '').trim() === '🔔') c.remove(); });
   const wrap = document.createElement('div'); wrap.className = 'nbell-wrap';

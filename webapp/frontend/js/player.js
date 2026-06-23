@@ -1,5 +1,6 @@
 renderSidebar('Players');
 Chart.defaults.color = '#7f8aa3';
+Chart.defaults.borderColor = 'rgba(150,158,178,.22)';
 Chart.defaults.font.family = 'Inter';
 let radarChart, careerChart;
 let curSeason = null;                                // selected season (raw code)
@@ -69,7 +70,7 @@ function drawGauge(canvasId, rating, w = 150, h = 92) {
   const frac = rating ? Math.max(0, Math.min(1, rating / 99)) : 0;
   const g = ctx.createLinearGradient(0, 0, w, 0);
   g.addColorStop(0, '#5570f0'); g.addColorStop(1, '#7d5cf5');
-  for (const [col, a0, a1] of [['#1b2236', Math.PI, 2 * Math.PI], [g, Math.PI, Math.PI + Math.PI * frac]]) {
+  for (const [col, a0, a1] of [['rgba(150,158,178,.22)', Math.PI, 2 * Math.PI], [g, Math.PI, Math.PI + Math.PI * frac]]) {
     ctx.beginPath(); ctx.lineWidth = 11; ctx.lineCap = 'round';
     ctx.strokeStyle = col; ctx.arc(cx, cy, rad, a0, a1); ctx.stroke();
   }
@@ -213,7 +214,7 @@ function heatColor(v) {
   return `hsla(${hue}, 100%, ${light}%, ${alpha})`;
 }
 function drawPitch(ctx, W, H) {
-  ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(150,158,178,.38)'; ctx.lineWidth = 1.5;
   ctx.strokeRect(2, 2, W - 4, H - 4);
   ctx.beginPath(); ctx.moveTo(W / 2, 2); ctx.lineTo(W / 2, H - 2); ctx.stroke();
   ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.13, 0, 2 * Math.PI); ctx.stroke();
@@ -283,8 +284,8 @@ function drawRadar(radar) {
       borderColor: '#7d5cf5', pointBackgroundColor: '#7d5cf5', pointRadius: 3 }] },
     options: { plugins: { legend: { display: false } }, scales: { r: {
       min: 0, max: 100, ticks: { display: false, stepSize: 25 },
-      grid: { color: '#1b2236' }, angleLines: { color: '#1b2236' },
-      pointLabels: { color: '#cdd4e6', font: { size: 11 },
+      grid: { color: 'rgba(150,158,178,.22)' }, angleLines: { color: 'rgba(150,158,178,.22)' },
+      pointLabels: { color: '#8a93a6', font: { size: 11 },
         callback: (l, i) => `${l}  ${data[i]}` } } } },
   });
 }
@@ -297,7 +298,7 @@ function drawCareer(career, stat) {
       borderColor: '#5570f0', backgroundColor: 'rgba(85,112,240,.15)', fill: true, tension: .35,
       pointBackgroundColor: '#5570f0', pointRadius: 4 }] },
     options: { plugins: { legend: { display: false }, tooltip: { enabled: true } },
-      scales: { x: { grid: { display: false } }, y: { grid: { color: '#1b2236' }, beginAtZero: true } } },
+      scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(150,158,178,.22)' }, beginAtZero: true } } },
   });
 }
 

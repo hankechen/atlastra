@@ -1,6 +1,7 @@
 renderSidebar('Team Styles');
 attachSearchDropdown(document.getElementById('searchBox'));
 Chart.defaults.color = '#7f8aa3';
+Chart.defaults.borderColor = 'rgba(150,158,178,.22)';
 Chart.defaults.font.family = 'Inter';
 
 const COLORS = [[85, 112, 240], [46, 200, 150]];
