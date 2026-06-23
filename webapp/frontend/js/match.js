@@ -145,8 +145,9 @@ function placeSide(xi, rows, isHome) {
 function chipHTML({ x, y, p }, isHome) {
   const rt = p.rating != null
     ? `<i class="luc-rt" style="background:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</i>` : '';
-  // our headline Atlastra rating (top-left), shown only when the player has one
-  const ar = p.atlas_rating != null ? `<i class="luc-ar" title="Atlastra rating">${p.atlas_rating}</i>` : '';
+  // our Atlastra League/UCL combined rating (or ~estimate when not in our DB)
+  const ar = p.atlas_rating != null
+    ? `<i class="luc-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (League/UCL combined)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</i>` : '';
   const cap = p.captain ? '<i class="luc-cap">C</i>' : '';
   // goal / assist icons from the player's match stats (keyed by SofaScore id)
   const st = _luStats && _luStats[p.id];
@@ -164,7 +165,7 @@ function chipHTML({ x, y, p }, isHome) {
 function lineupSideList(s, label) {
   if (!s) return '';
   const row = (p) => `<div class="lu-row"><span class="lu-no">${p.number ?? ''}</span>
-    <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar" title="Atlastra rating">${p.atlas_rating}</span>` : ''}</span><span class="lu-pos">${esc(p.position || '')}</span>
+    <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (League/UCL combined)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}</span><span class="lu-pos">${esc(p.position || '')}</span>
     ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   return `<section class="card lu-col">
     <div class="card-h"><h3>${esc(label)}</h3><span class="see">${esc(s.formation || '')}</span></div>
@@ -180,7 +181,7 @@ function subsCol(s, label) {
     const ev = (g ? ` ⚽${g > 1 ? g : ''}` : '') + (a ? ` 👟${a > 1 ? a : ''}` : '');
     return `<div class="lu-row" onclick="openPlayerModal(${p.id})" style="cursor:pointer">
       <span class="lu-no">${p.number ?? ''}</span>
-      <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar" title="Atlastra rating">${p.atlas_rating}</span>` : ''}<span class="lu-ev">${ev}</span></span>
+      <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (League/UCL combined)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}<span class="lu-ev">${ev}</span></span>
       <span class="lu-pos">${esc(p.position || '')}</span>
       ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   };

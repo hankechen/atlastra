@@ -649,8 +649,10 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .luc-rt{position:absolute;right:-11px;bottom:-6px;font-size:12px;font-weight:700;color:#06140a;border-radius:5px;padding:1px 5px;font-style:normal}
 .luc-ar{position:absolute;left:-11px;bottom:-6px;font-size:12px;font-weight:800;color:#fff;font-style:normal;
   background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:5px;padding:1px 5px;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.luc-ar.est{background:none;border:1.5px solid var(--accent2);color:var(--accent2);box-shadow:none;padding:0 4px}
 .lu-ar{display:inline-block;margin-left:6px;font-size:11px;font-weight:800;color:#fff;
   background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:5px;padding:0 5px}
+.lu-ar.est{background:none;border:1px solid var(--accent2);color:var(--accent2)}
 .luc-cap{position:absolute;left:-8px;top:-6px;font-size:10px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:16px;height:16px;line-height:16px;font-style:normal}
 
 /* ---- match prediction (from bookmaker odds) ---- */

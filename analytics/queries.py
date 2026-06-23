@@ -247,13 +247,29 @@ class SoccerDB:
         return {n for n in set(names) if n and self.find_player_id(n) is not None}
 
     def ratings_by_name(self, names: list[str]) -> dict:
-        """Map each resolvable name -> our headline Atlastra rating (int)."""
+        """Map each resolvable name -> our combined League/UCL rating (int).
+
+        Minutes-weighted blend of the league + UCL common-metric ratings for the
+        current season; falls back to the latest if this season is missing, then
+        to the headline composite rating.
+        """
         out = {}
         for n in set(names):
             if not n:
                 continue
             pid = self.find_player_id(n)
             if pid is None:
+                continue
+            rows = self.con.execute(
+                "SELECT season, rating, minutes FROM player_ratings_combined "
+                "WHERE player_id=? AND rating IS NOT NULL", [pid]).fetchall()
+            if rows:
+                seasons = {s for s, _, _ in rows}
+                sea = FOCUS_SEASON if FOCUS_SEASON in seasons else max(seasons)
+                sr = [(r, m) for s, r, m in rows if s == sea]   # league + ucl of that season
+                tot = sum((m or 0) for _, m in sr)
+                out[n] = int(round(sum(r * (m or 0) for r, m in sr) / tot)) if tot else \
+                    int(round(sum(r for r, _ in sr) / len(sr)))
                 continue
             r = self.con.execute(
                 "SELECT rating FROM player_ratings WHERE player_id=? AND rating IS NOT NULL "

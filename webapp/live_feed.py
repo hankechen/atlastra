@@ -124,6 +124,30 @@ def _lineup_side(side: dict) -> dict:
     return {"formation": side.get("formation"), "starting_xi": starters, "substitutes": subs}
 
 
+def season_estimate(player_id: int) -> int | None:
+    """Estimate an Atlastra-scale rating (~30–92) for a player NOT in our warehouse,
+    from their best recent SofaScore season average rating. Cached (1 day)."""
+    if not player_id:
+        return None
+    seas = _get(f"/player/{player_id}/statistics/seasons", ttl=86400)
+    best = (0.0, 0)                                   # (sofa rating, appearances)
+    for blk in ((seas or {}).get("uniqueTournamentSeasons") or [])[:2]:
+        ut = (blk.get("uniqueTournament") or {}).get("id")
+        sns = blk.get("seasons") or []
+        if not ut or not sns:
+            continue
+        ov = _get(f"/player/{player_id}/unique-tournament/{ut}/season/{sns[0]['id']}/statistics/overall",
+                  ttl=86400)
+        st = (ov or {}).get("statistics") or {}
+        rt, ap = st.get("rating"), st.get("appearances") or 0
+        if rt and ap >= 2 and ap > best[1]:
+            best = (float(rt), ap)
+    if best[1] == 0:
+        return None
+    # SofaScore season ratings cluster ~6.0–8.0; map to our wider scale, then clamp.
+    return max(30, min(92, round((best[0] - 6.0) * 28 + 40)))
+
+
 def lineups(eid: int) -> dict:
     d = _get(f"/event/{eid}/lineups", ttl=60)
     if not d or "home" not in d:

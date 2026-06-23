@@ -10,6 +10,7 @@ frontend, per the design mock.
 Run:  python -m webapp.server     ->  http://localhost:8000
 """
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,12 +67,24 @@ def match_api(path: str, q: dict) -> dict:
         for side in ("home", "away"):
             s = d.get(side) or {}
             players += (s.get("starting_xi") or []) + (s.get("substitutes") or [])
-        names = [p.get("name") for p in players]
-        if names:
+        if players:
             with SoccerDB(read_only=True) as db:
-                rmap = db.ratings_by_name(names)
+                rmap = db.ratings_by_name([p.get("name") for p in players])
+            # estimate (SofaScore season form) for players not in our DB — in
+            # parallel, since each is a couple of network calls.
+            need = {p.get("id") for p in players if rmap.get(p.get("name")) is None and p.get("id")}
+            ests = {}
+            if need:
+                with ThreadPoolExecutor(max_workers=8) as ex:
+                    futs = {ex.submit(live_feed.season_estimate, pid): pid for pid in need}
+                    for f in as_completed(futs):
+                        ests[futs[f]] = f.result()
             for p in players:
-                p["atlas_rating"] = rmap.get(p.get("name"))
+                r = rmap.get(p.get("name"))
+                if r is not None:                       # our combined League/UCL rating
+                    p["atlas_rating"], p["atlas_est"] = r, False
+                elif ests.get(p.get("id")) is not None:  # estimated from SofaScore
+                    p["atlas_rating"], p["atlas_est"] = ests[p["id"]], True
         return d
     if path == "/api/match/shotmap":
         return live_feed.shotmap(eid)
