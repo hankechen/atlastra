@@ -342,11 +342,3 @@ document.getElementById('searchBox').addEventListener('keydown', (e) => {
   }
 });
 
-// Atlastra Top 10 rail
-(async () => {
-  const ranks = await api('/api/rankings?limit=10');
-  document.getElementById('top10').innerHTML = ranks.map(p => `<div class="prow" onclick="location.href='${pHref(p.player)}'">
-    <span class="rk">${p.rank}</span><span class="pic">${avatarHTML(p.photo, p.player)}</span>
-    <span class="nm" style="flex:1">${p.player}</span>
-    <b style="color:var(--accent2)">${p.rating}</b></div>`).join('');
-})();
