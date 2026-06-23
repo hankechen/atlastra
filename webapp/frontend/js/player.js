@@ -45,12 +45,14 @@ function fmtTile(def, s) {
   return m ? (v / m * 90).toFixed(2) : '—';
 }
 const pctColor = (p) => p >= 80 ? '#2fbf71' : p >= 60 ? '#7d9f3a' : p >= 40 ? '#c9a227' : '#c97a27';
-// percentile bar shown under a stat (skip Apps — no peer percentile)
+const ordinal = (n) => { const v = n % 100, s = ['th', 'st', 'nd', 'rd']; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+// percentile bar + number shown under a stat (skip Apps — no peer percentile)
 function pctBar(key) {
   const p = tilePct[key];
   if (p == null || key === 'games') return '';
-  return `<div class="tpct" title="${p}th percentile vs position peers (100 = best)">
-    <i style="width:${p}%;background:${pctColor(p)}"></i></div>`;
+  return `<div class="tpctw" title="Percentile vs position peers (100 = best in position)">
+    <div class="tpct"><i style="width:${p}%;background:${pctColor(p)}"></i></div>
+    <span class="tpctn" style="color:${pctColor(p)}">${ordinal(p)}</span></div>`;
 }
 const oneTile = (def, s) =>
   `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${pctBar(def[1])}`;

@@ -1231,8 +1231,10 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 
 /* per-stat percentile bar + grouped (paired) stat tiles */
 .tile{position:relative}
-.tpct{height:4px;border-radius:3px;background:rgba(150,158,178,.18);overflow:hidden;margin-top:9px}
+.tpctw{margin-top:9px;display:flex;align-items:center;gap:7px;justify-content:center}
+.tpct{flex:1;max-width:60px;height:4px;border-radius:3px;background:rgba(150,158,178,.18);overflow:hidden}
 .tpct i{display:block;height:100%;border-radius:3px}
+.tpctn{font-size:10px;font-weight:800;flex:none}
 .tile.pair{grid-column:span 2;display:flex;padding:0;align-items:stretch}
 .tile.pair .tsub{flex:1;padding:14px 10px;text-align:center;min-width:0}
 .tile.pair .tsub:first-child{border-right:1px solid var(--border)}
