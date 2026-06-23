@@ -76,7 +76,9 @@ def match_api(path: str, q: dict) -> dict:
 
 
 def api(path: str, q: dict) -> dict | list:
-    if path.startswith("/api/match"):
+    # match-detail routes are exactly /api/match or /api/match/... — must NOT
+    # swallow sibling routes like /api/match_search or /api/match_preview.
+    if path == "/api/match" or path.startswith("/api/match/"):
         return match_api(path, q)
     if path == "/api/national_team":          # SofaScore live proxy (no DB)
         return live_feed.national_team(int(q.get("id", [0])[0]))

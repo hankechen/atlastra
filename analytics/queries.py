@@ -165,13 +165,45 @@ class SoccerDB:
         ).fetchone()
         return None if df is None else int(df[0])
 
-    def find_team_id(self, name: str) -> int | None:
+    # common shorthands users type that aren't substrings of the canonical name
+    _TEAM_ALIASES = {
+        "man city": "Manchester City", "man utd": "Manchester United",
+        "man united": "Manchester United", "spurs": "Tottenham",
+        "wolves": "Wolverhampton", "psg": "Paris", "barca": "Barcelona",
+        "atletico": "Atlético", "inter": "Internazionale", "gladbach": "Gladbach",
+        "leverkusen": "Leverkusen", "dortmund": "Dortmund", "bayern": "Bayern",
+    }
+
+    def _team_id_like(self, term: str) -> int | None:
         row = self.con.execute(
             "SELECT team_id FROM teams "
-            "WHERE strip_accents(lower(team_name)) LIKE strip_accents(lower('%'||?||'%')) LIMIT 1",
-            [name],
-        ).fetchone()
+            "WHERE strip_accents(lower(team_name)) LIKE strip_accents(lower('%'||?||'%')) "
+            "ORDER BY length(team_name) LIMIT 1", [term]).fetchone()
         return None if row is None else int(row[0])
+
+    def find_team_id(self, name: str) -> int | None:
+        q = (name or "").strip()
+        if not q:
+            return None
+        # 1) plain substring match (the canonical case)
+        tid = self._team_id_like(q)
+        if tid is not None:
+            return tid
+        # 2) known shorthand -> canonical fragment
+        alias = self._TEAM_ALIASES.get(q.lower())
+        if alias and (tid := self._team_id_like(alias)) is not None:
+            return tid
+        # 3) token-AND: every typed word must appear (handles "Man City" etc.)
+        toks = q.split()
+        if len(toks) > 1:
+            where = " AND ".join(
+                ["strip_accents(lower(team_name)) LIKE strip_accents(lower('%'||?||'%'))"] * len(toks))
+            row = self.con.execute(
+                f"SELECT team_id FROM teams WHERE {where} ORDER BY length(team_name) LIMIT 1",
+                toks).fetchone()
+            if row is not None:
+                return int(row[0])
+        return None
 
     # ----- use case 1: player statistics ---------------------------------- #
     def player_statistics(self, player: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
