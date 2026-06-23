@@ -1,13 +1,15 @@
 :root{
-  /* layered dark: softer (not black) base, lifted card surfaces, lighter borders */
-  --bg:#0a0e19; --bg2:#0c1120; --card:#141b2c; --card2:#1b2338;
-  --elev:#222c44;                                  /* lighter "frosted" surface (search, hovers) */
-  --border:#242e46; --border2:#313d5a;
-  --text:#eef1f8; --muted:#8a95ad; --muted2:#646e86;
-  --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#26335c;
+  /* slate theme: noticeably lighter content surfaces, dark sidebar kept for contrast */
+  --bg:#171d2b; --bg2:#0c1120; --card:#202839; --card2:#29324a;
+  --elev:#313c58;                                  /* lighter "frosted" surface (top bar, tiles, controls) */
+  --border:#323d59; --border2:#404e6e;
+  --text:#eff2f9; --muted:#9aa4ba; --muted2:#727d96;
+  --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#2c3b68;
   --green:#34c46a; --red:#e5484d; --gold:#e8b04b;
   --radius:14px; --sb:248px;
 }
+/* keep the sidebar a touch darker than the lighter content for a clear split */
+.sidebar{--bg2:#0c1120; --card:#141b2c; --card2:#1b2338; --border:#1f2740; --muted:#7f8aa3}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
