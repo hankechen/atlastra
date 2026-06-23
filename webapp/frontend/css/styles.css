@@ -14,14 +14,15 @@
 
 /* ---- LIGHT THEME (toggle adds .light on <html>) ---- */
 html.light{
-  --bg:#eef1f7; --bg2:#ffffff; --card:#ffffff; --card2:#f3f5fb; --elev:#e9edf6;
-  --border:#e3e7f0; --border2:#d5dbe8;
-  --text:#1b2230; --muted:#5d6678; --muted2:#8b94a6;
-  --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#e7ebff;
-  --green:#1f9d57; --red:#d63f44; --gold:#bd8a1f;
+  /* soft light (no pure white): muted grey page, off-white lifted cards */
+  --bg:#dfe3ec; --bg2:#eef1f7; --card:#f4f6fb; --card2:#e9edf5; --elev:#e1e6f0;
+  --border:#d2d8e6; --border2:#c2cadc;
+  --text:#222a3a; --muted:#5b6478; --muted2:#828ca2;
+  --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#dde3f7;
+  --green:#1f9d57; --red:#d63f44; --gold:#b9871d;
   --line:rgba(40,50,75,.16);
 }
-html.light .sidebar{--bg2:#ffffff; --card:#fff; --card2:#f3f5fb; --border:#e3e7f0; --muted:#5d6678}
+html.light .sidebar{--bg2:#e8ebf3; --card:#f4f6fb; --card2:#e9edf5; --border:#d2d8e6; --muted:#5b6478}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
@@ -264,7 +265,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .subtabs a{padding:9px 16px;font-size:13.5px;font-weight:600;color:var(--muted);
   border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .12s}
 .subtabs a:hover{color:var(--text)}
-.subtabs a.active{color:#fff;border-bottom-color:var(--accent)}
+.subtabs a.active{color:var(--text);border-bottom-color:var(--accent)}
 .page-head{display:flex;align-items:center;justify-content:space-between;margin:6px 0 18px}
 .page-head h2{font-size:24px;font-weight:800}
 .page-head p{color:var(--muted);font-size:13px;margin-top:3px}
@@ -388,7 +389,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .tmeta h1{font-size:30px;font-weight:800}
 .tmeta .tsub{color:var(--muted);margin:5px 0 12px;font-size:14px}
 .tmeta .trank{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.pill-rank{background:var(--accent-soft);color:#fff;border-radius:20px;padding:5px 14px;font-weight:700;font-size:13px}
+.pill-rank{background:var(--accent-soft);color:var(--text);border-radius:20px;padding:5px 14px;font-weight:700;font-size:13px}
 .tform{display:inline-flex;gap:3px}
 #perfTiles{grid-template-columns:repeat(9,1fr)}
 .res-row{display:grid;grid-template-columns:30px 26px 1fr auto auto;align-items:center;gap:12px;
@@ -501,7 +502,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .arch-nav .role{display:flex;align-items:center;justify-content:space-between;width:100%;background:none;border:none;
   color:var(--muted);font:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:9px 11px;border-radius:9px;text-align:left}
 .arch-nav .role:hover{background:#141a2b;color:var(--text)}
-.arch-nav .role.active{background:linear-gradient(90deg,var(--accent-soft),transparent);color:#fff;box-shadow:inset 3px 0 0 var(--accent)}
+.arch-nav .role.active{background:linear-gradient(90deg,var(--accent-soft),transparent);color:var(--text);box-shadow:inset 3px 0 0 var(--accent)}
 .arch-nav .role .rc{color:var(--muted2);font-size:12px;font-weight:700}
 .ad-grp{font-size:12px;letter-spacing:1px;color:var(--accent2);font-weight:700;text-transform:uppercase}
 .ad-name{font-size:26px;font-weight:800;margin:4px 0 8px}
@@ -701,7 +702,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 
 /* player stats table */
 .pl-tbl th{cursor:pointer;white-space:nowrap}
-.pl-tbl th.sorted{color:#fff}
+.pl-tbl th.sorted{color:var(--text)}
 .pl-tbl th.tl,.pl-tbl td.tl{text-align:left}
 .pl-tbl td{text-align:center;white-space:nowrap}
 .pl-tbl .pl-no{color:var(--muted);font-weight:700;display:inline-block;width:20px}
@@ -795,7 +796,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
   cursor:pointer;font-weight:800;font-size:12.5px;min-width:62px;transition:.12s}
 .bxi-fbtn:hover{border-color:var(--accent2)}
 .bxi-fbtn.active{background:linear-gradient(180deg,rgba(85,112,240,.28),var(--card2));
-  border-color:var(--accent);color:#fff}
+  border-color:var(--accent);color:var(--text)}
 .bxi-pic{display:flex;flex-direction:column;gap:3px}
 .bxi-pic-r{display:flex;justify-content:center;gap:3px}
 .bxi-pic-r i{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.8}
