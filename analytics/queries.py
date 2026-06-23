@@ -205,6 +205,10 @@ class SoccerDB:
                 return int(row[0])
         return None
 
+    def have_profiles(self, names: list[str]) -> set[str]:
+        """Subset of `names` that resolve to a player profile in our warehouse."""
+        return {n for n in set(names) if n and self.find_player_id(n) is not None}
+
     # ----- use case 1: player statistics ---------------------------------- #
     def player_statistics(self, player: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
         """Understat core stats + FotMob enrichment (dribbles, tackles,

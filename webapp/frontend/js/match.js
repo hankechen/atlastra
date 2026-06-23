@@ -359,7 +359,9 @@ function renderPlayers() {
       <thead><tr>${PCOLS.map(([k, l]) => `<th data-k="${k}" class="${k === playerSort.key ? 'sorted' : ''} ${k === 'name' ? 'tl' : ''}">${l}${k === playerSort.key ? (playerSort.dir < 0 ? ' ▾' : ' ▴') : ''}</th>`).join('')}<th>Cards</th></tr></thead>
       <tbody>${rows.map(p => `<tr class="${p.started ? '' : 'sub-row'}">
         ${PCOLS.map(([k]) => k === 'name'
-          ? `<td class="tl"><span class="pl-no">${p.number ?? ''}</span>${esc(p.name)} <span class="muted">${esc(p.position || '')} · ${esc((p.team || '').slice(0, 12))}</span></td>`
+          ? `<td class="tl"><span class="pl-no">${p.number ?? ''}</span>${p.has_profile
+              ? `<a class="pl-name-link" href="/player.html?name=${encodeURIComponent(p.name)}" title="View ${esc(p.name)}'s profile">${esc(p.name)}</a>`
+              : esc(p.name)} <span class="muted">${esc(p.position || '')} · ${esc((p.team || '').slice(0, 12))}</span></td>`
           : k === 'rating'
             ? `<td>${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : '—'}</td>`
             : `<td>${fmt(p[k], k)}</td>`).join('')}

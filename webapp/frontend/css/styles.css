@@ -1247,3 +1247,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .mcomp{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;
   background:var(--card2);border:1px solid var(--border2);color:var(--muted)}
 .mcomp.ucl{background:var(--accent-soft);border-color:transparent;color:var(--accent2)}
+
+/* clickable player name -> profile (match player-stats table) */
+.pl-name-link{color:var(--text);font-weight:600;text-decoration:none}
+.pl-name-link:hover{color:var(--accent2);text-decoration:underline}

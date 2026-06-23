@@ -67,7 +67,14 @@ def match_api(path: str, q: dict) -> dict:
     if path == "/api/match/timeline":
         return live_feed.timeline(eid)
     if path == "/api/match/player-stats":
-        return live_feed.player_stats(eid)
+        d = live_feed.player_stats(eid)
+        names = [p.get("name") for p in d.get("players", [])]
+        if names:
+            with SoccerDB(read_only=True) as db:
+                have = db.have_profiles(names)
+            for p in d["players"]:
+                p["has_profile"] = p.get("name") in have
+        return d
     if path == "/api/match/heatmap":
         return live_feed.player_heatmap(eid, int(q.get("player_id", [0])[0]))
     if path == "/api/match/prediction":
