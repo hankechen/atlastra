@@ -7,6 +7,34 @@ async function api(path) {
   if (!r.ok) throw new Error((await r.json()).error || r.statusText);
   return r.json();
 }
+async function apiPost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+
+// ---- Optional accounts: sign in to sync the Store across devices --------------
+// Guest is always fine (localStorage only). When signed in, the local Store blob
+// is pushed to the server on change and pulled back on the next login.
+const Auth = {
+  user: null, _t: null,
+  async me() { try { this.user = (await api('/api/auth/me')).user; } catch { this.user = null; } return this.user; },
+  async signup(username, password) { this.user = (await apiPost('/api/auth/signup', { username, password })).user; return this.user; },
+  async login(username, password) { this.user = (await apiPost('/api/auth/login', { username, password })).user; return this.user; },
+  async logout() { try { await apiPost('/api/auth/logout'); } catch { /* ignore */ } this.user = null; },
+  pushSoon() { clearTimeout(this._t); this._t = setTimeout(() => this.push(), 800); },
+  async push() { if (this.user) { try { await apiPost('/api/user/data', { data: Store._read() }); } catch { /* offline */ } } },
+  // server wins on pull; if the account has no data yet, seed it from local (guest carry-over)
+  async pull() {
+    try {
+      const d = await api('/api/user/data');
+      if (d.data) { localStorage.setItem(ATLA_KEY, JSON.stringify(d.data)); window.dispatchEvent(new Event('atla-store')); }
+      else { await this.push(); }
+    } catch { /* ignore */ }
+  },
+};
 
 // ---- Store: client-side personalization (no backend) -------------------------
 // Follows, watchlist and saved comparisons persist in localStorage. Lists hold
@@ -16,7 +44,8 @@ const ATLA_KEY = 'atlastra_store_v1';
 const Store = {
   _read() { try { return JSON.parse(localStorage.getItem(ATLA_KEY)) || {}; } catch { return {}; } },
   _write(s) { try { localStorage.setItem(ATLA_KEY, JSON.stringify(s)); } catch { /* quota */ }
-    window.dispatchEvent(new Event('atla-store')); },
+    window.dispatchEvent(new Event('atla-store'));
+    if (typeof Auth !== 'undefined' && Auth.user) Auth.pushSoon(); },
   list(k) { return this._read()[k] || []; },
   has(k, id) { return this.list(k).some(x => x.id === id); },
   count(k) { return this.list(k).length; },
@@ -218,8 +247,80 @@ function initNotifications() {
   _notifTimer = setInterval(notifTick, 45000);
   window.addEventListener('atla-store', () => notifTick());
 }
-if (document.readyState !== 'loading') initNotifications();
-else document.addEventListener('DOMContentLoaded', initNotifications);
+// ---- auth UI: sidebar control + sign-in/up modal ----
+let _sbActive = null;                          // last active key passed to renderSidebar
+function refreshAuthUI() {
+  const btn = document.getElementById('sbAuthBtn'), sub = document.getElementById('sbUserSub');
+  if (!btn) return;
+  if (Auth.user) {
+    btn.textContent = 'Sign out'; btn.classList.add('out');
+    btn.onclick = async (e) => { e.preventDefault(); sessionStorage.removeItem('atla_synced'); await Auth.logout(); location.reload(); };
+    if (sub) sub.textContent = '@' + Auth.user.username + ' · synced';
+  } else {
+    btn.textContent = 'Sign in to sync'; btn.classList.remove('out');
+    btn.onclick = (e) => { e.preventDefault(); openAuthModal(); };
+    if (sub) sub.textContent = 'View Profile';
+  }
+}
+function openAuthModal(mode = 'login') {
+  if (document.getElementById('authModal')) return;
+  const el = document.createElement('div');
+  el.id = 'authModal'; el.className = 'auth-ov';
+  el.innerHTML = `<div class="auth-card">
+    <button class="auth-x" id="authX" title="Close">✕</button>
+    <div class="auth-h">Atlastra account</div>
+    <p class="auth-sub">Optional — sign in to sync your profile, follows and saved comparisons across devices. Atlastra works fully as a guest too.</p>
+    <div class="auth-tabs"><button type="button" data-m="login">Sign in</button><button type="button" data-m="signup">Create account</button></div>
+    <form id="authForm" autocomplete="on">
+      <input id="authU" name="username" placeholder="Username" autocomplete="username" maxlength="24" required>
+      <input id="authP" name="password" type="password" placeholder="Password (min 6 chars)" required>
+      <div class="auth-err" id="authErr"></div>
+      <button class="btn btn-primary auth-go" id="authGo" type="submit">Sign in</button>
+    </form></div>`;
+  document.body.appendChild(el);
+  let m = mode;
+  const setMode = (x) => {
+    m = x;
+    el.querySelectorAll('.auth-tabs button').forEach(b => b.classList.toggle('active', b.dataset.m === x));
+    document.getElementById('authGo').textContent = x === 'login' ? 'Sign in' : 'Create account';
+    document.getElementById('authP').autocomplete = x === 'login' ? 'current-password' : 'new-password';
+  };
+  el.querySelectorAll('.auth-tabs button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+  const close = () => el.remove();
+  document.getElementById('authX').onclick = close;
+  el.onclick = (e) => { if (e.target === el) close(); };
+  document.getElementById('authForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const u = document.getElementById('authU').value.trim(), p = document.getElementById('authP').value;
+    const err = document.getElementById('authErr'), go = document.getElementById('authGo');
+    err.textContent = ''; go.disabled = true; go.textContent = '…';
+    try {
+      if (m === 'signup') await Auth.signup(u, p); else await Auth.login(u, p);
+      sessionStorage.setItem('atla_synced', '1');
+      await Auth.pull();
+      close(); location.reload();
+    } catch (ex) { err.textContent = ex.message || 'Something went wrong.'; go.disabled = false; go.textContent = m === 'login' ? 'Sign in' : 'Create account'; }
+  };
+  setMode(mode);
+  document.getElementById('authU').focus();
+}
+async function initAuth() {
+  await Auth.me();
+  if (Auth.user) {
+    const before = localStorage.getItem(ATLA_KEY);
+    await Auth.pull();
+    // first load of a session: if the server had newer data, reload once so every
+    // view reflects it (sessionStorage guard prevents a loop).
+    if (before !== localStorage.getItem(ATLA_KEY) && !sessionStorage.getItem('atla_synced')) {
+      sessionStorage.setItem('atla_synced', '1'); location.reload(); return;
+    }
+  }
+  if (_sbActive != null) renderSidebar(_sbActive);
+  refreshAuthUI();
+}
+
+if (document.readyState !== 'loading') { initNotifications(); initAuth(); }
+else document.addEventListener('DOMContentLoaded', () => { initNotifications(); initAuth(); });
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 const initials = (n) => n.replace(/[^A-Za-z .'-]/g, '').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 const eurM = (v) => v == null ? '—' : '€' + (v / 1e6).toFixed(0) + 'M';
@@ -385,6 +486,7 @@ const LEAGUES = [['Premier League', 47, '#3d195b'], ['La Liga', 87, '#e8a33d'],
                  ['Serie A', 55, '#0067b1'], ['Bundesliga', 54, '#d20515'], ['Ligue 1', 53, '#091c3e']];
 
 function renderSidebar(active) {
+  _sbActive = active;
   const item = ([n, ic, href, trail, children]) => {
     const end = trail === 'live' ? '<span class="livedot"></span>'
       : trail === 'chevR' ? `<span class="chev">${svg('chevR')}</span>` : '';
@@ -415,8 +517,10 @@ function renderSidebar(active) {
       <div class="pro-tx"><h4>ATLASTRA PRO</h4><p>Unlock advanced stats and features.</p></div>
       <span class="chev">${svg('chevR')}</span></div>
     <a href="/profile.html" class="sb-user"><span class="ava"${Store.profile().picture ? ` style="background-image:url('${Store.profile().picture}');background-size:cover;background-position:center;color:transparent"` : ''}>${initials(Store.name())}<i class="on"></i></span>
-      <span class="u-tx"><b>${Store.name()}</b><span>View Profile</span></span><span class="chev">${svg('chevR')}</span></a>`;
+      <span class="u-tx"><b>${Store.name()}</b><span class="u-sub" id="sbUserSub">View Profile</span></span><span class="chev">${svg('chevR')}</span></a>
+    <button class="sb-auth" id="sbAuthBtn">Sign in to sync</button>`;
   renderSubtabs(active);
+  refreshAuthUI();
 }
 
 // ---- live / fixtures match row (shared by home widget + /live.html) ----

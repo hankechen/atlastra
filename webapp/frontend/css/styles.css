@@ -1257,3 +1257,25 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 /* clickable player name -> profile (match player-stats table) */
 .pl-name-link{color:var(--text);font-weight:600;text-decoration:none}
 .pl-name-link:hover{color:var(--accent2);text-decoration:underline}
+
+/* ---- optional accounts: sidebar control + auth modal ---- */
+.sb-auth{display:block;width:100%;margin-top:8px;padding:8px;border-radius:9px;cursor:pointer;
+  background:var(--accent-soft);border:1px solid var(--border2);color:var(--text);font:inherit;font-size:12.5px;font-weight:700}
+.sb-auth:hover{border-color:var(--accent)}
+.sb-auth.out{background:none;color:var(--muted);font-weight:600}
+.sb-auth.out:hover{color:var(--red);border-color:var(--red)}
+.auth-ov{position:fixed;inset:0;z-index:100;background:rgba(4,7,14,.6);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.auth-card{position:relative;width:100%;max-width:380px;background:var(--card);border:1px solid var(--border2);
+  border-radius:16px;padding:26px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.auth-x{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer}
+.auth-h{font-size:20px;font-weight:800}
+.auth-sub{color:var(--muted);font-size:12.5px;line-height:1.5;margin:6px 0 16px}
+.auth-tabs{display:flex;gap:6px;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:3px;margin-bottom:14px}
+.auth-tabs button{flex:1;padding:8px;border:none;border-radius:7px;background:none;color:var(--muted);font:inherit;font-weight:700;font-size:13px;cursor:pointer}
+.auth-tabs button.active{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff}
+#authForm{display:flex;flex-direction:column;gap:10px}
+#authForm input{background:var(--elev);border:1px solid var(--border2);border-radius:9px;padding:11px 13px;color:var(--text);font:inherit;font-size:14px}
+#authForm input:focus{outline:none;border-color:var(--accent)}
+.auth-err{color:var(--red);font-size:12.5px;min-height:16px;font-weight:600}
+.auth-go{width:100%;justify-content:center}

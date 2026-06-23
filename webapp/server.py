@@ -44,6 +44,7 @@ def fetch_image(url: str):
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from analytics.queries import SoccerDB  # noqa: E402
+from webapp import auth  # noqa: E402
 from webapp import live_feed  # noqa: E402
 from webapp import scout_ai  # noqa: E402
 
@@ -210,17 +211,75 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
 
-    def _send(self, code, body, ctype):
+    def _send(self, code, body, ctype, extra_headers=None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         # dev server: never let the browser serve a stale JS/CSS/HTML asset
         self.send_header("Cache-Control", "no-store, must-revalidate")
+        for k, v in (extra_headers or []):
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
+    def _json(self, obj, code=200, extra_headers=None):
+        self._send(code, json.dumps(obj, default=str).encode(), "application/json", extra_headers)
+
+    def _cookie(self, name):
+        raw = self.headers.get("Cookie", "") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return None
+
+    def _body_json(self):
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        try:
+            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    # ---- optional accounts (auth + per-user data sync) ----
+    def do_POST(self):
+        u = urlparse(self.path)
+        b = self._body_json()
+        if u.path in ("/api/auth/signup", "/api/auth/login"):
+            fn = auth.signup if u.path.endswith("signup") else auth.login
+            user, tok = fn(b.get("username"), b.get("password"))
+            if not user:
+                self._json({"error": tok}, 400)
+                return
+            cookie = (f"atla_session={tok}; Path=/; HttpOnly; SameSite=Lax; "
+                      f"Max-Age={auth.SESSION_DAYS * 86400}")
+            self._json({"user": user}, extra_headers=[("Set-Cookie", cookie)])
+            return
+        if u.path == "/api/auth/logout":
+            auth.logout(self._cookie("atla_session"))
+            self._json({"ok": True}, extra_headers=[("Set-Cookie", "atla_session=; Path=/; Max-Age=0")])
+            return
+        if u.path == "/api/user/data":
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Not signed in."}, 401)
+                return
+            auth.set_data(user["id"], json.dumps(b.get("data")))
+            self._json({"ok": True})
+            return
+        self._json({"error": "Not found"}, 404)
+
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/api/auth/me":
+            self._json({"user": auth.user_for_token(self._cookie("atla_session"))})
+            return
+        if u.path == "/api/user/data":
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Not signed in."}, 401)
+                return
+            self._json({"data": json.loads(auth.get_data(user["id"]) or "null")})
+            return
         if u.path == "/api/img":                       # binary image proxy (not JSON)
             res = fetch_image(parse_qs(u.query).get("u", [""])[0])
             if res:
