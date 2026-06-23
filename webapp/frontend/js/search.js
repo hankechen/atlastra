@@ -66,11 +66,12 @@ async function runH2H() {
     <a class="h2h-team" href="${teamHref(d.team_b.name)}">${crestHTML(d.team_b.logo, 'crest-md')}${d.team_b.name}</a></div>`;
   const rows = d.matches.length ? d.matches.map(m => `
     <div class="mrow">
-      <span class="mdate">${m.date.slice(0, 10)}<small class="muted"> · ${m.season}</small></span>
+      <span class="mdate">${m.date.slice(0, 10)}<small class="muted"> · ${m.season}</small>
+        <small class="mcomp ${m.comp === 'UCL' ? 'ucl' : ''}">${m.comp === 'UCL' ? 'Champions League' : 'League'}</small></span>
       <span class="mteam home">${m.home}${crestHTML(m.home_logo, 'crest-sm')}</span>
       <span class="mscore"><b>${m.home_goals}–${m.away_goals}</b></span>
       <span class="mteam away">${crestHTML(m.away_logo, 'crest-sm')}${m.away}</span>
-      <span class="mxg muted">xG ${m.home_xg} – ${m.away_xg}</span>
+      <span class="mxg muted">${m.home_xg != null ? 'xG ' + m.home_xg + ' – ' + m.away_xg : ''}</span>
     </div>`).join('') : '<div class="empty">No fixtures between these teams in the last 12 seasons.</div>';
   out.innerHTML = head + summary + rows;
 }

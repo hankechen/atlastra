@@ -169,7 +169,7 @@ class SoccerDB:
     _TEAM_ALIASES = {
         "man city": "Manchester City", "man utd": "Manchester United",
         "man united": "Manchester United", "spurs": "Tottenham",
-        "wolves": "Wolverhampton", "psg": "Paris", "barca": "Barcelona",
+        "wolves": "Wolverhampton", "psg": "Saint Germain", "barca": "Barcelona",
         "atletico": "Atlético", "inter": "Internazionale", "gladbach": "Gladbach",
         "leverkusen": "Leverkusen", "dortmund": "Dortmund", "bayern": "Bayern",
     }
@@ -519,30 +519,52 @@ class SoccerDB:
         start = int(ref[:2]) - (n - 1)
         return f"{start % 100:02d}{(start + 1) % 100:02d}"
 
+    def _has_ucl_matches(self) -> bool:
+        return bool(self.con.execute(
+            "SELECT 1 FROM information_schema.tables WHERE table_name='ucl_matches'").fetchone())
+
     def search_matches(self, team_a: str, team_b: str, since: str | None = None) -> pd.DataFrame:
         """Head-to-head fixtures between two teams, most recent first.
 
-        `since` is a lower-bound season code; defaults to the last 6 seasons.
+        Unions domestic league fixtures (`matches`) with Champions League meetings
+        (`ucl_matches`). `since` is a lower-bound season code; defaults to 12 seasons.
         """
         ta, tb = self.find_team_id(team_a), self.find_team_id(team_b)
         if ta is None or tb is None:
             return pd.DataFrame()
         if since is None:
             since = self._season_n_back(12)   # all 12 seasons in `matches` (1415–2526)
-        return self.con.execute(
+        ucl_part = ""
+        params = [since, ta, tb, tb, ta]
+        if self._has_ucl_matches():
+            ucl_part = """
+            UNION ALL
+            SELECT u.match_date::DATE AS date, u.season, h.team_name AS home, a.team_name AS away,
+                   u.home_goals, u.away_goals, NULL AS home_xg, NULL AS away_xg, 'UCL' AS comp
+            FROM ucl_matches u
+            JOIN teams h ON h.team_id = u.home_team_id
+            JOIN teams a ON a.team_id = u.away_team_id
+            WHERE u.season >= ?
+              AND ((u.home_team_id=? AND u.away_team_id=?) OR (u.home_team_id=? AND u.away_team_id=?))
             """
-            SELECT m.match_date::DATE AS date, m.season, h.team_name AS home, a.team_name AS away,
-                   m.home_goals, m.away_goals, round(m.home_xg,2) AS home_xg,
-                   round(m.away_xg,2) AS away_xg
-            FROM matches m
-            JOIN teams h ON h.team_id = m.home_team_id
-            JOIN teams a ON a.team_id = m.away_team_id
-            WHERE m.season >= ?
-              AND ((m.home_team_id=? AND m.away_team_id=?) OR (m.home_team_id=? AND m.away_team_id=?))
-              AND m.is_result
-            ORDER BY m.match_date DESC
+            params += [since, ta, tb, tb, ta]
+        return self.con.execute(
+            f"""
+            SELECT date, season, home, away, home_goals, away_goals, home_xg, away_xg, comp FROM (
+              SELECT m.match_date::DATE AS date, m.season, h.team_name AS home, a.team_name AS away,
+                     m.home_goals, m.away_goals, round(m.home_xg,2) AS home_xg,
+                     round(m.away_xg,2) AS away_xg, 'League' AS comp
+              FROM matches m
+              JOIN teams h ON h.team_id = m.home_team_id
+              JOIN teams a ON a.team_id = m.away_team_id
+              WHERE m.season >= ?
+                AND ((m.home_team_id=? AND m.away_team_id=?) OR (m.home_team_id=? AND m.away_team_id=?))
+                AND m.is_result
+              {ucl_part}
+            )
+            ORDER BY date DESC
             """,
-            [since, ta, tb, tb, ta],
+            params,
         ).df()
 
     # ----- web UI bundles (Atlastra frontend) ----------------------------- #
@@ -1159,7 +1181,7 @@ class SoccerDB:
         names = dict(self.con.execute(
             "SELECT team_id, team_name FROM teams WHERE team_id IN (?, ?)", [ta, tb]).fetchall())
         df = self.search_matches(names[ta], names[tb], since)
-        matches = [{"date": str(r.date), "season": _fmt_season(r.season),
+        matches = [{"date": str(r.date), "season": _fmt_season(r.season), "comp": r.comp,
                     "home": r.home, "away": r.away,
                     "home_logo": self.team_logo(r.home), "away_logo": self.team_logo(r.away),
                     "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals),

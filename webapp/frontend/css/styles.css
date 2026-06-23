@@ -1242,3 +1242,8 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 
 /* head-to-head record summary */
 .h2h-sum{text-align:center;font-size:14px;margin:0 0 14px;padding:9px;background:var(--card2);border:1px solid var(--border);border-radius:10px}
+
+/* head-to-head competition chip */
+.mcomp{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;
+  background:var(--card2);border:1px solid var(--border2);color:var(--muted)}
+.mcomp.ucl{background:var(--accent-soft);border-color:transparent;color:var(--accent2)}

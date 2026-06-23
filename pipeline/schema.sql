@@ -54,6 +54,22 @@ CREATE TABLE IF NOT EXISTS matches (
     is_result       BOOLEAN                -- played (true) vs scheduled (false)
 );
 
+-- Champions League results (SofaScore), 12 seasons. No FK: UCL involves non-top-5
+-- clubs absent from `teams`; team_ids are mapped where possible (see
+-- pipeline/load_ucl_matches.py) so head-to-head can union with domestic `matches`.
+CREATE TABLE IF NOT EXISTS ucl_matches (
+    event_id        BIGINT PRIMARY KEY,    -- SofaScore event id
+    season          VARCHAR,               -- '2526'
+    match_date      TIMESTAMP,
+    home_team_id    BIGINT,                -- our teams.team_id (nullable)
+    away_team_id    BIGINT,
+    home_name       VARCHAR,               -- SofaScore display name
+    away_name       VARCHAR,
+    home_goals      INTEGER,
+    away_goals      INTEGER,
+    round           VARCHAR
+);
+
 CREATE TABLE IF NOT EXISTS team_match_stats (
     game_id             BIGINT NOT NULL REFERENCES matches(game_id),
     team_id             BIGINT NOT NULL REFERENCES teams(team_id),
