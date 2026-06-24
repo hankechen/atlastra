@@ -724,6 +724,11 @@ class SoccerDB:
             WHERE c.scope = 'league' AND c.season = ?
             ORDER BY c.rating DESC, c.percentile DESC LIMIT ?
         """, [season, limit]).df()
+        return [{"rank": i + 1, "player": r.player, "team": r.team,
+                 "position": r.position, "rating": int(r.rating),
+                 "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                for i, r in enumerate(df.itertuples())]
+
     # Ballon d'Or leans on attacking output above all, then overall quality and a
     # deep Champions League run; attackers win it far more than defenders/keepers.
     _BALLON_POSW = {"ST": 1.0, "W": 1.0, "AM": 0.92, "CM": 0.72,
