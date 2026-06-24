@@ -2756,63 +2756,189 @@ class SoccerDB:
     #  their season per-90 stat card and the Atlastra league rating as the hidden
     #  answer. The user reads the line, guesses the rating, and is scored on how
     #  close they land — the points logic lives client-side.
+    # SQL selecting the columns a guess card needs, shared by the random game, the
+    # seeded daily challenge and the higher-or-lower feed.
+    _GUESS_COLS = """SELECT pl.player_name AS nm, c.position_group AS grp, c.rating,
+                  v.team, v.games, v.minutes, v.goals, v.assists,
+                  v.xg_per90, v.xa_per90, v.shots, v.key_passes, v.dribbles_completed,
+                  v.tackles, v.interceptions, v.pass_accuracy_pct, v.duels_won_pct,
+                  b.nationality, b.country_code, b.fotmob_age AS age,
+                  (SELECT max(fotmob_player_id) FROM player_enrichment e
+                   WHERE e.player_id = c.player_id AND e.fotmob_player_id IS NOT NULL) AS fpid
+           FROM player_ratings_combined c
+           JOIN v_player_season_stats v ON v.player_id = c.player_id AND v.season = c.season
+           JOIN players pl ON pl.player_id = c.player_id
+           LEFT JOIN player_bio b ON b.player_id = c.player_id
+           WHERE c.scope='league' AND c.season = ? AND c.position_group <> 'GK'
+             AND v.minutes >= ? AND c.rating >= ?"""
+
+    def _guess_pool(self, count, min_minutes, min_rating, season, salt=None):
+        """Batch of guessable players. With `salt` the order is a deterministic hash
+        of player_id+salt (stable across runs/threads, for a shared daily); without
+        it, plain random(). DuckDB's threaded random() ignores setseed, so a hash
+        ordering is the only reproducible option."""
+        if salt is not None:
+            order, extra = "hash(CAST(c.player_id AS VARCHAR) || ?)", [salt]
+        else:
+            order, extra = "random()", []
+        return self.con.execute(
+            self._GUESS_COLS + f" ORDER BY {order} LIMIT ?",
+            [season, min_minutes, min_rating, *extra, count]).df()
+
+    def _guess_card(self, r) -> dict:
+        """Build one guess round (stat card + hidden rating answer) from a df row."""
+        mins = float(r.minutes or 0)
+
+        def per90(total):
+            return round(float(total or 0) / mins * 90, 2) if mins else 0.0
+        pct = lambda v: (str(round(float(v), 1)) + "%") if not pd.isna(v) else "—"
+        stats = [
+            {"label": "Minutes", "value": int(mins)},
+            {"label": "Appearances", "value": int(r.games or 0)},
+            {"label": "Goals", "value": int(r.goals or 0)},
+            {"label": "Assists", "value": int(r.assists or 0)},
+            {"label": "xG / 90", "value": round(float(r.xg_per90 or 0), 2)},
+            {"label": "xA / 90", "value": round(float(r.xa_per90 or 0), 2)},
+            {"label": "Shots / 90", "value": per90(r.shots)},
+            {"label": "Key passes / 90", "value": per90(r.key_passes)},
+            {"label": "Dribbles / 90", "value": per90(r.dribbles_completed)},
+            {"label": "Tackles + Int / 90", "value": per90((r.tackles or 0) + (r.interceptions or 0))},
+            {"label": "Pass accuracy", "value": pct(r.pass_accuracy_pct)},
+            {"label": "Duels won", "value": pct(r.duels_won_pct)},
+        ]
+        return {
+            "name": r.nm, "rating": int(r.rating),
+            "team": r.team, "team_logo": self.team_logo(r.team),
+            "position": self.GROUP_LABELS.get(r.grp, r.grp), "position_code": r.grp,
+            "nationality": None if pd.isna(r.nationality) else r.nationality,
+            "country_code": None if pd.isna(r.country_code) else r.country_code,
+            "age": None if pd.isna(r.age) else int(r.age),
+            "photo": self.player_photo(None if pd.isna(r.fpid) else int(r.fpid)),
+            "stats": stats,
+        }
+
     def web_guess_rounds(self, count: int = 8, min_minutes: int = 1100,
                          min_rating: int = 66, season: str = FOCUS_SEASON) -> dict:
-        df = self.con.execute(
-            """SELECT pl.player_name AS nm, c.position_group AS grp, c.rating,
-                      v.team, v.games, v.minutes, v.goals, v.assists,
-                      v.xg_per90, v.xa_per90, v.shots, v.key_passes, v.dribbles_completed,
-                      v.tackles, v.interceptions, v.pass_accuracy_pct, v.duels_won_pct,
-                      b.nationality, b.country_code, b.fotmob_age AS age,
-                      (SELECT max(fotmob_player_id) FROM player_enrichment e
-                       WHERE e.player_id = c.player_id AND e.fotmob_player_id IS NOT NULL) AS fpid
-               FROM player_ratings_combined c
-               JOIN v_player_season_stats v ON v.player_id = c.player_id AND v.season = c.season
-               JOIN players pl ON pl.player_id = c.player_id
-               LEFT JOIN player_bio b ON b.player_id = c.player_id
-               WHERE c.scope='league' AND c.season = ? AND c.position_group <> 'GK'
-                 AND v.minutes >= ? AND c.rating >= ?
-               ORDER BY random() LIMIT ?""",
-            [season, min_minutes, min_rating, count]).df()
+        df = self._guess_pool(count, min_minutes, min_rating, season)
         if df.empty:
             return {"available": False, "error": "No players available for the game."}
+        return {"available": True, "season": season,
+                "rounds": [self._guess_card(r) for r in df.itertuples()]}
 
-        def per90(total, minutes):
-            return round(float(total or 0) / minutes * 90, 2) if minutes else 0.0
+    def web_daily_challenge(self, date_str: str, rounds: int = 5,
+                            season: str = FOCUS_SEASON) -> dict:
+        """The same `rounds` players for everyone on a given date (seeded by date),
+        biased to recognizable names — the basis of the cross-user leaderboard."""
+        df = self._guess_pool(rounds, 1200, 70, season, salt="daily:" + date_str)
+        if df.empty:
+            return {"available": False, "error": "No players available."}
+        return {"available": True, "date": date_str, "season": season, "game": "daily",
+                "rounds": [self._guess_card(r) for r in df.itertuples()]}
 
-        rounds = []
+    # ---------------------------------------------------------------- Guess the Player (Wordle-style)
+    #  One mystery player; the client reveals clues one at a time and the user
+    #  guesses the name. `date_str` makes it a shared daily puzzle; None = practice.
+    def web_player_quiz(self, date_str: str | None = None, season: str = FOCUS_SEASON) -> dict:
+        import unicodedata
+        # famous-ish pool so the puzzle is guessable; the shared daily skews to bigger
+        # names (deterministic hash order by date), practice is a broader random pick.
+        if date_str is not None:
+            order, extra = "hash(CAST(c.player_id AS VARCHAR) || ?)", ["quiz:" + date_str]
+            min_min, min_rt = 1900, 80
+        else:
+            order, extra = "random()", []
+            min_min, min_rt = 1400, 73
+        r = self.con.execute(
+            self._GUESS_COLS + f" AND v.minutes >= {min_min} AND c.rating >= {min_rt} "
+            f"ORDER BY {order} LIMIT 1",
+            [season, 0, 0, *extra]).df()
+        if r.empty:
+            return {"available": False, "error": "No player available."}
+        row = next(r.itertuples())
+        mins = float(row.minutes or 0)
+        ga = int(row.goals or 0) + int(row.assists or 0)
+        nat = None if pd.isna(row.nationality) else row.nationality
+        cc = None if pd.isna(row.country_code) else row.country_code
+        age = None if pd.isna(row.age) else int(row.age)
+        # progressive clues — broad first, increasingly specific
+        clues = [{"label": "Position", "value": self.GROUP_LABELS.get(row.grp, row.grp)}]
+        if nat:
+            clues.append({"label": "Nationality", "value": nat, "country_code": cc})
+        if age:
+            clues.append({"label": "Age", "value": age})
+        clues.append({"label": "This season", "value": f"{int(row.games or 0)} apps · {int(mins)} mins"})
+        clues.append({"label": "Goals + Assists", "value": f"{int(row.goals or 0)}G {int(row.assists or 0)}A ({ga})"})
+        clues.append({"label": "Club", "value": row.team})
+
+        def norm(s):
+            s = unicodedata.normalize("NFKD", str(s)).encode("ascii", "ignore").decode().lower()
+            return "".join(ch for ch in s if ch.isalnum() or ch == " ").strip()
+        full = norm(row.nm)
+        accept = {full, full.replace(" ", "")}
+        toks = full.split()
+        if len(toks) > 1:
+            accept.add(toks[-1])                          # surname
+            accept.add(" ".join(toks[-2:]))               # last two names
+        return {"available": True, "season": season, "daily": date_str is not None,
+                "date": date_str, "game": "quiz",
+                "answer": row.nm, "accept": sorted(a for a in accept if a),
+                "team": row.team, "team_logo": self.team_logo(row.team),
+                "photo": self.player_photo(None if pd.isna(row.fpid) else int(row.fpid)),
+                "rating": int(row.rating), "max_guesses": len(clues), "clues": clues}
+
+    # ---------------------------------------------------------------- Draft Battle (Build-a-XI)
+    #  Candidate pools (priced, rating-ranked) per formation slot category, plus the
+    #  formation's pitch layout. The client drafts an XI within a budget; scoring vs
+    #  the optimal XI uses web_best_xi.
+    def web_draft_pool(self, formation: str = "4-3-3", min_minutes: int = 600,
+                       per_cat: int = 60, season: str = FOCUS_SEASON) -> dict:
+        lines_def = self._FORMATIONS.get(formation)
+        if not lines_def:
+            return {"available": False, "error": "Unknown formation."}
+        form = {"GK": 1}
+        for line in lines_def:
+            for cat in line:
+                form[cat] = form.get(cat, 0) + 1
+        df = self.con.execute(
+            """SELECT c.player_id pid, pl.player_name nm, c.position_group grp, c.rating,
+                      f.team, f.market_value_eur mv,
+                      COALESCE(f.detailed_position, f.main_position, c.position_group) pos,
+                      b.fotmob_age age, b.nationality,
+                      (SELECT max(fotmob_player_id) FROM player_enrichment e
+                       WHERE e.player_id = c.player_id AND e.fotmob_player_id IS NOT NULL) fpid
+               FROM player_ratings_combined c JOIN players pl ON pl.player_id = c.player_id
+               JOIN v_player_profile_full f ON f.player_id = c.player_id
+               LEFT JOIN player_bio b ON b.player_id = c.player_id
+               WHERE c.scope='league' AND c.season=? AND c.minutes>=?
+                 AND f.market_value_eur IS NOT NULL AND f.market_value_eur > 0""",
+            [season, min_minutes]).df()
+        pools = {cat: [] for cat in self._CAT_ORDER}
         for r in df.itertuples():
-            mins = float(r.minutes or 0)
-            stats = [
-                {"label": "Minutes", "value": int(mins)},
-                {"label": "Appearances", "value": int(r.games or 0)},
-                {"label": "Goals", "value": int(r.goals or 0)},
-                {"label": "Assists", "value": int(r.assists or 0)},
-                {"label": "xG / 90", "value": round(float(r.xg_per90 or 0), 2)},
-                {"label": "xA / 90", "value": round(float(r.xa_per90 or 0), 2)},
-                {"label": "Shots / 90", "value": per90(r.shots, mins)},
-                {"label": "Key passes / 90", "value": per90(r.key_passes, mins)},
-                {"label": "Dribbles / 90", "value": per90(r.dribbles_completed, mins)},
-                {"label": "Tackles + Int / 90",
-                 "value": per90((r.tackles or 0) + (r.interceptions or 0), mins)},
-                {"label": "Pass accuracy",
-                 "value": (str(round(float(r.pass_accuracy_pct), 1)) + "%")
-                          if not pd.isna(r.pass_accuracy_pct) else "—"},
-                {"label": "Duels won",
-                 "value": (str(round(float(r.duels_won_pct), 1)) + "%")
-                          if not pd.isna(r.duels_won_pct) else "—"},
-            ]
-            rounds.append({
-                "name": r.nm, "rating": int(r.rating),
-                "team": r.team, "team_logo": self.team_logo(r.team),
-                "position": self.GROUP_LABELS.get(r.grp, r.grp), "position_code": r.grp,
+            cat = self._GRP2CAT.get(r.grp)
+            if not cat or form.get(cat, 0) == 0:
+                continue
+            pools[cat].append({
+                "id": int(r.pid), "player": r.nm, "team": r.team, "position": r.pos,
+                "rating": int(r.rating), "value_m": max(1, int(round(r.mv / 1e6))),
+                "value_eur": float(r.mv), "age": None if pd.isna(r.age) else int(r.age),
                 "nationality": None if pd.isna(r.nationality) else r.nationality,
-                "country_code": None if pd.isna(r.country_code) else r.country_code,
-                "age": None if pd.isna(r.age) else int(r.age),
                 "photo": self.player_photo(None if pd.isna(r.fpid) else int(r.fpid)),
-                "stats": stats,
-            })
-        return {"available": True, "season": season, "rounds": rounds}
+                "team_logo": self.team_logo(r.team)})
+        cats = {}
+        for cat, lst in pools.items():
+            if form.get(cat, 0) == 0:
+                continue
+            lst.sort(key=lambda p: (-p["rating"], p["value_m"]))
+            cats[cat] = lst[:per_cat]
+        # pitch slot layout (back -> front, GK first), each slot tagged with its category
+        slots = [[{"cat": "GK", "x": 0.5}]]
+        for line in lines_def:
+            slots.append([{"cat": cat, "x": (i + 0.5) / len(line)} for i, cat in enumerate(line)])
+        cheapest = sum(min((p["value_m"] for p in cats[c]), default=0) * form[c] for c in form)
+        return {"available": True, "season": season, "formation": formation,
+                "formations": list(self._FORMATIONS), "slots": slots,
+                "cat_labels": self._CAT_LABEL, "form_counts": form,
+                "min_budget_m": cheapest, "candidates": cats}
 
     # ---------------------------------------------------------------- Football DNA Map
     #  Project every outfielder onto a 2D "style map" so distance == dissimilarity.

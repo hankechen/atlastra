@@ -437,6 +437,10 @@ const ICONS = {
   ucl: '<path d="M7 4h10v3a5 5 0 01-10 0z"/><path d="M7 5H4v1a3 3 0 003 3M17 5h3v1a3 3 0 01-3 3"/><path d="M12 12v4M9 20h6M10 16h4l1 4H9z"/>',
   worldcup: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.5 6.2c2 1.4 11 1.4 13 0M5.5 17.8c2-1.4 11-1.4 13 0"/>',
   guess: '<circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.9 2.9 0 015.6 1c0 1.9-2.8 2.5-2.8 4.2"/><circle cx="12" cy="17.6" r="1" fill="currentColor" stroke="none"/>',
+  daily: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="m12 12.4 1 2 2.2.3-1.6 1.5.4 2.2-2-1-2 1 .4-2.2-1.6-1.5 2.2-.3z" fill="currentColor" stroke="none"/>',
+  higherlower: '<path d="M7 21V5M7 5 3.5 8.5M7 5l3.5 3.5M17 3v16m0 0 3.5-3.5M17 19l-3.5-3.5"/>',
+  mystery: '<circle cx="12" cy="8.4" r="3.4"/><path d="M5.5 20c0-3.4 2.9-5.2 6.5-5.2s6.5 1.8 6.5 5.2"/><path d="M10.4 7.6a1.7 1.7 0 013.3.6c0 1.1-1.6 1.4-1.6 2.4"/>',
+  draft: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M4 8h16M4 16h16M12 8v8"/><circle cx="12" cy="12" r="2"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -464,7 +468,14 @@ const NAV_ANALYTICS = [
   ['Football DNA Map', 'archetypes', '/dnamap.html'],
   ['Big Game Index', 'rankings', '/biggame.html'],
   ['Stat Leaders', 'rankings', '/leaders.html'],
+];
+// Games & engagement hub
+const NAV_GAMES = [
+  ['Daily Challenge', 'daily', '/daily.html'],
   ['Guess the Rating', 'guess', '/guess.html'],
+  ['Higher or Lower', 'higherlower', '/higherlower.html'],
+  ['Guess the Player', 'mystery', '/mystery.html'],
+  ['Draft Battle', 'draft', '/draft.html'],
 ];
 
 // in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];
@@ -512,6 +523,8 @@ function renderSidebar(active) {
     <div class="brand"><svg class="logo" viewBox="0 0 32 32"><path d="M16 3 L29 28 H3 Z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5570f0"/><stop offset="1" stop-color="#7d5cf5"/></linearGradient></defs></svg>ATLASTRA</div>
     <div class="sb-scroll">
       ${section('Main', NAV_MAIN)}
+      <div class="sb-div"></div>
+      ${section('Games', NAV_GAMES)}
       <div class="sb-div"></div>
       ${section('Analytics', NAV_ANALYTICS)}
       <div class="sb-div"></div>

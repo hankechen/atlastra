@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Daily Challenge</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=45">
+<style>
+.dc-top{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.dc-top{grid-template-columns:1fr}}
+.dc-progress{display:flex;gap:6px;margin:2px 0 14px}
+.dc-dot{flex:1;height:6px;border-radius:4px;background:var(--card2);border:1px solid var(--border2)}
+.dc-dot.done{background:linear-gradient(90deg,var(--accent),var(--accent2));border-color:transparent}
+.dc-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.dc-pos{background:var(--accent-soft);color:var(--text);border-radius:20px;padding:5px 13px;font-size:12.5px;font-weight:700}
+.dc-tag{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+.dc-statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+@media(max-width:560px){.dc-statgrid{grid-template-columns:1fr}}
+.dc-stat{display:flex;justify-content:space-between;align-items:center;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px 13px}
+.dc-stat .l{color:var(--muted);font-size:12.5px}.dc-stat .v{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+.dc-bignum{font-size:58px;font-weight:800;text-align:center;line-height:1;font-variant-numeric:tabular-nums;
+  background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.dc-slider{width:100%;margin:18px 0 4px;-webkit-appearance:none;appearance:none;height:8px;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent2));outline:none}
+.dc-slider::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--text);border:3px solid var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.dc-scale{display:flex;justify-content:space-between;color:var(--muted2);font-size:11px;margin-bottom:12px}
+.dc-photo{width:84px;height:84px;border-radius:50%;margin:0 auto 8px;background:var(--card2);border:2px solid var(--border2);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.dc-photo img{width:100%;height:100%;object-fit:cover}.dc-photo .ini{font-size:26px;font-weight:800;color:var(--muted)}
+.dc-q{font-size:46px;font-weight:800;color:var(--muted2);text-align:center;margin:8px 0}
+.dc-final{text-align:center}
+.dc-total{font-size:60px;font-weight:800;background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.dc-rowmini{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);font-size:13px}
+.dc-rowmini .nm{flex:1;font-weight:600}.dc-rowmini .pts{font-weight:800}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Daily Challenge</h2><p>Five mystery players, the same for everyone today. Guess each rating, bank your score, climb the global leaderboard.</p></div>
+    </div>
+
+    <div id="dc-out"><section class="card"><div class="placeholder-note">Loading today's challenge…</div></section></div>
+  </main>
+</div>
+<script src="/js/api.js?v=19"></script>
+<script src="/js/games.js?v=1"></script>
+<script src="/js/daily.js?v=1"></script>
+</body>
+</html>

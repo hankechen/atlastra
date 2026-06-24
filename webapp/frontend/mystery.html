@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Guess the Player</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=45">
+<style>
+.my-wrap{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.my-wrap{grid-template-columns:1fr}}
+.clue{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;
+  border:1px solid var(--border);background:var(--card2);margin-bottom:8px}
+.clue.locked{opacity:.5;border-style:dashed;background:transparent}
+.clue .cl{color:var(--muted);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.clue .cv{font-weight:800;font-size:15px;text-align:right}
+.clue.locked .cv{font-weight:600;color:var(--muted2)}
+.my-guesses{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}
+.gtag{background:var(--card2);border:1px solid var(--border2);border-radius:16px;padding:4px 11px;font-size:12.5px}
+.gtag.bad{border-color:var(--red);color:var(--red)}
+.my-inputwrap{position:relative}
+.my-input{width:100%;background:var(--elev);border:1px solid var(--border2);color:var(--text);border-radius:10px;
+  padding:12px 14px;font-family:inherit;font-size:14px;outline:none}
+.my-input:focus{border-color:var(--accent)}
+.my-dd{position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border2);border-radius:10px;
+  margin-top:4px;z-index:20;overflow:hidden;display:none;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.my-dd.open{display:block}
+.my-dd a{display:flex;align-items:center;gap:9px;padding:9px 12px;cursor:pointer;color:var(--text);text-decoration:none}
+.my-dd a:hover,.my-dd a.hi{background:var(--card2)}
+.my-dd .pic{width:26px;height:26px;border-radius:50%;overflow:hidden;background:var(--card2);position:relative;flex:none}
+.my-dd .pic img{width:100%;height:100%;object-fit:cover}.my-dd .pic .ini{font-size:11px}
+.my-attempts{color:var(--muted);font-size:12.5px;margin-top:10px;text-align:center}
+.my-reveal{text-align:center}
+.my-photo{width:108px;height:108px;border-radius:50%;margin:2px auto 10px;background:var(--card2);
+  border:2px solid var(--border2);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.my-photo img{width:100%;height:100%;object-fit:cover}.my-photo .ini{font-size:34px;font-weight:800;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Guess the Player</h2><p>Clues reveal one at a time. Name the mystery player in as few guesses as possible — fewer guesses, more points.</p></div>
+    </div>
+
+    <div class="game-sub" id="modeTabs"></div>
+    <div id="my-out"><section class="card"><div class="placeholder-note">Loading puzzle…</div></section></div>
+  </main>
+</div>
+<script src="/js/api.js?v=19"></script>
+<script src="/js/games.js?v=1"></script>
+<script src="/js/mystery.js?v=1"></script>
+</body>
+</html>

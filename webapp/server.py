@@ -230,6 +230,12 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_guess_rounds(int(q.get("count", ["8"])[0]),
                                       int(q.get("min_minutes", ["1100"])[0]),
                                       int(q.get("min_rating", ["66"])[0]))
+        if path == "/api/daily_challenge":
+            return d.web_daily_challenge(q.get("date", [""])[0] or "1970-01-01")
+        if path == "/api/player_quiz":
+            return d.web_player_quiz(q.get("date", [None])[0])
+        if path == "/api/draft_pool":
+            return d.web_draft_pool(q.get("formation", ["4-3-3"])[0])
         if path == "/api/team_options":
             return d.web_team_options()
         if path == "/api/team_style":
@@ -297,6 +303,23 @@ class Handler(BaseHTTPRequestHandler):
             auth.set_data(user["id"], json.dumps(b.get("data")))
             self._json({"ok": True})
             return
+        if u.path == "/api/score":                     # post a game score to the leaderboard
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Sign in to post scores to the leaderboard."}, 401)
+                return
+            try:
+                score = float(b.get("score"))
+            except (TypeError, ValueError):
+                self._json({"error": "Bad score."}, 400)
+                return
+            game = str(b.get("game", ""))[:32]
+            period = str(b.get("period", "alltime"))[:32]
+            if not game or not (0 <= score <= 1_000_000):
+                self._json({"error": "Invalid submission."}, 400)
+                return
+            self._json(auth.submit_score(game, period, user["id"], user["username"], score))
+            return
         self._json({"error": "Not found"}, 404)
 
     def do_GET(self):
@@ -310,6 +333,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Not signed in."}, 401)
                 return
             self._json({"data": json.loads(auth.get_data(user["id"]) or "null")})
+            return
+        if u.path == "/api/leaderboard":               # public game leaderboard
+            qq = parse_qs(u.query)
+            self._json(auth.leaderboard(qq.get("game", [""])[0],
+                                        qq.get("period", ["alltime"])[0],
+                                        int(qq.get("limit", ["25"])[0])))
             return
         if u.path == "/api/img":                       # binary image proxy (not JSON)
             res = fetch_image(parse_qs(u.query).get("u", [""])[0])

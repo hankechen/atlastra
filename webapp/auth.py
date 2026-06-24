@@ -34,6 +34,11 @@ def _con() -> sqlite3.Connection:
               "token TEXT PRIMARY KEY, user_id INTEGER, expires REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS user_data("
               "user_id INTEGER PRIMARY KEY, data TEXT)")
+    # Global game leaderboards. One best (max) score per user per (game, period);
+    # `period` is e.g. a date for daily challenges or 'alltime' for endless modes.
+    c.execute("CREATE TABLE IF NOT EXISTS scores("
+              "game TEXT, period TEXT, user_id INTEGER, username TEXT, "
+              "score REAL, updated REAL, PRIMARY KEY(game, period, user_id))")
     return c
 
 
@@ -128,3 +133,46 @@ def set_data(uid: int, data: str) -> None:
             c.commit()
         finally:
             c.close()
+
+
+# ---- game leaderboards ----
+def submit_score(game: str, period: str, uid: int, username: str, score: float) -> dict:
+    """Record a score, keeping only the user's best for this (game, period).
+    Returns the user's stored best + their rank (1-based) on the board."""
+    score = float(score)
+    with _LOCK:
+        c = _con()
+        try:
+            row = c.execute(
+                "SELECT score FROM scores WHERE game=? AND period=? AND user_id=?",
+                [game, period, uid]).fetchone()
+            best = max(score, row[0]) if row else score
+            c.execute("INSERT OR REPLACE INTO scores(game, period, user_id, username, score, updated) "
+                      "VALUES(?,?,?,?,?,?)", [game, period, uid, username, best, time.time()])
+            c.commit()
+        finally:
+            c.close()
+    return {"best": best, "improved": (not row) or score > row[0],
+            "rank": _rank(game, period, best), "leaderboard": leaderboard(game, period)}
+
+
+def _rank(game: str, period: str, score: float) -> int:
+    c = _con()
+    try:
+        n = c.execute("SELECT count(*) FROM scores WHERE game=? AND period=? AND score > ?",
+                      [game, period, score]).fetchone()[0]
+        return int(n) + 1
+    finally:
+        c.close()
+
+
+def leaderboard(game: str, period: str, limit: int = 25) -> list[dict]:
+    c = _con()
+    try:
+        rows = c.execute(
+            "SELECT username, score, updated FROM scores WHERE game=? AND period=? "
+            "ORDER BY score DESC, updated ASC LIMIT ?", [game, period, limit]).fetchall()
+        return [{"rank": i + 1, "username": r[0], "score": r[1], "updated": r[2]}
+                for i, r in enumerate(rows)]
+    finally:
+        c.close()

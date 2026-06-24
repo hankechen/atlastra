@@ -1388,3 +1388,22 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .wc-grp .card-h{margin-bottom:8px}
 .wc-grp .ltbl td,.wc-grp .ltbl th{padding:5px 6px}
 .wc-grp .ltbl .tcell{display:flex;align-items:center;gap:8px}
+
+/* ---- shared games: leaderboard + small bits ---- */
+.lb{width:100%;border-collapse:collapse;font-size:13.5px}
+.lb th{text-align:left;color:var(--muted2);font-size:11px;letter-spacing:.6px;text-transform:uppercase;
+  font-weight:700;padding:6px 8px;border-bottom:1px solid var(--border)}
+.lb td{padding:8px;border-bottom:1px solid var(--border)}
+.lb td.rk{width:34px;color:var(--muted);font-weight:700}
+.lb td.sc{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
+.lb td.who{font-weight:600}
+.lb tr.me{background:var(--accent-soft)}
+.lb tr.me td.who{color:var(--accent)}
+.lb-empty{color:var(--muted);padding:22px;text-align:center;font-size:13px}
+.lb-nudge{margin-top:12px;font-size:12.5px;color:var(--muted);background:var(--card2);
+  border:1px solid var(--border);border-radius:10px;padding:10px 13px}
+.lb-nudge a{color:var(--accent);font-weight:600;text-decoration:none}
+.game-sub{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.pill-btn{background:var(--card2);border:1px solid var(--border2);color:var(--text);border-radius:20px;
+  padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+.pill-btn.active{background:linear-gradient(90deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
