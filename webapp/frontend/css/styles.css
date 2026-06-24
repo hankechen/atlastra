@@ -1388,8 +1388,13 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .wc-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
 .wc-grp{padding:14px 16px}
 .wc-grp .card-h{margin-bottom:8px}
-.wc-grp .ltbl td,.wc-grp .ltbl th{padding:5px 6px}
-.wc-grp .ltbl .tcell{display:flex;align-items:center;gap:8px}
+.wc-grp .ltbl{width:100%}
+.wc-grp .ltbl td,.wc-grp .ltbl th{padding:5px 5px}
+/* narrow group cards can't afford the 180px team column the league table uses --
+   let it size to the (short) national-team names so the stat columns sit tight. */
+.wc-grp .ltbl .tcell{display:flex;align-items:center;gap:8px;min-width:0}
+.wc-grp .ltbl th:nth-child(2),.wc-grp .ltbl td.tcell{width:100%}
+.wc-grp .ltbl .tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---- shared games: leaderboard + small bits ---- */
 .lb{width:100%;border-collapse:collapse;font-size:13.5px}
