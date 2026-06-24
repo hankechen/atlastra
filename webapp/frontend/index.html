@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atlastra — Soccer Intelligence</title>
+<title>Atlastra — Football Intelligence</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/styles.css">
@@ -22,7 +22,46 @@
     <!-- row 1: hero + live matches -->
     <div class="grid" style="grid-template-columns:1fr 380px">
       <section class="hero">
-        <h1>Soccer Intelligence,<br><span class="accent">Elevated.</span></h1>
+        <svg class="hero-deco" viewBox="0 0 800 320" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+          <defs>
+            <linearGradient id="hl1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#5570f0" stop-opacity="0"/>
+              <stop offset=".5" stop-color="#8a78ff" stop-opacity=".9"/>
+              <stop offset="1" stop-color="#5570f0" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="hl2" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0" stop-color="#7d5cf5" stop-opacity="0"/>
+              <stop offset=".55" stop-color="#6c8bff" stop-opacity=".75"/>
+              <stop offset="1" stop-color="#7d5cf5" stop-opacity="0"/>
+            </linearGradient>
+            <radialGradient id="hg" cx=".5" cy=".5" r=".5">
+              <stop offset="0" stop-color="#7d5cf5" stop-opacity=".65"/>
+              <stop offset="1" stop-color="#7d5cf5" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="lglow" x="-20%" y="-60%" width="140%" height="220%">
+              <feGaussianBlur stdDeviation="3.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+          <circle cx="555" cy="60" r="150" fill="url(#hg)"/>
+          <circle cx="735" cy="250" r="120" fill="url(#hg)" opacity=".7"/>
+          <circle cx="120" cy="280" r="120" fill="url(#hg)" opacity=".35"/>
+          <circle cx="600" cy="160" r="155" fill="none" stroke="#7d8cff" stroke-opacity=".22" stroke-width="1.5"/>
+          <circle cx="600" cy="160" r="210" fill="none" stroke="#7d5cf5" stroke-opacity=".14" stroke-width="1.5"/>
+          <g filter="url(#lglow)">
+            <path d="M-40,240 C190,175 360,295 560,140 740,45 810,115 880,55" fill="none" stroke="url(#hl1)" stroke-width="3.2"/>
+            <path d="M-40,295 C220,235 430,325 620,200 790,90 845,160 885,115" fill="none" stroke="url(#hl2)" stroke-width="2.4"/>
+            <path d="M-20,140 C150,108 330,200 520,72 650,-12 730,50 800,18" fill="none" stroke="url(#hl1)" stroke-width="2.2" stroke-opacity=".9"/>
+            <path d="M-30,200 C170,150 320,250 540,110" fill="none" stroke="url(#hl2)" stroke-width="1.8" stroke-opacity=".75"/>
+          </g>
+        </svg>
+        <div class="hero-figs">
+          <a class="hero-fig fig-back" href="/player.html?name=Kylian%20Mbappé" title="Kylian Mbappé">
+            <img src="/img/mbappe.png" alt="Kylian Mbappé"></a>
+          <a class="hero-fig fig-front" href="/player.html?name=Lamine%20Yamal" title="Lamine Yamal">
+            <img src="/img/yamal.png" alt="Lamine Yamal"></a>
+        </div>
+        <h1>Football Intelligence,<br><span class="accent">Elevated.</span></h1>
         <p>Track. Analyze. Compare. Win.</p>
         <div class="cta">
           <a class="btn btn-primary" href="/players.html">Explore Players</a>

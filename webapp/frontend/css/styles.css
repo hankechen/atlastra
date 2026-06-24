@@ -136,7 +136,21 @@ a{color:inherit;text-decoration:none}
 
 /* home hero */
 .hero{position:relative;overflow:hidden;border-radius:var(--radius);border:1px solid var(--border);
-  background:radial-gradient(120% 140% at 80% 20%,var(--accent-soft) 0%,var(--card2) 60%,var(--card) 100%);padding:34px}
+  background:radial-gradient(120% 140% at 80% 20%,var(--accent-soft) 0%,var(--card2) 60%,var(--card) 100%);
+  padding:34px;min-height:312px}
+.hero h1,.hero p,.hero .cta,.hero-stats{position:relative;z-index:2}
+.hero-deco{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+/* featured players (Mbappé behind, Yamal front) as transparent cutouts bleeding
+   out of the hero's right edge */
+.hero-figs{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+.hero-fig{position:absolute;top:5%;display:block;pointer-events:auto;transition:transform .28s ease}
+.hero-fig img{display:block;height:100%;width:auto;object-fit:contain;object-position:top;
+  filter:drop-shadow(0 12px 26px rgba(0,0,0,.5))}
+.hero-fig.fig-back{right:16%;height:132%;opacity:.92;z-index:1}
+.hero-fig.fig-front{right:1%;height:150%;z-index:2}
+.hero-fig:hover{transform:translateY(-5px)}
+.hero-fig.fig-front:hover{z-index:3}
+@media(max-width:1040px){.hero-figs{display:none}}
 .hero h1{font-size:40px;line-height:1.05;font-weight:800;letter-spacing:-.5px}
 .hero h1 .accent{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero p{color:var(--muted);margin:14px 0 22px;font-size:15px}
