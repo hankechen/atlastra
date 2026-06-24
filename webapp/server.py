@@ -86,7 +86,14 @@ CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
 def match_api(path: str, q: dict) -> dict:
     eid = int(q.get("id", [0])[0])
     if path == "/api/match":
-        return live_feed.header(eid)
+        h = live_feed.header(eid)
+        if h.get("available") and (h.get("home_national") or h.get("away_national")):
+            with SoccerDB(read_only=True) as db:   # FIFA rank for national-team sides
+                if h.get("home_national"):
+                    h["home_rank"] = db.fifa_rank(h.get("home"))
+                if h.get("away_national"):
+                    h["away_rank"] = db.fifa_rank(h.get("away"))
+        return h
     if path == "/api/match/stats":
         return live_feed.statistics(eid)
     if path == "/api/match/lineups":

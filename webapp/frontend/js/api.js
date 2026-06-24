@@ -564,9 +564,13 @@ function teamBadge(m, side) {
   if (f) return `<span class="nflag">${f}</span>`;
   return crestHTML(m[side + '_logo'], 'crest') || '<span class="crest"></span>';
 }
-// FIFA World Ranking badge (e.g. #4) for a national team, or '' when unknown.
+// FIFA World Ranking badge (e.g. FIFA #4) for a national team, or '' when unknown.
+// The "FIFA" caption is hidden by default (compact lists) and revealed + enlarged
+// in the live-matches feed and match-header contexts via CSS.
 function rankBadge(r) {
-  return r != null ? `<span class="fifa-rank" title="FIFA World Ranking">#${r}</span>` : '';
+  return r != null
+    ? `<span class="fifa-rank" title="FIFA World Ranking"><span class="fr-cap">FIFA </span>#${r}</span>`
+    : '';
 }
 // Left "minute" cell: running clock for live, 'HT' on the break, 'FT' for results,
 // local kickoff time for upcoming.

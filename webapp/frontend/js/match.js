@@ -41,10 +41,10 @@ async function loadHeader() {
   hero.innerHTML = `
     <div class="mh-comp">${esc(head.competition || '')}${head.round ? ' · ' + esc(head.round) : ''}</div>
     <div class="mh-row">
-      <div class="mh-team home"${open('home')}>${badge('home')}<span class="mh-name">${esc(head.home)}</span></div>
+      <div class="mh-team home"${open('home')}>${badge('home')}<span class="mh-name">${esc(head.home)}</span>${rankBadge(head.home_rank)}</div>
       <div class="mh-score">${played ? `${head.home_score}<span class="dash">-</span>${head.away_score}` : '<span class="vs">vs</span>'}
         <div class="mh-st">${heroStatus()}</div></div>
-      <div class="mh-team away"${open('away')}><span class="mh-name">${esc(head.away)}</span>${badge('away')}</div>
+      <div class="mh-team away"${open('away')}>${rankBadge(head.away_rank)}<span class="mh-name">${esc(head.away)}</span>${badge('away')}</div>
     </div>`;
 }
 
