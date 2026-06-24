@@ -2,7 +2,8 @@
   /* slate theme: noticeably lighter content surfaces, dark sidebar kept for contrast */
   --bg:#171d2b; --bg2:#0c1120; --card:#202839; --card2:#29324a;
   --elev:#313c58;                                  /* lighter "frosted" surface (top bar, tiles, controls) */
-  --border:#323d59; --border2:#404e6e;
+  /* white-tinted borders for definition on the dark surfaces (light theme overrides below) */
+  --border:rgba(255,255,255,.15); --border2:rgba(255,255,255,.26);
   --text:#eff2f9; --muted:#9aa4ba; --muted2:#727d96;
   --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#2c3b68;
   --green:#34c46a; --red:#e5484d; --gold:#e8b04b;
@@ -10,7 +11,7 @@
   --radius:14px; --sb:248px;
 }
 /* keep the sidebar a touch darker than the lighter content for a clear split */
-.sidebar{--bg2:#0c1120; --card:#141b2c; --card2:#1b2338; --border:#1f2740; --muted:#7f8aa3}
+.sidebar{--bg2:#0c1120; --card:#141b2c; --card2:#1b2338; --border:rgba(255,255,255,.10); --muted:#7f8aa3}
 
 /* ---- LIGHT THEME (toggle adds .light on <html>) ---- */
 html.light{
