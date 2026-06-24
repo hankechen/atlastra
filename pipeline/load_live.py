@@ -37,6 +37,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import (DB_PATH, SOFASCORE_BASE, SOFASCORE_LIVE_TOURNAMENTS,
                     LIVE_DAYS_BACK, LIVE_DAYS_AHEAD)
+from analytics.queries import connect_retry
 import duckdb
 
 RATE_LIMIT_SEC = 1.2
@@ -172,7 +173,7 @@ def load_live() -> int:
     """Rebuild live_matches; returns the number of in-play matches (so a refresher
     can pace itself -- poll fast while games are live, slow when idle)."""
     rows = fetch_rows()
-    con = duckdb.connect(str(DB_PATH))
+    con = connect_retry(DB_PATH, read_only=False)
     con.execute(DDL)
     con.execute("DELETE FROM live_matches")
     if rows:
@@ -188,6 +189,43 @@ def load_live() -> int:
     print(f"live_matches: {len(rows)} rows "
           f"({n_live} live, {n_fin} results, {n_up} upcoming).")
     return n_live
+
+
+def fetch_live_only() -> list[dict]:
+    """Just the global live feed -- one fast call (covered tournaments only),
+    skipping the slow day-by-day window scrape. For frequent in-play refreshes."""
+    now = int(time.time())
+    updated_at = datetime.now()
+    rows: dict[int, dict] = {}
+    live = _get("/sport/football/events/live")
+    for ev in live.get("events", []):
+        r = _row(ev, now, updated_at)
+        if r:
+            rows[r["event_id"]] = r
+    return list(rows.values())
+
+
+def update_live_overlay() -> int:
+    """Upsert ONLY the currently in-play matches (freshest score + running clock)
+    into live_matches, leaving upcoming/finished rows untouched -- the cheap path a
+    live refresher runs every ~25s. Returns the in-play count. A full load_live()
+    is still needed periodically to catch kickoffs and full-time transitions
+    (a match that just ended drops out of the live feed)."""
+    rows = fetch_live_only()
+    con = connect_retry(DB_PATH, read_only=False)
+    try:
+        con.execute(DDL)
+        if rows:
+            df = pd.DataFrame(rows)[COLS]
+            con.register("live_df", df)
+            assigns = ", ".join(f"{c}=excluded.{c}" for c in COLS if c != "event_id")
+            con.execute(f"INSERT INTO live_matches ({','.join(COLS)}) "
+                        f"SELECT {','.join(COLS)} FROM live_df "
+                        f"ON CONFLICT (event_id) DO UPDATE SET {assigns}")
+            con.unregister("live_df")
+    finally:
+        con.close()
+    return len(rows)
 
 
 if __name__ == "__main__":

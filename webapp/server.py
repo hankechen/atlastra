@@ -11,6 +11,8 @@ Run:  python -m webapp.server     ->  http://localhost:8000
 """
 import json
 import math
+import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import urllib.request
@@ -393,6 +395,32 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, f.read_bytes(), CT.get(f.suffix, "application/octet-stream"))
 
 
+def _live_refresher():
+    """Keep live_matches genuinely live while the server runs: re-scrape SofaScore
+    on a loop so the /api/live feed (and the page's 30s poll) shows current scores.
+    Full window scrape every FULL_EVERY s (catches kickoffs / full-time / new
+    fixtures); the cheap in-play overlay in between. Paces itself -- ~25s while
+    games are live, slower when idle. Set ATLASTRA_NO_LIVE_REFRESH=1 to disable."""
+    import time
+    from pipeline import load_live as live
+    FULL_EVERY = 180
+    last_full = 0.0
+    n_live = 0
+    while True:
+        try:
+            if time.time() - last_full >= FULL_EVERY:
+                n_live = live.load_live()
+                last_full = time.time()
+            elif n_live:                       # only worth an overlay if games are on
+                n_live = live.update_live_overlay()
+        except Exception as e:                 # noqa: BLE001 -- network/scrape hiccup
+            print(f"live refresher: {type(e).__name__}: {str(e)[:120]}")
+        time.sleep(25 if n_live else 90)
+
+
 if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
+    if os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1":
+        threading.Thread(target=_live_refresher, daemon=True).start()
+        print("live refresher: on (re-scrapes SofaScore; ATLASTRA_NO_LIVE_REFRESH=1 to disable)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

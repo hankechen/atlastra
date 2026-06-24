@@ -75,9 +75,25 @@ def _norm_team(s):
     return " ".join(s.split())
 
 
+def connect_retry(db_path, read_only=True, attempts=15, backoff=0.06):
+    """duckdb.connect that rides out transient file-lock contention. The live
+    refresher (pipeline.load_live) briefly takes a read-write lock every refresh;
+    a read-only connect that lands in that ~0.2s window otherwise raises. Retry
+    only on lock/IO errors so real problems still surface immediately."""
+    import time as _t
+    for i in range(attempts):
+        try:
+            return duckdb.connect(str(db_path), read_only=read_only)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if i == attempts - 1 or not any(k in msg for k in ("lock", "conflict", "being used")):
+                raise
+            _t.sleep(backoff)
+
+
 class SoccerDB:
     def __init__(self, db_path=None, read_only=True):
-        self.con = duckdb.connect(str(db_path or DB_PATH), read_only=read_only)
+        self.con = connect_retry(db_path or DB_PATH, read_only=read_only)
         self._logo_map = None
         self._wiki_photos = None
         self._fifa_ranks = None
