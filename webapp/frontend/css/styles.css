@@ -131,6 +131,18 @@ a{color:inherit;text-decoration:none}
 .prow .sub{color:var(--muted);font-size:12px}
 .prow .end{margin-left:auto;display:flex;align-items:center;gap:6px;font-weight:700;white-space:nowrap}
 .prow .end .unit{color:var(--muted);font-weight:600;font-size:10.5px;letter-spacing:.2px}
+/* home "Games" rail: icon + title/tagline rows linking into each game */
+.glist{display:flex;flex-direction:column}
+.grow{display:flex;align-items:center;gap:11px;padding:9px 6px;border-radius:8px;cursor:pointer;color:inherit;text-decoration:none}
+.grow:hover{background:var(--card2)}
+.grow .gic{width:34px;height:34px;border-radius:9px;background:var(--card2);display:flex;align-items:center;justify-content:center;flex:none;color:var(--accent2)}
+.grow .gic .ic{width:18px;height:18px}
+.grow .gtx{display:flex;flex-direction:column;min-width:0}
+.grow .gtx b{font-weight:600;font-size:13.5px}
+.grow .gtx span{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow .gchev{margin-left:auto;display:flex;color:var(--muted2)}
+.grow .gchev .ic{width:16px;height:16px}
+.grow:hover .gchev{color:var(--accent2)}
 .ratingchip{width:34px;height:34px;border-radius:50%;border:2px solid var(--accent);
   display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
 .flag{width:18px;height:13px;border-radius:2px;background:#2a3350;display:inline-block}
