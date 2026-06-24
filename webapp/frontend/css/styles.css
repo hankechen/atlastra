@@ -281,6 +281,11 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
 .tech .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
 .bo-bar{flex:1;height:6px;border-radius:4px;background:var(--card2);overflow:hidden;margin:0 10px}
 .bo-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+/* Ballon d'Or predictor row: avatar + name/G+A + a fixed-width share bar */
+.bo-row .bo-tx{min-width:0;display:flex;flex-direction:column}
+.bo-row .bo-tx .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bo-row .bo-bar{width:34px;flex:none;margin:0}
+.bo-row .end{gap:8px}
 select{background:var(--elev);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:6px 10px;font-family:inherit;font-size:12.5px}
 .placeholder-note{font-size:10.5px;color:var(--muted2);font-style:italic}
 .season-sel{margin-left:10px;padding:3px 8px;font-size:12px;font-weight:600;border-radius:7px;cursor:pointer;vertical-align:middle}

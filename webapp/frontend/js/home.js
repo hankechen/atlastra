@@ -18,10 +18,18 @@ attachSearchDropdown(document.getElementById('searchBox'));
   }
 })();
 
-const BALLON = [['Kylian Mbappé', 34], ['Lamine Yamal', 29], ['Jude Bellingham', 16], ['Pedri', 8], ['Florian Wirtz', 7]];
-document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `
-  <div class="prow" onclick="location.href='${pHref(n)}'"><span class="rk">${i + 1}</span><span class="pic"></span>
-    <span class="nm">${n}</span><span class="bo-bar"><i style="width:${p * 2.5}%"></i></span><b>${p}%</b></div>`).join('');
+// Ballon d'Or Predictor — real model (attacking output + rating + UCL, by position)
+(async () => {
+  const ball = await api('/api/ballon?limit=5');
+  const top = ball.length ? ball[0].share : 1;
+  document.getElementById('ballon').innerHTML = ball.map(p => `
+    <div class="prow bo-row" onclick="location.href='${pHref(p.player)}'">
+      <span class="rk">${p.rank}</span>
+      <span class="pic">${avatarHTML(p.photo, p.player)}</span>
+      <span class="bo-tx"><div class="nm">${p.player}</div><div class="sub">${p.ga} G+A · ${p.rating} OVR</div></span>
+      <span class="end"><span class="bo-bar"><i style="width:${Math.round(p.share / top * 100)}%"></i></span><b>${p.share}%</b></span>
+    </div>`).join('');
+})();
 
 // Team of the Season — real best XI by average match rating (4-3-3)
 (async () => {

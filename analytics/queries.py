@@ -724,8 +724,59 @@ class SoccerDB:
             WHERE c.scope = 'league' AND c.season = ?
             ORDER BY c.rating DESC, c.percentile DESC LIMIT ?
         """, [season, limit]).df()
+    # Ballon d'Or leans on attacking output above all, then overall quality and a
+    # deep Champions League run; attackers win it far more than defenders/keepers.
+    _BALLON_POSW = {"ST": 1.0, "W": 1.0, "AM": 0.92, "CM": 0.72,
+                    "DM": 0.55, "FB": 0.5, "CB": 0.5, "GK": 0.5}
+
+    def web_ballon(self, limit: int = 5, season: str = FOCUS_SEASON) -> list[dict]:
+        """Predicted Ballon d'Or race. A composite per player —
+        position weight × (0.42·league rating + 0.40·(G+A vs the season's best)
+        + 0.18·UCL rating) — then the top `limit` scores are turned into a vote
+        'share %' via a power-softmax (favourite clearly ahead). Heuristic, not a
+        trained model, but it surfaces a credible shortlist from real season data."""
+        posw = ("CASE c.position_group " +
+                " ".join(f"WHEN '{k}' THEN {v}" for k, v in self._BALLON_POSW.items()) +
+                " ELSE 0.7 END")
+        df = self.con.execute(f"""
+            WITH base AS (
+                SELECT c.player_id, c.rating AS lg_rating, {posw} AS posw,
+                       s.goals, s.assists, (s.goals + s.assists) AS ga,
+                       COALESCE(u.rating, 0) AS ucl_rating
+                FROM player_ratings_combined c
+                JOIN v_player_season_stats s
+                     ON s.player_id = c.player_id AND s.season = c.season
+                LEFT JOIN player_ratings_combined u
+                     ON u.player_id = c.player_id AND u.season = c.season AND u.scope = 'ucl'
+                WHERE c.scope = 'league' AND c.season = ? AND s.minutes >= 900
+            ),
+            mx AS (SELECT max(ga) AS mga, max(ucl_rating) AS mucl FROM base),
+            scored AS (
+                SELECT b.player_id, b.lg_rating AS rating, b.goals, b.assists, b.ga,
+                       b.posw * (0.42 * (b.lg_rating / 100.0)
+                                 + 0.40 * (b.ga / NULLIF(mx.mga, 0))
+                                 + 0.18 * (b.ucl_rating / NULLIF(mx.mucl, 0))) AS score
+                FROM base b CROSS JOIN mx
+            )
+            SELECT pl.player_name AS player,
+                   COALESCE(f.detailed_position, f.main_position, '') AS position,
+                   f.team, sc.rating, sc.goals, sc.assists, sc.ga, pe.fpid, sc.score
+            FROM scored sc
+            JOIN players pl ON pl.player_id = sc.player_id
+            LEFT JOIN v_player_profile_full f ON f.player_id = sc.player_id
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = sc.player_id
+            ORDER BY sc.score DESC LIMIT ?
+        """, [season, limit]).df()
+        if df.empty:
+            return []
+        weights = [float(s) ** 5 for s in df.score]      # power-softmax -> vote share
+        total = sum(weights) or 1.0
         return [{"rank": i + 1, "player": r.player, "team": r.team,
                  "position": r.position, "rating": int(r.rating),
+                 "goals": int(r.goals), "assists": int(r.assists), "ga": int(r.ga),
+                 "share": round(weights[i] / total * 100),
                  "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
                 for i, r in enumerate(df.itertuples())]
 
