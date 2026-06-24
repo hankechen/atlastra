@@ -10,6 +10,7 @@ frontend, per the design mock.
 Run:  python -m webapp.server     ->  http://localhost:8000
 """
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import urllib.request
@@ -56,6 +57,24 @@ from webapp import scout_ai  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent / "frontend"
 PORT = 8000
+
+
+def _finite(o):
+    """Recursively replace NaN/Inf floats with None so responses are valid JSON.
+    Python's json.dumps emits a bare ``NaN`` token by default, which browsers'
+    JSON.parse rejects -- one stray NaN stat would 'break' a whole endpoint."""
+    if isinstance(o, float):
+        return o if math.isfinite(o) else None
+    if isinstance(o, dict):
+        return {k: _finite(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_finite(v) for v in o]
+    return o
+
+
+def jdumps(obj):
+    """JSON-encode an API payload, guaranteeing valid JSON (no NaN/Inf tokens)."""
+    return json.dumps(_finite(obj), default=str)
 CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
       ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png"}
 
@@ -260,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _json(self, obj, code=200, extra_headers=None):
-        self._send(code, json.dumps(obj, default=str).encode(), "application/json", extra_headers)
+        self._send(code, jdumps(obj).encode(), "application/json", extra_headers)
 
     def _cookie(self, name):
         raw = self.headers.get("Cookie", "") or ""
@@ -358,7 +377,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/api/"):
             try:
                 data = api(u.path, parse_qs(u.query))
-                self._send(200, json.dumps(data, default=str).encode(), "application/json")
+                self._send(200, jdumps(data).encode(), "application/json")
             except Exception as e:  # noqa: BLE001
                 self._send(404 if isinstance(e, KeyError) else 500,
                            json.dumps({"error": str(e)}).encode(), "application/json")

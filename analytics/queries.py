@@ -2787,18 +2787,21 @@ class SoccerDB:
 
     def _guess_card(self, r) -> dict:
         """Build one guess round (stat card + hidden rating answer) from a df row."""
-        mins = float(r.minutes or 0)
+        # `x or 0` is NaN-unsafe (pandas NaN is truthy), so coerce explicitly --
+        # a stray NaN would otherwise serialize to an invalid `NaN` JSON token.
+        num = lambda v: 0.0 if v is None or pd.isna(v) else float(v)
+        mins = num(r.minutes)
 
         def per90(total):
-            return round(float(total or 0) / mins * 90, 2) if mins else 0.0
+            return round(num(total) / mins * 90, 2) if mins else 0.0
         pct = lambda v: (str(round(float(v), 1)) + "%") if not pd.isna(v) else "—"
         stats = [
             {"label": "Minutes", "value": int(mins)},
-            {"label": "Appearances", "value": int(r.games or 0)},
-            {"label": "Goals", "value": int(r.goals or 0)},
-            {"label": "Assists", "value": int(r.assists or 0)},
-            {"label": "xG / 90", "value": round(float(r.xg_per90 or 0), 2)},
-            {"label": "xA / 90", "value": round(float(r.xa_per90 or 0), 2)},
+            {"label": "Appearances", "value": int(num(r.games))},
+            {"label": "Goals", "value": int(num(r.goals))},
+            {"label": "Assists", "value": int(num(r.assists))},
+            {"label": "xG / 90", "value": round(num(r.xg_per90), 2)},
+            {"label": "xA / 90", "value": round(num(r.xa_per90), 2)},
             {"label": "Shots / 90", "value": per90(r.shots)},
             {"label": "Key passes / 90", "value": per90(r.key_passes)},
             {"label": "Dribbles / 90", "value": per90(r.dribbles_completed)},
