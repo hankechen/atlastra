@@ -233,10 +233,10 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
 .gauge .val b{font-size:40px;font-weight:800;line-height:1}
 .gauge .cls{color:var(--accent);font-weight:700;margin-top:6px}
 .gauge .top{color:var(--muted);font-size:12px;margin-top:2px}
-.gauge.sm{width:150px;height:92px}
-.gauge.sm .val b{font-size:30px}
-.dual{display:flex;justify-content:space-around;gap:8px;margin-top:6px}
-.rgauge{display:flex;flex-direction:column;align-items:center}
+.gauge.sm{width:124px;height:78px}
+.gauge.sm .val b{font-size:26px}
+.dual{display:flex;justify-content:space-between;gap:6px;margin-top:6px}
+.rgauge{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0}
 .rgauge .lbl{color:var(--muted);font-size:11px;letter-spacing:1px;font-weight:700;text-transform:uppercase}
 .rgauge .cls{color:var(--accent);font-weight:700;font-size:12px;margin-top:4px;text-align:center}
 

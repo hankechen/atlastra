@@ -88,16 +88,16 @@ const PLAYSTYLE = { MID: ['Deep-Lying Playmaker', 'Progressive Passer', 'Press R
   DEF: ['Ball-Playing Defender', 'Stopper', 'Aerial Dominator', 'Progressive Carrier'], GK: ['Sweeper Keeper', 'Shot Stopper'] };
 const TECH = [['La Pausa', 24], ['Body Feint', 18], ['Outside Foot Pass', 15], ['Third-Man Combination', 12], ['Half Turn', 9]];
 
-function drawGauge(canvasId, rating, w = 150, h = 92) {
+function drawGauge(canvasId, rating, w = 124, h = 78) {
   const c = document.getElementById(canvasId);
   const ctx = c.getContext('2d');
   ctx.clearRect(0, 0, w, h);
-  const cx = w / 2, cy = h - 10, rad = w * 0.42;
+  const cx = w / 2, cy = h - 8, rad = w * 0.42;
   const frac = rating ? Math.max(0, Math.min(1, rating / 99)) : 0;
   const g = ctx.createLinearGradient(0, 0, w, 0);
   g.addColorStop(0, '#5570f0'); g.addColorStop(1, '#7d5cf5');
   for (const [col, a0, a1] of [['rgba(150,158,178,.22)', Math.PI, 2 * Math.PI], [g, Math.PI, Math.PI + Math.PI * frac]]) {
-    ctx.beginPath(); ctx.lineWidth = 11; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.lineWidth = Math.round(w * 0.073); ctx.lineCap = 'round';
     ctx.strokeStyle = col; ctx.arc(cx, cy, rad, a0, a1); ctx.stroke();
   }
 }
