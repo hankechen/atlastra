@@ -151,6 +151,8 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_overview()
         if path == "/api/rankings":
             return d.web_rankings(int(q.get("limit", ["10"])[0]))
+        if path == "/api/trending":
+            return d.web_trending(int(q.get("limit", ["5"])[0]))
         if path == "/api/position_rankings":
             return d.web_position_rankings(int(q.get("limit", ["20"])[0]),
                                            scope=q.get("scope", ["league"])[0])

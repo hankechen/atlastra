@@ -46,8 +46,15 @@ document.getElementById('ballon').innerHTML = BALLON.map(([n, p], i) => `
 
   const ranks = await api('/api/rankings?limit=5');
   document.getElementById('top5').innerHTML = ranks.map(p => playerRow(p, { chip: true })).join('');
-  document.getElementById('trending').innerHTML = ranks.map((p, i) =>
-    playerRow({ ...p, rank: i + 1 }, { arrow: true, value: (9.9 - i * 0.2).toFixed(1) })).join('');
+
+  // Trending = players whose last few games out-produce their own season baseline
+  // (recent goal involvements, not raw quality — so it differs from the Top-5).
+  const trend = await api('/api/trending?limit=5');
+  const trendEl = document.getElementById('trending');
+  trendEl.innerHTML = trend.length
+    ? trend.map(p => playerRow(p, { arrow: true,
+        value: `${p.recent_ga} <span class="unit">G+A · L${p.recent_games}</span>` })).join('')
+    : '<div class="placeholder-note" style="padding:8px 0">No recent match data.</div>';
 
   const spot = await api('/api/spotlight');
   const cards = [

@@ -713,6 +713,60 @@ class SoccerDB:
                  "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
                 for i, r in enumerate(df.itertuples())]
 
+    def web_trending(self, limit: int = 5, season: str = FOCUS_SEASON,
+                     window: int = 6, min_season_min: int = 720,
+                     min_recent_min: int = 270, min_recent_ga: int = 3) -> list[dict]:
+        """Players in hot recent form: their last `window` appearances out-produce
+        their own season baseline. Momentum, not just quality -- so it differs from
+        the Top-10 rail. Score = recent attacking output per-90 plus half the lift
+        over the player's season per-90, where output = goals + assists + half the
+        underlying xG + xA (actuals reward the streak, expected stops one-game noise
+        from dominating). Gated to rated players with a real recent end-product
+        (>= `min_recent_ga` goal involvements) so the list stays credible.
+
+        Per-match data is Understat (domestic leagues) only -- see player_match_log."""
+        df = self.con.execute(f"""
+            WITH log AS (
+                SELECT player_id, minutes, goals, assists, xg, xa,
+                       row_number() OVER (PARTITION BY player_id
+                           ORDER BY match_date DESC, game_id DESC) AS rn
+                FROM player_match_log WHERE season = ? AND minutes > 0
+            ),
+            season AS (
+                SELECT player_id, sum(minutes) AS smin,
+                       sum(goals + assists + 0.5 * (xg + xa)) AS sc
+                FROM log GROUP BY player_id HAVING sum(minutes) >= ?
+            ),
+            recent AS (
+                SELECT player_id, sum(minutes) AS rmin,
+                       sum(goals + assists + 0.5 * (xg + xa)) AS rc,
+                       sum(goals + assists) AS rga, count(*) AS rgames
+                FROM log WHERE rn <= {window} GROUP BY player_id
+                HAVING sum(minutes) >= ? AND sum(goals + assists) >= ?
+            )
+            SELECT pl.player_name AS player,
+                   COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position,
+                   f.team, c.rating, pe.fpid, r.rga, r.rgames,
+                   (r.rc / r.rmin * 90)
+                     + 0.5 * ((r.rc / r.rmin * 90) - (s.sc / s.smin * 90)) AS score
+            FROM recent r
+            JOIN season s USING(player_id)
+            JOIN player_ratings_combined c
+                 ON c.player_id = r.player_id AND c.season = ? AND c.scope = 'league'
+            JOIN players pl USING(player_id)
+            LEFT JOIN v_player_profile_full f ON f.player_id = r.player_id
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = r.player_id
+            WHERE (r.rc / r.rmin * 90) >= (s.sc / s.smin * 90) * 1.05
+            ORDER BY score DESC LIMIT ?
+        """, [season, min_season_min, min_recent_min, min_recent_ga, season, limit]).df()
+        return [{"rank": i + 1, "player": r.player, "team": r.team,
+                 "position": r.position, "rating": int(r.rating),
+                 "recent_ga": int(r.rga), "recent_games": int(r.rgames),
+                 "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                for i, r in enumerate(df.itertuples())]
+
     # fine position groups (player_ratings_combined.position_group) -> display label,
     # in the order the Rankings page shows them.
     POSITION_RANK_GROUPS = [
