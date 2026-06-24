@@ -441,6 +441,12 @@ const ICONS = {
   higherlower: '<path d="M7 21V5M7 5 3.5 8.5M7 5l3.5 3.5M17 3v16m0 0 3.5-3.5M17 19l-3.5-3.5"/>',
   mystery: '<circle cx="12" cy="8.4" r="3.4"/><path d="M5.5 20c0-3.4 2.9-5.2 6.5-5.2s6.5 1.8 6.5 5.2"/><path d="M10.4 7.6a1.7 1.7 0 013.3.6c0 1.1-1.6 1.4-1.6 2.4"/>',
   draft: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M4 8h16M4 16h16M12 8v8"/><circle cx="12" cy="12" r="2"/>',
+  award: '<circle cx="12" cy="14" r="5"/><path d="M9 9.6 6.5 3M15 9.6 17.5 3"/><path d="m12 11.7.9 1.8 2 .3-1.45 1.4.35 2L12 16.5l-1.8.95.35-2L9.1 14.1l2-.3z" fill="currentColor" stroke="none"/>',
+  biggame: '<path d="M12 3c1 3-2 4-2 7a2 2 0 004 0c0-1 .5-2 .5-2 1 1 2.5 2.9 2.5 5a5 5 0 01-10 0c0-3.6 4-5.6 5-10z"/>',
+  budget: '<ellipse cx="12" cy="6.3" rx="7" ry="3"/><path d="M5 6.3v5.4c0 1.7 3.1 3 7 3s7-1.3 7-3V6.3"/><path d="M5 11.7v5.4c0 1.7 3.1 3 7 3s7-1.3 7-3v-5.4"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  dnamap: '<path d="M3.5 4v16.5H20"/><circle cx="8" cy="15.5" r="1.4"/><circle cx="11.5" cy="10" r="1.4"/><circle cx="16" cy="13" r="1.4"/><circle cx="18.5" cy="6.5" r="1.4"/>',
+  card: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.5" cy="11" r="2.2"/><path d="M5.5 16.4c.4-1.5 1.6-2.3 3-2.3s2.6.8 3 2.3"/><path d="M14.5 9.5h4M14.5 13h4M14.5 16.2h2.5"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -461,13 +467,15 @@ const NAV_MAIN = [
   ['Search', 'search', '/search.html'],
 ];
 const NAV_ANALYTICS = [
-  ['Rankings & Awards', 'rankings', '/rankings.html'],
-  ['Best XI on a Budget', 'teams', '/bestxi.html'],
-  ['Find the Next…', 'compare', '/findnext.html'],
-  ['Player Cards', 'players', '/card.html'],
-  ['Football DNA Map', 'archetypes', '/dnamap.html'],
-  ['Big Game Index', 'rankings', '/biggame.html'],
+  // leaderboards
+  ['Rankings & Awards', 'award', '/rankings.html'],
   ['Stat Leaders', 'rankings', '/leaders.html'],
+  ['Big Game Index', 'biggame', '/biggame.html'],
+  // discovery & tools
+  ['Find the Next…', 'target', '/findnext.html'],
+  ['Football DNA Map', 'dnamap', '/dnamap.html'],
+  ['Best XI on a Budget', 'budget', '/bestxi.html'],
+  ['Player Cards', 'card', '/card.html'],
 ];
 // Games & engagement hub
 const NAV_GAMES = [
