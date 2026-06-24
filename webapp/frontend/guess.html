@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Guess the Rating</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=44">
+<style>
+.gr-wrap{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;align-items:start}
+@media(max-width:900px){.gr-wrap{grid-template-columns:1fr}}
+.gr-scoreboard{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.gr-sb{flex:1;min-width:104px;background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:11px 14px}
+.gr-sb b{display:block;font-size:22px;font-weight:800;line-height:1.1}
+.gr-sb span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:600}
+.gr-sb.hot b{color:var(--gold)}
+.gr-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.gr-pos{background:var(--accent-soft);color:var(--text);border-radius:20px;padding:5px 13px;font-size:12.5px;font-weight:700}
+.gr-tag{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px}
+.gr-tag img{width:18px;height:18px;object-fit:contain}
+.gr-statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+@media(max-width:560px){.gr-statgrid{grid-template-columns:1fr}}
+.gr-stat{display:flex;justify-content:space-between;align-items:center;background:var(--card2);
+  border:1px solid var(--border);border-radius:10px;padding:10px 13px}
+.gr-stat .l{color:var(--muted);font-size:12.5px;font-weight:500}
+.gr-stat .v{font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+/* guess panel */
+.gr-guess{position:sticky;top:78px}
+.gr-bignum{font-size:64px;font-weight:800;text-align:center;line-height:1;font-variant-numeric:tabular-nums;
+  background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.gr-hint{text-align:center;color:var(--muted);font-size:12.5px;margin-top:6px}
+.gr-slider{width:100%;margin:20px 0 6px;-webkit-appearance:none;appearance:none;height:8px;border-radius:6px;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));outline:none}
+.gr-slider::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;
+  background:var(--text);border:3px solid var(--accent);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.gr-slider::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--text);border:3px solid var(--accent);cursor:pointer}
+.gr-scale{display:flex;justify-content:space-between;color:var(--muted2);font-size:11px;margin-bottom:14px}
+.gr-btn{width:100%}
+/* reveal */
+.gr-reveal{text-align:center}
+.gr-photo{width:96px;height:96px;border-radius:50%;margin:2px auto 10px;background:var(--card2);
+  border:2px solid var(--border2);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.gr-photo img{width:100%;height:100%;object-fit:cover}
+.gr-photo .ini{font-size:30px;font-weight:800;color:var(--muted)}
+.gr-name{font-size:20px;font-weight:800}
+.gr-name a{color:inherit;text-decoration:none}.gr-name a:hover{color:var(--accent)}
+.gr-vs{display:flex;justify-content:center;align-items:flex-end;gap:24px;margin:16px 0}
+.gr-vs .col{display:flex;flex-direction:column;gap:2px}
+.gr-vs .col b{font-size:40px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.gr-vs .col span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.gr-verdict{font-size:18px;font-weight:800;margin:4px 0}
+.gr-pts{font-size:14px;font-weight:700}
+.gr-q{font-size:54px;font-weight:800;color:var(--muted2)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><span>🔖</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Guess the Rating</h2><p>Read the season per-90 line and guess the player's Atlastra rating. The closer you land, the more points you bank.</p></div>
+      <button class="btn btn-ghost" id="resetBtn" title="Reset your score">Reset score</button>
+    </div>
+
+    <div class="gr-scoreboard" id="scoreboard"></div>
+    <div id="gr-out"><section class="card"><div class="placeholder-note">Loading players…</div></section></div>
+  </main>
+</div>
+<script src="/js/api.js?v=18"></script>
+<script src="/js/guess.js?v=1"></script>
+</body>
+</html>

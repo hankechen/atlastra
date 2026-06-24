@@ -436,6 +436,7 @@ const ICONS = {
   styles: '<path d="M12 2.5 21 7.5v9L12 21.5 3 16.5v-9z"/><path d="M12 8l4 2.2v4.4L12 17l-4-2.4v-4.4z"/>',
   ucl: '<path d="M7 4h10v3a5 5 0 01-10 0z"/><path d="M7 5H4v1a3 3 0 003 3M17 5h3v1a3 3 0 01-3 3"/><path d="M12 12v4M9 20h6M10 16h4l1 4H9z"/>',
   worldcup: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.5 6.2c2 1.4 11 1.4 13 0M5.5 17.8c2-1.4 11-1.4 13 0"/>',
+  guess: '<circle cx="12" cy="12" r="9"/><path d="M9.2 9.3a2.9 2.9 0 015.6 1c0 1.9-2.8 2.5-2.8 4.2"/><circle cx="12" cy="17.6" r="1" fill="currentColor" stroke="none"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -463,6 +464,7 @@ const NAV_ANALYTICS = [
   ['Football DNA Map', 'archetypes', '/dnamap.html'],
   ['Big Game Index', 'rankings', '/biggame.html'],
   ['Stat Leaders', 'rankings', '/leaders.html'],
+  ['Guess the Rating', 'guess', '/guess.html'],
 ];
 
 // in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];

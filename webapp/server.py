@@ -226,6 +226,10 @@ def api(path: str, q: dict) -> dict | list:
                 float(q.get("max_value", ["0"])[0]), int(q.get("min_minutes", ["450"])[0]),
                 int(q.get("max_age", ["0"])[0]), int(q.get("min_rating", ["0"])[0]),
                 int(q.get("limit", ["40"])[0]))
+        if path == "/api/guess":
+            return d.web_guess_rounds(int(q.get("count", ["8"])[0]),
+                                      int(q.get("min_minutes", ["1100"])[0]),
+                                      int(q.get("min_rating", ["66"])[0]))
         if path == "/api/team_options":
             return d.web_team_options()
         if path == "/api/team_style":

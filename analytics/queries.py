@@ -2750,6 +2750,70 @@ class SoccerDB:
                 "photo": p.get("photo"), "market_value_eur": p.get("market_value_eur"),
                 "season": p.get("season"), "stats": stats}
 
+    # ---------------------------------------------------------------- Guess the Rating
+    #  A content/game endpoint: hand the client a batch of random outfield players
+    #  (decent minutes, recognizable enough that the per-90 line is meaningful) with
+    #  their season per-90 stat card and the Atlastra league rating as the hidden
+    #  answer. The user reads the line, guesses the rating, and is scored on how
+    #  close they land — the points logic lives client-side.
+    def web_guess_rounds(self, count: int = 8, min_minutes: int = 1100,
+                         min_rating: int = 66, season: str = FOCUS_SEASON) -> dict:
+        df = self.con.execute(
+            """SELECT pl.player_name AS nm, c.position_group AS grp, c.rating,
+                      v.team, v.games, v.minutes, v.goals, v.assists,
+                      v.xg_per90, v.xa_per90, v.shots, v.key_passes, v.dribbles_completed,
+                      v.tackles, v.interceptions, v.pass_accuracy_pct, v.duels_won_pct,
+                      b.nationality, b.country_code, b.fotmob_age AS age,
+                      (SELECT max(fotmob_player_id) FROM player_enrichment e
+                       WHERE e.player_id = c.player_id AND e.fotmob_player_id IS NOT NULL) AS fpid
+               FROM player_ratings_combined c
+               JOIN v_player_season_stats v ON v.player_id = c.player_id AND v.season = c.season
+               JOIN players pl ON pl.player_id = c.player_id
+               LEFT JOIN player_bio b ON b.player_id = c.player_id
+               WHERE c.scope='league' AND c.season = ? AND c.position_group <> 'GK'
+                 AND v.minutes >= ? AND c.rating >= ?
+               ORDER BY random() LIMIT ?""",
+            [season, min_minutes, min_rating, count]).df()
+        if df.empty:
+            return {"available": False, "error": "No players available for the game."}
+
+        def per90(total, minutes):
+            return round(float(total or 0) / minutes * 90, 2) if minutes else 0.0
+
+        rounds = []
+        for r in df.itertuples():
+            mins = float(r.minutes or 0)
+            stats = [
+                {"label": "Minutes", "value": int(mins)},
+                {"label": "Appearances", "value": int(r.games or 0)},
+                {"label": "Goals", "value": int(r.goals or 0)},
+                {"label": "Assists", "value": int(r.assists or 0)},
+                {"label": "xG / 90", "value": round(float(r.xg_per90 or 0), 2)},
+                {"label": "xA / 90", "value": round(float(r.xa_per90 or 0), 2)},
+                {"label": "Shots / 90", "value": per90(r.shots, mins)},
+                {"label": "Key passes / 90", "value": per90(r.key_passes, mins)},
+                {"label": "Dribbles / 90", "value": per90(r.dribbles_completed, mins)},
+                {"label": "Tackles + Int / 90",
+                 "value": per90((r.tackles or 0) + (r.interceptions or 0), mins)},
+                {"label": "Pass accuracy",
+                 "value": (str(round(float(r.pass_accuracy_pct), 1)) + "%")
+                          if not pd.isna(r.pass_accuracy_pct) else "—"},
+                {"label": "Duels won",
+                 "value": (str(round(float(r.duels_won_pct), 1)) + "%")
+                          if not pd.isna(r.duels_won_pct) else "—"},
+            ]
+            rounds.append({
+                "name": r.nm, "rating": int(r.rating),
+                "team": r.team, "team_logo": self.team_logo(r.team),
+                "position": self.GROUP_LABELS.get(r.grp, r.grp), "position_code": r.grp,
+                "nationality": None if pd.isna(r.nationality) else r.nationality,
+                "country_code": None if pd.isna(r.country_code) else r.country_code,
+                "age": None if pd.isna(r.age) else int(r.age),
+                "photo": self.player_photo(None if pd.isna(r.fpid) else int(r.fpid)),
+                "stats": stats,
+            })
+        return {"available": True, "season": season, "rounds": rounds}
+
     # ---------------------------------------------------------------- Football DNA Map
     #  Project every outfielder onto a 2D "style map" so distance == dissimilarity.
     #  Position-agnostic per-90 features, z-scored globally, then PCA to 2 axes
