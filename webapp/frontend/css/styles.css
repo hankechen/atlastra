@@ -150,7 +150,7 @@ a{color:inherit;text-decoration:none}
 .flag{width:18px;height:13px;border-radius:2px;background:#2a3350;display:inline-block}
 
 /* home hero */
-.hero{position:relative;overflow:hidden;border-radius:var(--radius);border:1px solid var(--border);
+.hero{position:relative;overflow:hidden;border-radius:var(--radius);border:1px solid rgba(255,255,255,.08);
   background:radial-gradient(120% 140% at 80% 20%,var(--accent-soft) 0%,var(--card2) 60%,var(--card) 100%);
   padding:34px;min-height:312px}
 .hero h1,.hero p,.hero .cta,.hero-stats{position:relative;z-index:2}
@@ -170,7 +170,7 @@ a{color:inherit;text-decoration:none}
 .hero h1 .accent{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero p{color:var(--muted);margin:14px 0 22px;font-size:15px}
 .hero .cta{display:flex;gap:12px}
-.hero-stats{display:flex;gap:30px;margin-top:26px;padding-top:22px;border-top:1px solid var(--border)}
+.hero-stats{display:flex;gap:30px;margin-top:26px;padding-top:22px;border-top:1px solid rgba(255,255,255,.08)}
 .hero-stats .s b{font-size:20px;font-weight:800;display:block}
 .hero-stats .s span{color:var(--muted);font-size:12px}
 
