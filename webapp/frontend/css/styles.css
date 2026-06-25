@@ -320,7 +320,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .pcard:hover{transform:translateY(-3px);border-color:var(--accent)}
 .pcard .top{display:flex;justify-content:space-between;align-items:flex-start}
 .pcard .photo{width:54px;height:54px;border-radius:50%;background:var(--card2);
-  border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--muted)}
+  border:1px solid var(--pic-border);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--muted)}
 .pcard .rt{width:42px;height:42px;border-radius:50%;border:2px solid var(--accent);display:flex;
   align-items:center;justify-content:center;font-weight:800;font-size:15px}
 .pcard .nm{font-weight:700;font-size:16px;margin-top:14px}
