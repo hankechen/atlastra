@@ -217,24 +217,42 @@ def fetch_rows() -> list[dict]:
 
 
 def load_live() -> int:
-    """Rebuild live_matches; returns the number of in-play matches (so a refresher
-    can pace itself -- poll fast while games are live, slow when idle)."""
+    """Refresh live_matches and return the in-play count (so a refresher can pace
+    itself -- poll fast while games are live, slow when idle).
+
+    Non-destructive: UPSERT the scraped rows and only DELETE rows that have aged out
+    of the [today-BACK, today+AHEAD] window. A degraded scrape (e.g. an upstream
+    endpoint 404s and we get only the live overlay) therefore never blanks the feed
+    -- it just doesn't add new rows that cycle, while good in-window rows persist."""
     rows = fetch_rows()
     con = connect_retry(DB_PATH, read_only=False)
     con.execute(DDL)
-    con.execute("DELETE FROM live_matches")
     if rows:
         df = pd.DataFrame(rows)[COLS]                 # exact column order
         con.register("live_df", df)
+        assigns = ", ".join(f"{c}=excluded.{c}" for c in COLS if c != "event_id")
         con.execute(f"INSERT INTO live_matches ({','.join(COLS)}) "
-                    f"SELECT {','.join(COLS)} FROM live_df")
+                    f"SELECT {','.join(COLS)} FROM live_df "
+                    f"ON CONFLICT (event_id) DO UPDATE SET {assigns}")
         con.unregister("live_df")
-    n_live = sum(r["status_type"] == "inprogress" for r in rows)
-    n_fin = sum(r["status_type"] == "finished" for r in rows)
-    n_up = sum(r["status_type"] == "notstarted" for r in rows)
+    # prune only by time window -- drops old results / far-future fixtures and keeps
+    # the table bounded, without ever deleting a row just because one scrape missed it
+    now = int(time.time())
+    lo = now - (LIVE_DAYS_BACK + 1) * 86400
+    hi = now + (LIVE_DAYS_AHEAD + 1) * 86400
+    con.execute("DELETE FROM live_matches "
+                "WHERE start_timestamp IS NOT NULL "
+                "AND (start_timestamp < ? OR start_timestamp > ?)", [lo, hi])
+    n_live, n_fin, n_up = con.execute(
+        "SELECT count(*) FILTER (WHERE status_type='inprogress'), "
+        "       count(*) FILTER (WHERE status_type='finished'), "
+        "       count(*) FILTER (WHERE status_type='notstarted') FROM live_matches"
+    ).fetchone()
+    total = con.execute("SELECT count(*) FROM live_matches").fetchone()[0]
     con.close()
-    print(f"live_matches: {len(rows)} rows "
-          f"({n_live} live, {n_fin} results, {n_up} upcoming).")
+    print(f"live_matches: {total} rows "
+          f"({n_live} live, {n_fin} results, {n_up} upcoming) "
+          f"[+{len(rows)} scraped].")
     return n_live
 
 
