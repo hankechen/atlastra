@@ -66,12 +66,21 @@ COLS = ["event_id", "tournament_key", "tournament_name", "tournament_group",
         "home_score", "away_score", "winner_code", "updated_at"]
 
 
-def _get(path: str) -> dict:
+def _get(path: str, retries: int = 2) -> dict:
     """Bare GET -- NO extra headers (CORS headers trip SofaScore's bot challenge;
-    the default browser-TLS fingerprint alone is accepted)."""
-    r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=30)
-    r.raise_for_status()
-    return r.json()
+    the default browser-TLS fingerprint alone is accepted). Retries a couple of
+    times because SofaScore intermittently 404s/throttles otherwise-valid paths."""
+    last = None
+    for i in range(retries + 1):
+        try:
+            r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:                        # noqa: BLE001
+            last = e
+            if i < retries:
+                time.sleep(0.8)
+    raise last
 
 
 def _round_name(ev: dict) -> str | None:
@@ -129,29 +138,67 @@ def _row(ev: dict, now: int, updated_at: datetime) -> dict | None:
     }
 
 
+# current-season id per uniqueTournament. Changes once a season, so cache it for
+# the process (a server restart picks up a new season); avoids a /seasons call per
+# full refresh.
+_SEASON_CACHE: dict[int, int] = {}
+
+
+def _season_id(tid: int) -> int | None:
+    """Current (latest) SofaScore season id for a uniqueTournament, or None."""
+    if tid in _SEASON_CACHE:
+        return _SEASON_CACHE[tid]
+    try:
+        seasons = _get(f"/unique-tournament/{tid}/seasons").get("seasons") or []
+    except Exception as e:                            # noqa: BLE001
+        print(f"  ! seasons {tid}: {e}")
+        time.sleep(RATE_LIMIT_SEC)
+        return None
+    time.sleep(RATE_LIMIT_SEC)
+    sid = seasons[0].get("id") if seasons else None
+    if sid:
+        _SEASON_CACHE[tid] = sid
+    return sid
+
+
 def fetch_rows() -> list[dict]:
+    """Build the live_matches snapshot. SofaScore's date-based scheduled-events
+    endpoint is unreliable (returns 404), so pull each covered tournament's
+    current-season `next` (upcoming) + `last` (recent results) and keep the events
+    inside the [today-LIVE_DAYS_BACK, today+LIVE_DAYS_AHEAD] window, then overlay the
+    global live feed for the freshest in-play scores."""
     now = int(time.time())
     updated_at = datetime.now()
     rows: dict[int, dict] = {}        # event_id -> row (last write wins)
 
     today = date.today()
-    window = [today + timedelta(days=d)
-              for d in range(-LIVE_DAYS_BACK, LIVE_DAYS_AHEAD + 1)]
-    for d in window:
-        try:
-            data = _get(f"/sport/football/scheduled-events/{d.isoformat()}")
-        except Exception as e:                       # noqa: BLE001
-            print(f"  ! {d}: {e}")
-            time.sleep(RATE_LIMIT_SEC)
+    lo, hi = today - timedelta(days=LIVE_DAYS_BACK), today + timedelta(days=LIVE_DAYS_AHEAD)
+
+    def in_window(ev) -> bool:
+        ts = ev.get("startTimestamp")
+        return bool(ts) and lo <= date.fromtimestamp(ts) <= hi
+
+    for key, (tid, name, grp) in SOFASCORE_LIVE_TOURNAMENTS.items():
+        sid = _season_id(tid)
+        if not sid:
             continue
         kept = 0
-        for ev in data.get("events", []):
-            r = _row(ev, now, updated_at)
-            if r:
-                rows[r["event_id"]] = r
-                kept += 1
-        print(f"  {d}: {kept} covered match(es)")
-        time.sleep(RATE_LIMIT_SEC)
+        for kind in ("next", "last"):     # upcoming fixtures + recent results
+            try:
+                data = _get(f"/unique-tournament/{tid}/season/{sid}/events/{kind}/0")
+            except Exception as e:                    # noqa: BLE001
+                print(f"  ! {name} {kind}: {e}")
+                time.sleep(RATE_LIMIT_SEC)
+                continue
+            for ev in data.get("events", []):
+                if not in_window(ev):
+                    continue
+                r = _row(ev, now, updated_at)
+                if r:
+                    rows[r["event_id"]] = r
+                    kept += 1
+            time.sleep(RATE_LIMIT_SEC)
+        print(f"  {name}: {kept} match(es) in window")
 
     # overlay the global live feed -- freshest score + running clock for in-play
     try:
