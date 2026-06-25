@@ -4,6 +4,7 @@
   --elev:#313c58;                                  /* lighter "frosted" surface (top bar, tiles, controls) */
   /* white borders for definition on the dark surfaces (light theme overrides below) */
   --border:rgba(255,255,255,.6); --border2:rgba(255,255,255,.85);
+  --pic-border:rgba(255,255,255,.22);              /* softer ring for player avatars */
   --text:#eff2f9; --muted:#9aa4ba; --muted2:#727d96;
   --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#2c3b68;
   --green:#34c46a; --red:#e5484d; --gold:#e8b04b;
@@ -17,7 +18,7 @@
 html.light{
   /* soft light (no pure white): muted grey page, off-white lifted cards */
   --bg:#dfe3ec; --bg2:#eef1f7; --card:#f4f6fb; --card2:#e9edf5; --elev:#e1e6f0;
-  --border:#d2d8e6; --border2:#c2cadc;
+  --border:#d2d8e6; --border2:#c2cadc; --pic-border:#c2cadc;
   --text:#222a3a; --muted:#5b6478; --muted2:#828ca2;
   --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#dde3f7;
   --green:#1f9d57; --red:#d63f44; --gold:#b9871d;
@@ -127,7 +128,7 @@ a{color:inherit;text-decoration:none}
 .prow:hover{background:var(--card2)}
 .prow .rk{width:18px;text-align:center;color:var(--muted);font-weight:700}
 .prow .pic{width:34px;height:34px;border-radius:50%;background:var(--card2);flex:none;
-  background-size:cover;border:1px solid var(--border2)}
+  background-size:cover;border:1px solid var(--pic-border)}
 .prow .nm{font-weight:600;font-size:13.5px}
 .prow .sub{color:var(--muted);font-size:12px}
 .prow .end{margin-left:auto;display:flex;align-items:center;gap:6px;font-weight:700;white-space:nowrap}
@@ -218,7 +219,7 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
 .spot{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
 .spot .s{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
 .spot .s .lab{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
-.spot .s .pic{width:62px;height:62px;border-radius:50%;margin:12px auto;background:var(--card2);border:1px solid var(--border2)}
+.spot .s .pic{width:62px;height:62px;border-radius:50%;margin:12px auto;background:var(--card2);border:1px solid var(--pic-border)}
 .spot .s .nm{font-weight:700;font-size:13.5px}
 .spot .s .v{color:var(--accent);font-weight:700;font-size:13px;margin-top:3px}
 
@@ -227,11 +228,11 @@ td{padding:9px 6px;border-top:1px solid var(--border)}
   padding:14px;display:grid;grid-template-rows:repeat(4,1fr);gap:10px;min-height:300px}
 .pline{display:flex;justify-content:space-around}
 .pp{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px}
-.pp .dot{width:34px;height:34px;border-radius:50%;background:var(--card2);border:1px solid var(--border2)}
+.pp .dot{width:34px;height:34px;border-radius:50%;background:var(--card2);border:1px solid var(--pic-border)}
 
 /* player header */
 .ph{display:grid;grid-template-columns:140px minmax(0,1fr);gap:20px}
-.ph .photo{width:140px;height:170px;border-radius:12px;background:var(--card2);border:1px solid var(--border2)}
+.ph .photo{width:140px;height:170px;border-radius:12px;background:var(--card2);border:1px solid var(--pic-border)}
 .ph h1{font-size:34px;font-weight:800;display:flex;align-items:center;gap:10px}
 .verified{color:var(--accent)}
 .ph .team{color:var(--muted);margin:6px 0 16px;font-size:14px}
@@ -469,7 +470,7 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .sr .pic{width:38px;height:38px;border-radius:50%;flex:none;overflow:hidden;position:relative;background:var(--card2)}
 .sr .pic>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:var(--card2)}
 .sr .pic .ini{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--muted);font-size:12px}
-.sr .pic.crest-pic{background:var(--card2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:16px}
+.sr .pic.crest-pic{background:var(--card2);border:1px solid var(--pic-border);display:flex;align-items:center;justify-content:center;font-size:16px}
 .sr .srx{flex:1;min-width:0}
 .sr .srx .nm{font-weight:700;font-size:14px}
 .sr .srx .sub{color:var(--muted);font-size:12px;margin-top:2px}
