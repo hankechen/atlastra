@@ -4,7 +4,7 @@
   --elev:#313c58;                                  /* lighter "frosted" surface (top bar, tiles, controls) */
   /* white borders for definition on the dark surfaces (light theme overrides below) */
   --border:rgba(255,255,255,.6); --border2:rgba(255,255,255,.85);
-  --pic-border:rgba(255,255,255,.22);              /* softer ring for player avatars */
+  --pic-border:var(--accent);                      /* blue ring for player avatars (matches Compare) */
   --text:#eff2f9; --muted:#9aa4ba; --muted2:#727d96;
   --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#2c3b68;
   --green:#34c46a; --red:#e5484d; --gold:#e8b04b;
@@ -18,7 +18,7 @@
 html.light{
   /* soft light (no pure white): muted grey page, off-white lifted cards */
   --bg:#dfe3ec; --bg2:#eef1f7; --card:#f4f6fb; --card2:#e9edf5; --elev:#e1e6f0;
-  --border:#d2d8e6; --border2:#c2cadc; --pic-border:#c2cadc;
+  --border:#d2d8e6; --border2:#c2cadc; --pic-border:var(--accent);
   --text:#222a3a; --muted:#5b6478; --muted2:#828ca2;
   --accent:#5570f0; --accent2:#7d5cf5; --accent-soft:#dde3f7;
   --green:#1f9d57; --red:#d63f44; --gold:#b9871d;
