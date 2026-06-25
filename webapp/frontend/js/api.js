@@ -541,9 +541,6 @@ function renderSidebar(active) {
       <div class="nav-label">Leagues<span class="chev">${svg('chevD')}</span></div>
       <nav class="nav">${leagues}</nav>
     </div>
-    <div class="pro"><span class="pro-ic">${svg('pro')}</span>
-      <div class="pro-tx"><h4>ATLASTRA PRO</h4><p>Unlock advanced stats and features.</p></div>
-      <span class="chev">${svg('chevR')}</span></div>
     <a href="/profile.html" class="sb-user"><span class="ava"${Store.profile().picture ? ` style="background-image:url('${Store.profile().picture}');background-size:cover;background-position:center;color:transparent"` : ''}>${initials(Store.name())}<i class="on"></i></span>
       <span class="u-tx"><b>${Store.name()}</b><span class="u-sub" id="sbUserSub">View Profile</span></span><span class="chev">${svg('chevR')}</span></a>
     <button class="sb-auth" id="sbAuthBtn">Sign in to sync</button>`;
