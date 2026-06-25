@@ -60,6 +60,16 @@ from webapp import scout_ai  # noqa: E402
 FRONTEND = Path(__file__).resolve().parent / "frontend"
 PORT = 8000
 
+# The in-process live refresher writes to the warehouse on a loop. DuckDB shares a
+# single instance per file per process and forbids mixing read-only + read-write
+# connections, so when the refresher is on we must open request connections
+# read-write too -- otherwise the first read-only request blocks every later write
+# AND a cached read-only instance never sees the refresher's updates (stale live
+# feed). With the refresher off, stay read-only so other processes can use the
+# warehouse concurrently.
+LIVE_REFRESH = os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1"
+DB_READ_ONLY = not LIVE_REFRESH
+
 
 def _finite(o):
     """Recursively replace NaN/Inf floats with None so responses are valid JSON.
@@ -88,7 +98,7 @@ def match_api(path: str, q: dict) -> dict:
     if path == "/api/match":
         h = live_feed.header(eid)
         if h.get("available") and (h.get("home_national") or h.get("away_national")):
-            with SoccerDB(read_only=True) as db:   # FIFA rank for national-team sides
+            with SoccerDB(read_only=DB_READ_ONLY) as db:   # FIFA rank for national-team sides
                 if h.get("home_national"):
                     h["home_rank"] = db.fifa_rank(h.get("home"))
                 if h.get("away_national"):
@@ -103,7 +113,7 @@ def match_api(path: str, q: dict) -> dict:
             s = d.get(side) or {}
             players += (s.get("starting_xi") or []) + (s.get("substitutes") or [])
         if players:
-            with SoccerDB(read_only=True) as db:
+            with SoccerDB(read_only=DB_READ_ONLY) as db:
                 rmap = db.ratings_by_name([p.get("name") for p in players])
             # estimate (SofaScore season form) for players not in our DB — in
             # parallel, since each is a couple of network calls.
@@ -129,7 +139,7 @@ def match_api(path: str, q: dict) -> dict:
         d = live_feed.player_stats(eid)
         names = [p.get("name") for p in d.get("players", [])]
         if names:
-            with SoccerDB(read_only=True) as db:
+            with SoccerDB(read_only=DB_READ_ONLY) as db:
                 have = db.have_profiles(names)
             for p in d["players"]:
                 p["has_profile"] = p.get("name") in have
@@ -151,11 +161,11 @@ def api(path: str, q: dict) -> dict | list:
     if path == "/api/player_club":
         return live_feed.player_club(int(q.get("id", [0])[0]))
     if path == "/api/scout_report":           # gather data (DB), then generate via Claude
-        with SoccerDB(read_only=True) as d:
+        with SoccerDB(read_only=DB_READ_ONLY) as d:
             data = d.web_player(q.get("name", ["Pedri"])[0], q.get("career_stat", ["xa"])[0],
                                 q.get("season", [None])[0])
         return scout_ai.scout_report(data, refresh=q.get("refresh", ["0"])[0] == "1")
-    with SoccerDB(read_only=True) as d:
+    with SoccerDB(read_only=DB_READ_ONLY) as d:
         if path == "/api/overview":
             return d.web_overview()
         if path == "/api/rankings":
@@ -423,13 +433,13 @@ def _live_refresher():
             elif n_live:                       # only worth an overlay if games are on
                 n_live = live.update_live_overlay()
         except Exception as e:                 # noqa: BLE001 -- network/scrape hiccup
-            print(f"live refresher: {type(e).__name__}: {str(e)[:120]}")
+            print(f"live refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
         time.sleep(25 if n_live else 90)
 
 
 if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
-    if os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1":
+    if LIVE_REFRESH:
         threading.Thread(target=_live_refresher, daemon=True).start()
-        print("live refresher: on (re-scrapes SofaScore; ATLASTRA_NO_LIVE_REFRESH=1 to disable)")
+        print("live refresher: on (read-write DB; ATLASTRA_NO_LIVE_REFRESH=1 to disable)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

@@ -3,7 +3,8 @@ attachSearchDropdown(document.getElementById('searchBox'));
 
 // ---- live matches widget (real SofaScore feed) ----
 // Show what's on: live games first, then the soonest upcoming, then latest results.
-(async () => {
+// Re-polls every 30s so in-play scores stay current without a page reload.
+async function loadLiveWidget() {
   const box = document.getElementById('liveMatches');
   try {
     const d = await api('/api/live?recent=4&upcoming=5');
@@ -16,7 +17,9 @@ attachSearchDropdown(document.getElementById('searchBox'));
   } catch {
     box.innerHTML = '<div class="placeholder-note">Live feed unavailable.</div>';
   }
-})();
+}
+loadLiveWidget();
+setInterval(() => { if (!document.hidden) loadLiveWidget(); }, 30000);
 
 // Ballon d'Or Predictor — real model (attacking output + rating + UCL, by position)
 (async () => {

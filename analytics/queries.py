@@ -1633,7 +1633,7 @@ class SoccerDB:
         recent = [match(r) for r in df[df.status_type == "finished"]
                   .sort_values("start_timestamp", ascending=False).head(limit_recent).itertuples()]
         return {"live": live, "upcoming": upcoming, "recent": recent,
-                "updated_at": df["updated_at"].iloc[0]}
+                "updated_at": df["updated_at"].max()}   # latest row (live overlay), not first
 
     def _team_form(self, team_name: str, season: str, n: int = 5) -> list:
         """Last-n results as W/D/L, oldest→newest (for a form string)."""
