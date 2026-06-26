@@ -2313,6 +2313,40 @@ class SoccerDB:
 
     # per-stat percentile vs same-position peers (per-90 basis; rates as-is), so the
     # tiles can show where a player sits — peak of the stat = 100th percentile.
+    def _progressive_stats(self, pid: int, season: str) -> dict:
+        """Progressive passes & carries (per-90 + position percentile) from the
+        datamb/Wyscout set. Read straight from player_wyscout joined to player_id via
+        the datamb-name crosswalk the profile tables carry -- so it works for EVERY
+        position (player_profile_metrics keeps only each line's SWOT metrics, so it
+        misses progressive passing for e.g. strikers). FOCUS_SEASON, top-5 domestic."""
+        g = self.con.execute("SELECT position_group FROM players WHERE player_id=?", [pid]).fetchone()
+        if not g or not g[0]:
+            return {}
+        df = self.con.execute("""
+            WITH xwalk AS (SELECT DISTINCT player_id, player
+                           FROM player_profile_metrics WHERE season = ?)
+            SELECT x.player_id, pl.position_group AS grp,
+                   w.progressive_passes_per_90 AS pp, w.progressive_carries_per_90 AS pc
+            FROM player_wyscout w
+            JOIN xwalk x ON x.player = w.player
+            JOIN players pl ON pl.player_id = x.player_id
+            WHERE w.season = ?
+        """, [season, season]).df()
+        if pid not in set(df["player_id"]):
+            return {}
+        grp = df.loc[df["player_id"] == pid, "grp"].iloc[0]
+        peers = df[df["grp"] == grp]
+        out = {}
+        for key, col in (("progressive_passes", "pp"), ("progressive_carries", "pc")):
+            v = df.loc[df["player_id"] == pid, col].iloc[0]
+            if pd.isna(v):
+                continue
+            out[key] = {"per90": _r(v, 2)}
+            c = peers[col].dropna()
+            if len(c) >= 5:                          # percentile within position line
+                out[key]["pct"] = int(round((c <= v).mean() * 100))
+        return out
+
     def _tile_percentiles(self, pid: int, season: str) -> dict:
         g = self.con.execute("SELECT position_group FROM players WHERE player_id=?", [pid]).fetchone()
         if not g or not g[0]:
@@ -2462,21 +2496,14 @@ class SoccerDB:
         scopes = self._player_stat_scopes(pid, season)
         tile_pct = self._tile_percentiles(pid, season)
         if season == FOCUS_SEASON and scopes:
-            keymap = {"PrgPasses": "progressive_passes", "PrgCarries": "progressive_carries"}
-            prog = self.con.execute(
-                "SELECT metric, value, percentile FROM player_profile_metrics "
-                "WHERE player_id = ? AND metric IN ('PrgPasses', 'PrgCarries')", [pid]).df()
-            for r in prog.itertuples():
-                key = keymap.get(r.metric)
-                if not key or pd.isna(r.value):
-                    continue
-                per90 = _r(r.value, 2)
+            for key, info in self._progressive_stats(pid, season).items():
+                per90 = info["per90"]
                 for sc in scopes.values():        # one datamb dataset -> same rate in all scopes
                     sc[key] = per90               # per-90 value (Per-90 grid)
                     if sc.get("minutes"):         # season total (Total grid) = rate x minutes/90
                         sc[key + "_total"] = round(per90 * sc["minutes"] / 90)
-                if not pd.isna(r.percentile):     # same rate-based percentile for both tiles
-                    tile_pct[key] = tile_pct[key + "_total"] = _i(r.percentile)
+                if "pct" in info:                 # same rate-based percentile for both tiles
+                    tile_pct[key] = tile_pct[key + "_total"] = info["pct"]
         return {
             "name": prof["player_name"], "team": team,
             "photo": self.player_photo(fpid[0] if fpid else None),
