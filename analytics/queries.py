@@ -2470,10 +2470,13 @@ class SoccerDB:
                 key = keymap.get(r.metric)
                 if not key or pd.isna(r.value):
                     continue
-                for sc in scopes.values():        # one datamb dataset -> same in all scopes
-                    sc[key] = _r(r.value, 2)
-                if not pd.isna(r.percentile):
-                    tile_pct[key] = _i(r.percentile)
+                per90 = _r(r.value, 2)
+                for sc in scopes.values():        # one datamb dataset -> same rate in all scopes
+                    sc[key] = per90               # per-90 value (Per-90 grid)
+                    if sc.get("minutes"):         # season total (Total grid) = rate x minutes/90
+                        sc[key + "_total"] = round(per90 * sc["minutes"] / 90)
+                if not pd.isna(r.percentile):     # same rate-based percentile for both tiles
+                    tile_pct[key] = tile_pct[key + "_total"] = _i(r.percentile)
         return {
             "name": prof["player_name"], "team": team,
             "photo": self.player_photo(fpid[0] if fpid else None),

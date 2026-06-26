@@ -20,6 +20,8 @@ const TOTAL_DEFS = [
   [['💪', 'duels_won', 'Duels Won', 'count'], ['％', 'duels_won_pct', 'Duels %', 'pct']],
   ['🛡', 'tackles', 'Tackles', 'count'], ['✋', 'interceptions', 'Interceptions', 'count'],
   ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
+  [['↗', 'progressive_passes_total', 'Prog. Passes', 'count'],
+   ['🏃', 'progressive_carries_total', 'Prog. Carries', 'count']],
 ];
 const PER90_DEFS = [
   ['👕', 'games', 'Apps', 'count'],
