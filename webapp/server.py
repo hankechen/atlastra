@@ -117,11 +117,13 @@ def match_api(path: str, q: dict) -> dict:
                 rmap = db.ratings_by_name([p.get("name") for p in players])
             # estimate (SofaScore season form) for players not in our DB — in
             # parallel, since each is a couple of network calls.
-            need = {p.get("id") for p in players if rmap.get(p.get("name")) is None and p.get("id")}
+            need = {p.get("id"): p.get("position") for p in players
+                    if rmap.get(p.get("name")) is None and p.get("id")}
             ests = {}
             if need:
                 with ThreadPoolExecutor(max_workers=8) as ex:
-                    futs = {ex.submit(live_feed.season_estimate, pid): pid for pid in need}
+                    futs = {ex.submit(live_feed.season_estimate, pid, pos): pid
+                            for pid, pos in need.items()}
                     for f in as_completed(futs):
                         ests[futs[f]] = f.result()
             for p in players:

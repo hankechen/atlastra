@@ -124,11 +124,22 @@ def _lineup_side(side: dict) -> dict:
     return {"formation": side.get("formation"), "starting_xi": starters, "substitutes": subs}
 
 
-def season_estimate(player_id: int) -> int | None:
+# SofaScore avg match rating (~6.0–8.3) -> our 0–100 scale. Calibrated by least-
+# squares against ~1,360 players present in BOTH systems (shared slope + per-line
+# intercept, R^2≈0.55), which corrects the old hand-tuned map that ran ~8–11 points
+# hot. The coarse lineup line (G/D/M/F) shifts the intercept because SofaScore rates
+# the lines a few points apart for the same Atlastra value.
+_EST_SLOPE = 29.3
+_EST_INTERCEPT = {"G": -147.0, "D": -145.0, "M": -146.0, "F": -143.0}
+_EST_DEFAULT = -145.0
+
+
+def season_estimate(player_id: int, position: str | None = None) -> int | None:
     """Estimate a CONSTANT, overall Atlastra-scale rating (~30–92) for a player not
     in our warehouse. It is NOT a single match/tournament: we appearance-weight the
     player's average SofaScore rating across their recent competitions (league, cup,
-    continental, national team), so one game can't swing it. Cached 7 days."""
+    continental, national team), so one game can't swing it. `position` is the coarse
+    lineup line (G/D/M/F) used to pick the calibration intercept. Cached 7 days."""
     if not player_id:
         return None
     seas = _get(f"/player/{player_id}/statistics/seasons", ttl=604800)
@@ -148,8 +159,8 @@ def season_estimate(player_id: int) -> int | None:
     if tot_a < 5:                                     # not enough of a sample to estimate
         return None
     sofa = tot_r / tot_a                              # career-level average rating
-    # SofaScore ratings cluster ~6.0–8.0; map to our wider scale, then clamp.
-    return max(30, min(92, round((sofa - 6.0) * 28 + 40)))
+    intercept = _EST_INTERCEPT.get((position or "")[:1].upper(), _EST_DEFAULT)
+    return max(30, min(92, round(_EST_SLOPE * sofa + intercept)))
 
 
 def lineups(eid: int) -> dict:
