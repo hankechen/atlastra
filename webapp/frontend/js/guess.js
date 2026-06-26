@@ -67,7 +67,7 @@ function renderRound() {
       ${c.age ? `<span class="gr-tag">${flagFor(c.country_code)} ${c.nationality || ''} · ${c.age}y</span>` : ''}
     </div>`;
   const stats = c.stats.map(s =>
-    `<div class="gr-stat"><span class="l">${s.label}</span><span class="v">${s.value}</span></div>`).join('');
+    `<div class="gr-stat"><span class="l">${s.label}</span><span class="v">${s.value == null ? '—' : s.value}</span></div>`).join('');
   document.getElementById('gr-out').innerHTML = `<div class="gr-wrap">
     <section class="card">
       ${meta}

@@ -2937,6 +2937,7 @@ class SoccerDB:
                   v.team, v.games, v.minutes, v.goals, v.assists,
                   v.xg_per90, v.xa_per90, v.shots, v.key_passes, v.dribbles_completed,
                   v.tackles, v.interceptions, v.pass_accuracy_pct, v.duels_won_pct,
+                  wy.prog_passes, wy.prog_carries,
                   b.nationality, b.country_code, b.fotmob_age AS age,
                   (SELECT max(fotmob_player_id) FROM player_enrichment e
                    WHERE e.player_id = c.player_id AND e.fotmob_player_id IS NOT NULL) AS fpid
@@ -2944,6 +2945,15 @@ class SoccerDB:
            JOIN v_player_season_stats v ON v.player_id = c.player_id AND v.season = c.season
            JOIN players pl ON pl.player_id = c.player_id
            LEFT JOIN player_bio b ON b.player_id = c.player_id
+           LEFT JOIN (   -- progressive passing/carrying (datamb/Wyscout) via name crosswalk
+               SELECT x.player_id, w.season,
+                      max(w.progressive_passes_per_90) AS prog_passes,
+                      max(w.progressive_carries_per_90) AS prog_carries
+               FROM player_wyscout w
+               JOIN (SELECT DISTINCT player_id, player FROM player_profile_metrics) x
+                    ON x.player = w.player
+               GROUP BY x.player_id, w.season
+           ) wy ON wy.player_id = c.player_id AND wy.season = c.season
            WHERE c.scope='league' AND c.season = ? AND c.position_group <> 'GK'
              AND v.minutes >= ? AND c.rating >= ?"""
 
@@ -2983,6 +2993,11 @@ class SoccerDB:
             {"label": "Tackles + Int / 90", "value": per90((r.tackles or 0) + (r.interceptions or 0))},
             {"label": "Pass accuracy", "value": pct(r.pass_accuracy_pct)},
             {"label": "Duels won", "value": pct(r.duels_won_pct)},
+            # progressive stats are absent for ~30% of the pool (no datamb match) -> None
+            {"label": "Prog. passes / 90",
+             "value": None if pd.isna(r.prog_passes) else round(float(r.prog_passes), 2)},
+            {"label": "Prog. carries / 90",
+             "value": None if pd.isna(r.prog_carries) else round(float(r.prog_carries), 2)},
         ]
         return {
             "name": r.nm, "rating": int(r.rating),

@@ -4,12 +4,17 @@ attachSearchDropdown(document.getElementById('searchBox'));
 const STATS_KEY = 'higherlower';
 const DEFAULTS = { best: 0, played: 0 };
 const statVal = (p, label) => { const s = p.stats.find(x => x.label === label); return s ? Number(s.value) : 0; };
+// like statVal but NaN when the stat is missing (null) — so the deck filter drops
+// players without that stat instead of treating them as 0 (e.g. no datamb data).
+const statValN = (p, label) => { const s = p.stats.find(x => x.label === label); return s && s.value != null ? Number(s.value) : NaN; };
 const METRICS = [
   { key: 'rating', label: 'Atlastra Rating', get: p => p.rating, fmt: v => v },
   { key: 'goals', label: 'Goals', get: p => statVal(p, 'Goals'), fmt: v => v },
   { key: 'assists', label: 'Assists', get: p => statVal(p, 'Assists'), fmt: v => v },
   { key: 'xg90', label: 'xG / 90', get: p => statVal(p, 'xG / 90'), fmt: v => v.toFixed(2) },
   { key: 'dribbles', label: 'Dribbles / 90', get: p => statVal(p, 'Dribbles / 90'), fmt: v => v.toFixed(2) },
+  { key: 'progpass', label: 'Prog. Passes / 90', get: p => statValN(p, 'Prog. passes / 90'), fmt: v => v.toFixed(2) },
+  { key: 'progcarry', label: 'Prog. Carries / 90', get: p => statValN(p, 'Prog. carries / 90'), fmt: v => v.toFixed(2) },
 ];
 
 let deck = [], metric = METRICS[0], left = null, right = null, streak = 0, locked = false;
