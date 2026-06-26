@@ -2455,6 +2455,25 @@ class SoccerDB:
         else:
             season_pos = self._player_season_position(pid, season)
             pos_group, pos_detail = (season_pos or prof["position_group"]), None
+        # Progressive passing/carrying (datamb/Wyscout per-90 vs position). Only the
+        # current season has the datamb dataset, and it isn't split by competition, so
+        # inject the same per-90 value into every stat scope + the tile percentiles so
+        # the Per-90 grid can render it like any other rate stat.
+        scopes = self._player_stat_scopes(pid, season)
+        tile_pct = self._tile_percentiles(pid, season)
+        if season == FOCUS_SEASON and scopes:
+            keymap = {"PrgPasses": "progressive_passes", "PrgCarries": "progressive_carries"}
+            prog = self.con.execute(
+                "SELECT metric, value, percentile FROM player_profile_metrics "
+                "WHERE player_id = ? AND metric IN ('PrgPasses', 'PrgCarries')", [pid]).df()
+            for r in prog.itertuples():
+                key = keymap.get(r.metric)
+                if not key or pd.isna(r.value):
+                    continue
+                for sc in scopes.values():        # one datamb dataset -> same in all scopes
+                    sc[key] = _r(r.value, 2)
+                if not pd.isna(r.percentile):
+                    tile_pct[key] = _i(r.percentile)
         return {
             "name": prof["player_name"], "team": team,
             "photo": self.player_photo(fpid[0] if fpid else None),
@@ -2473,8 +2492,8 @@ class SoccerDB:
             "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
             "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
             "tiles": tiles, "radar": radar,
-            "tile_pct": self._tile_percentiles(pid, season),  # per-stat percentile vs position peers
-            "stats_scopes": self._player_stat_scopes(pid, season),  # league/ucl/combined cumulative
+            "tile_pct": tile_pct,            # per-stat percentile vs position peers
+            "stats_scopes": scopes,          # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9
             "heatmap": self._player_heatmap(pid, season),  # season-aware (past seasons scraped from SofaScore)

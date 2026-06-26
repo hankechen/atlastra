@@ -30,6 +30,8 @@ const PER90_DEFS = [
   ['⚡', 'dribbles_completed', 'Dribbles / 90', 'per90'],
   [['💪', 'duels_won', 'Duels / 90', 'per90'], ['％', 'duels_won_pct', 'Duels %', 'pct']],
   ['🛡', 'tackles', 'Tackles / 90', 'per90'], ['◉', 'pass_accuracy_pct', 'Pass Acc', 'pct'],
+  [['↗', 'progressive_passes', 'Prog. Passes / 90', 'dec'],
+   ['🏃', 'progressive_carries', 'Prog. Carries / 90', 'dec']],
 ];
 const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined']];
 let statScopes = {}, scopeTotals = 'combined', scopePer90 = 'combined';
