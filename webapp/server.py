@@ -430,18 +430,23 @@ def _live_refresher():
     FULL_EVERY = int(os.environ.get("ATLASTRA_FULL_EVERY", "1800"))   # full sweep every 30 min
     LIVE_POLL = int(os.environ.get("ATLASTRA_LIVE_POLL", "45"))       # overlay while games are live
     IDLE_POLL = int(os.environ.get("ATLASTRA_IDLE_POLL", "300"))      # nothing live -> back off
+    # Lite mode: ONLY the single global live-events call (no per-competition sweep),
+    # so one proxy IP never bursts and trips SofaScore's per-IP rate limit. Live
+    # scores + the real-time bracket still update; upcoming/results stay on the last
+    # snapshot. For a single static IP this is the only reliable mode.
+    LITE = os.environ.get("ATLASTRA_LIVE_LITE") == "1"
     last_full = 0.0
     n_live = 0
     while True:
         try:
-            if time.time() - last_full >= FULL_EVERY:
+            if not LITE and time.time() - last_full >= FULL_EVERY:
                 n_live = live.load_live()
                 last_full = time.time()
-            elif n_live:                       # only worth an overlay if games are on
+            elif LITE or n_live:               # 1-call overlay: always in lite mode, else when live
                 n_live = live.update_live_overlay()
         except Exception as e:                 # noqa: BLE001 -- network/scrape hiccup
             print(f"live refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
-        time.sleep(LIVE_POLL if n_live else IDLE_POLL)
+        time.sleep(LIVE_POLL if (LITE or n_live) else IDLE_POLL)
 
 
 if __name__ == "__main__":
