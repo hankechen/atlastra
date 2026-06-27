@@ -2,7 +2,7 @@ renderSidebar('Live Matches');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const EID = new URLSearchParams(location.search).get('id');
-const TABS = [['preview', 'Preview'], ['lineups', 'Lineups'], ['prediction', 'Prediction'], ['stats', 'Stats'],
+const TABS = [['preview', 'Preview'], ['predict', 'Predict'], ['lineups', 'Lineups'], ['prediction', 'Odds'], ['stats', 'Stats'],
               ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
 const TAB_KEYS = TABS.map(([k]) => k);
 let head = null, timer = null;
@@ -55,14 +55,14 @@ function renderTabs() {
   el.querySelectorAll('.tab').forEach(t => t.onclick = () => { active = t.dataset.k; renderTabs(); loadActive(); });
 }
 const body = () => document.getElementById('tabBody');
-const LOADERS = { preview: loadPreview, stats: loadStats, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
+const LOADERS = { preview: loadPreview, predict: loadPredict, stats: loadStatsTab, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
 async function loadActive(refresh) {
   if (!refresh) body().innerHTML = '<section class="card"><div class="placeholder-note">Loading…</div></section>';
   try { await LOADERS[active](); } catch { body().innerHTML = '<section class="card"><div class="placeholder-note">Could not load this section.</div></section>'; }
 }
 
 // ---- Stats ----
-async function loadStats() {
+async function loadStatsTab() {
   const d = await A('/api/match/stats');
   if (!d.available) { body().innerHTML = empty('No match statistics yet — check back once the match kicks off.'); return; }
   body().innerHTML = d.groups.map(g => `
@@ -84,6 +84,64 @@ async function loadStats() {
         </div>`;
       }).join('')}
     </section>`).join('');
+}
+
+// ---- Predict (the user's own score pick — shares the Score Predictor store) ----
+const _mppVal = (id) => {
+  const x = document.getElementById(id).value;
+  if (x === '') return null;
+  const n = parseInt(x, 10);
+  return isNaN(n) ? null : Math.max(0, Math.min(30, n));
+};
+function _predState(p, finished, locked) {
+  if (finished) {
+    if (!p) return `<span class="lock">Final <b>${head.home_score}-${head.away_score}</b> — you didn't predict this one.</span>`;
+    const cls = p.pts > 0 ? 'pos' : 'zero';
+    return `Final <b>${head.home_score}-${head.away_score}</b> · you called ${p.h}-${p.a}
+      <span class="mpp-pts ${cls}">${p.pts > 0 ? '+' + p.pts : '0'} pts</span>`;
+  }
+  if (locked) return '<span class="lock">Predictions are locked — this match has kicked off.</span>';
+  if (p) return `<span class="saved">✓ Prediction saved: ${p.h}-${p.a}.</span> Change it any time before kickoff.`;
+  return 'Enter your scoreline to lock in a prediction. <b>+5</b> for the exact score · <b>+2</b> for the right result.';
+}
+function loadPredict() {
+  if (typeof predStore !== 'function') { body().innerHTML = empty('Predictor unavailable.'); return; }
+  const eid = EID;
+  const finished = head?.status === 'finished' && head.home_score != null;
+  if (finished) predSettle(eid, head.home_score, head.away_score, head.competition);   // settle on view
+  const now = Date.now() / 1000;
+  const locked = head?.status !== 'notstarted' || (head?.start_ts && head.start_ts <= now);
+  const d = predStore(), p = d.preds[eid];
+  const dis = (locked || finished) ? ' disabled' : '';
+  const setc = p ? ' set' : '';
+  const v = (x) => x == null ? '' : x;
+  body().innerHTML = `<section class="card">
+    <div class="card-h"><h3>Predict the Score</h3><a class="see" href="/predict.html">Open Score Predictor →</a></div>
+    <div class="mpp">
+      <div class="mpp-team">${badge('home')}<span>${esc(head.home)}</span></div>
+      <div class="mpp-score">
+        <input id="mppH" class="mpp-in${setc}" type="number" min="0" max="30" inputmode="numeric" value="${p ? v(p.h) : ''}"${dis}>
+        <span class="dash">-</span>
+        <input id="mppA" class="mpp-in${setc}" type="number" min="0" max="30" inputmode="numeric" value="${p ? v(p.a) : ''}"${dis}>
+      </div>
+      <div class="mpp-team away"><span>${esc(head.away)}</span>${badge('away')}</div>
+    </div>
+    <div class="mpp-state" id="mppState">${_predState(p, finished, locked)}</div>
+    <div class="mpp-foot">Your running total: <b>${d.total}</b> pts</div>
+  </section>`;
+  if (!locked && !finished) {
+    const save = () => {
+      const h = _mppVal('mppH'), a = _mppVal('mppA');
+      const cleared = h == null || a == null;
+      const meta = { ko: head.start_ts, comp: head.competition, home: head.home, away: head.away,
+                     home_country: head.home_country, away_country: head.away_country };
+      predSave(eid, meta, cleared ? null : h, cleared ? null : a);
+      document.querySelectorAll('.mpp-in').forEach(x => x.classList.toggle('set', !cleared));
+      document.getElementById('mppState').innerHTML = _predState(cleared ? null : { h, a }, false, false);
+    };
+    document.getElementById('mppH').addEventListener('change', save);
+    document.getElementById('mppA').addEventListener('change', save);
+  }
 }
 
 // ---- Prediction (from bookmaker odds) ----
@@ -476,7 +534,7 @@ const empty = (msg) => `<section class="card"><div class="placeholder-note">${es
 (async () => {
   if (!EID) { document.getElementById('hero').innerHTML = empty('No match selected.'); return; }
   await loadHeader();
-  if (!active) active = head?.status === 'notstarted' ? 'preview' : 'lineups';   // default by status
+  if (!active) active = head?.status === 'notstarted' ? 'predict' : 'lineups';   // default by status
   renderTabs();
   await loadActive();
   if (head?.status === 'inprogress') {

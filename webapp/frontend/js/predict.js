@@ -1,26 +1,13 @@
 renderSidebar('Predictions');
 attachSearchDropdown(document.getElementById('searchBox'));
 
-// Predictions live in the synced Store under games.predict:
-//   { preds: { [eventId]: {h,a, ko, comp, home, away, home_logo, away_logo,
-//                          home_country, away_country, done, pts, ah, aa} }, total }
-// Scoring is computed on the client from real match results (/api/match per event,
-// authoritative for ANY past match -- not just ones still in the live window).
-const KEY = 'predict';
-const PTS_EXACT = 5, PTS_RESULT = 2;
-const blank = () => ({ preds: {}, total: 0 });
-
-const outcome = (h, a) => h > a ? 'H' : h < a ? 'A' : 'D';
-function pointsFor(ph, pa, ah, aa) {
-  if (ph === ah && pa === aa) return PTS_EXACT;
-  if (outcome(ph, pa) === outcome(ah, aa)) return PTS_RESULT;
-  return 0;
-}
-const recompute = (d) => { d.total = Object.values(d.preds).reduce((s, p) => s + (p.done ? p.pts : 0), 0); };
-
+// Prediction storage + scoring helpers (predStore/predSave/predSettle/predPoints,
+// PRED_KEY/PRED_EXACT) are shared from games.js. Scoring is settled on the client
+// from real match results (/api/match per event -- authoritative for ANY past match,
+// not just ones still in the live window).
 function renderScoreboard(d) {
   const done = Object.values(d.preds).filter(p => p.done);
-  const exact = done.filter(p => p.pts === PTS_EXACT).length;
+  const exact = done.filter(p => p.pts === PRED_EXACT).length;
   const hit = done.filter(p => p.pts > 0).length;
   const acc = done.length ? Math.round(hit / done.length * 100) : 0;
   const cell = (v, l, hot) => `<div class="gr-sb${hot ? ' hot' : ''}"><b>${v}</b><span>${l}</span></div>`;
@@ -97,7 +84,7 @@ function renderResults(d) {
     return `<div class="pres">
       <span class="comp">${p.comp || ''}</span>
       <span class="line">${p.home} <b>${p.ah}-${p.aa}</b> ${p.away}
-        <span class="guess${p.pts === PTS_EXACT ? ' hit' : ''}">· your call ${p.h}-${p.a}</span></span>
+        <span class="guess${p.pts === PRED_EXACT ? ' hit' : ''}">· your call ${p.h}-${p.a}</span></span>
       <span class="pts ${hit ? 'pos' : 'zero'}">${hit ? '+' + p.pts : '0'}</span></div>`;
   }).join('');
 }
@@ -113,14 +100,9 @@ async function settlePending(d) {
   pend.forEach(([eid], i) => {
     const m = res[i];
     if (m && m.available && m.status === 'finished' && m.home_score != null) {
-      const p = d.preds[eid];
-      p.done = true; p.ah = m.home_score; p.aa = m.away_score;
-      p.pts = pointsFor(p.h, p.a, p.ah, p.aa);
-      if (m.competition) p.comp = m.competition;
-      changed = true;
+      if (predSettle(eid, m.home_score, m.away_score, m.competition)) changed = true;
     }
   });
-  if (changed) { recompute(d); saveStats(KEY, d); postScore(KEY, 'alltime', d.total); }
   return changed;
 }
 
@@ -131,41 +113,37 @@ function onInput(e) {
   const ins = row.querySelectorAll('.pin');
   const h = ins[0].value === '' ? null : Math.max(0, Math.min(30, parseInt(ins[0].value, 10)));
   const a = ins[1].value === '' ? null : Math.max(0, Math.min(30, parseInt(ins[1].value, 10)));
-  const d = loadStats(KEY, blank());
   const m = FIXTURES[eid];
-  if (h == null || a == null || isNaN(h) || isNaN(a)) {
-    delete d.preds[eid];
-    ins.forEach(x => x.classList.remove('set'));
-    row.querySelector('.pred-state').innerHTML = m && m.kickoff_ts <= Date.now() / 1000 ? '<span class="lock">Locked</span>' : '';
-  } else if (m) {
-    d.preds[eid] = {
-      h, a, ko: m.kickoff_ts, comp: m.competition, home: m.home, away: m.away,
-      home_logo: m.home_logo, away_logo: m.away_logo,
-      home_country: m.home_country, away_country: m.away_country,
-    };
-    ins.forEach(x => x.classList.add('set'));
-    row.querySelector('.pred-state').innerHTML = '<span class="saved">✓ Saved</span>';
-  }
-  saveStats(KEY, d);
+  const cleared = h == null || a == null || isNaN(h) || isNaN(a);
+  const meta = m ? {
+    ko: m.kickoff_ts, comp: m.competition, home: m.home, away: m.away,
+    home_logo: m.home_logo, away_logo: m.away_logo,
+    home_country: m.home_country, away_country: m.away_country,
+  } : {};
+  const d = predSave(eid, meta, cleared ? null : h, cleared ? null : a);
+  ins.forEach(x => x.classList.toggle('set', !cleared));
+  row.querySelector('.pred-state').innerHTML = cleared
+    ? (m && m.kickoff_ts <= Date.now() / 1000 ? '<span class="lock">Locked</span>' : '')
+    : '<span class="saved">✓ Saved</span>';
   renderScoreboard(d);
-  Auth.push && Auth.push();        // sync the blob when signed in
 }
 
 let FIXTURES = {};                 // eventId -> fixture object (for input handler)
 
 async function loadLeaderboard() {
-  const rows = await fetchLeaderboard(KEY, 'alltime', 25);
+  const rows = await fetchLeaderboard(PRED_KEY, 'alltime', 25);
   document.getElementById('leaderboard').innerHTML =
     leaderboardHTML(rows, Auth.user && Auth.user.username, 'Pts') + signInNudge();
 }
 
 async function load() {
-  const d = loadStats(KEY, blank());
+  let d = predStore();
   let feed = { live: [], upcoming: [], recent: [] };
   try { feed = await api('/api/live?upcoming=30&recent=0'); } catch { /* offline */ }
   FIXTURES = {};
   [...(feed.live || []), ...(feed.upcoming || [])].forEach(m => FIXTURES[m.event_id] = m);
   try { await settlePending(d); } catch { /* network */ }
+  d = predStore();                 // pick up any just-settled results
   renderScoreboard(d);
   renderFixtures(d, feed);
   renderResults(d);
@@ -176,7 +154,7 @@ document.getElementById('fixtures').addEventListener('change', onInput);
 document.getElementById('clearBtn').onclick = (e) => {
   e.preventDefault();
   if (!confirm('Clear all your predictions and points?')) return;
-  saveStats(KEY, blank()); load();
+  saveStats(PRED_KEY, predBlank()); load();
 };
 
 load();

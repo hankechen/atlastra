@@ -64,6 +64,41 @@ function leaderboardHTML(rows, meName, scoreLabel = 'Score') {
       <td class="sc">${Math.round(r.score).toLocaleString()}</td></tr>`).join('')}</tbody></table>`;
 }
 
+// ---- score predictor (shared by /predict.html and the match page) ----
+// Predictions live in the synced Store under games.predict:
+//   { preds: { [eventId]: {h,a, ko, comp, home, away, ...meta, done, pts, ah, aa} }, total }
+const PRED_KEY = 'predict';
+const PRED_EXACT = 5, PRED_RESULT = 2;
+const predBlank = () => ({ preds: {}, total: 0 });
+const predStore = () => loadStats(PRED_KEY, predBlank());
+const predOutcome = (h, a) => h > a ? 'H' : h < a ? 'A' : 'D';
+function predPoints(ph, pa, ah, aa) {
+  if (ph === ah && pa === aa) return PRED_EXACT;            // exact score
+  if (predOutcome(ph, pa) === predOutcome(ah, aa)) return PRED_RESULT;  // right result
+  return 0;
+}
+const predRecompute = (d) => { d.total = Object.values(d.preds).reduce((s, p) => s + (p.done ? p.pts : 0), 0); };
+// Save (or clear, when h/a are blank) a prediction; `meta` carries the display
+// fields (home/away/ko/comp/...) needed to render it later. Returns the new store.
+function predSave(eid, meta, h, a) {
+  const d = predStore();
+  if (h == null || a == null || isNaN(h) || isNaN(a)) delete d.preds[eid];
+  else d.preds[eid] = Object.assign({}, meta, { h, a });
+  saveStats(PRED_KEY, d);
+  if (typeof Auth !== 'undefined' && Auth.push) Auth.push();   // sync the blob when signed in
+  return d;
+}
+// Settle one event against its finished result; posts the new total. True if newly settled.
+function predSettle(eid, ah, aa, comp) {
+  const d = predStore(); const p = d.preds[eid];
+  if (!p || p.done) return false;
+  p.done = true; p.ah = ah; p.aa = aa; p.pts = predPoints(p.h, p.a, ah, aa);
+  if (comp) p.comp = comp;
+  predRecompute(d); saveStats(PRED_KEY, d);
+  postScore(PRED_KEY, 'alltime', d.total);
+  return true;
+}
+
 // A small "sign in to compete" nudge for guests, shown under leaderboards.
 function signInNudge() {
   if (Auth.user) return '';

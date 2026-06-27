@@ -627,6 +627,22 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .mh-score{font-size:34px;font-weight:800;text-align:center;letter-spacing:2px;white-space:nowrap}
 .mh-score .dash{margin:0 8px;color:var(--muted)}
 .mh-score .vs{font-size:18px;color:var(--muted);letter-spacing:0}
+/* match page "Predict the Score" tab */
+.mpp{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;margin:10px 0 2px}
+.mpp-team{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;min-width:0}
+.mpp-team.away{justify-content:flex-end}
+.mpp-team .nflag{font-size:26px}.mpp-team .crest{width:28px;height:28px}
+.mpp-score{display:flex;align-items:center;gap:8px}
+.mpp-in{width:54px;height:48px;text-align:center;font-size:22px;font-weight:800;background:var(--elev);
+  border:1px solid var(--border2);border-radius:10px;color:var(--text);outline:none;font-family:inherit;-moz-appearance:textfield}
+.mpp-in::-webkit-outer-spin-button,.mpp-in::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.mpp-in:focus{border-color:var(--accent)}.mpp-in:disabled{opacity:.6;cursor:not-allowed}
+.mpp-in.set{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.mpp-score .dash{color:var(--muted);font-weight:800;font-size:20px}
+.mpp-state{text-align:center;color:var(--muted);font-size:13.5px;margin-top:16px}
+.mpp-state .saved{color:var(--green)}.mpp-state .lock{color:var(--muted2)}
+.mpp-pts{font-weight:800;margin-left:4px}.mpp-pts.pos{color:var(--green)}.mpp-pts.zero{color:var(--muted2)}
+.mpp-foot{text-align:center;color:var(--muted);font-size:12.5px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
 .mh-st{margin-top:4px}
 .mh-st .live{color:var(--red);font-size:12px;font-weight:700}
 .mh-st .tag{color:var(--muted);font-size:11px}
