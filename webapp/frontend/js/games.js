@@ -46,6 +46,15 @@ async function fetchLeaderboard(game, period, limit = 25) {
   try { return await api(`/api/leaderboard?game=${encodeURIComponent(game)}&period=${encodeURIComponent(period)}&limit=${limit}`); }
   catch { return []; }
 }
+// Push the current local score to the board on page load, once we KNOW whether the
+// user is signed in (Auth resolves async, so a plain postScore at load can no-op).
+// This is what makes a just-signed-in user's existing score appear without replaying.
+// Returns the post response (incl. fresh leaderboard) when it posts, else null.
+async function syncScore(game, period, score) {
+  try { await Auth.me(); } catch { /* offline -> treat as guest */ }
+  if (Auth.user && score > 0) return postScore(game, period, score);
+  return null;
+}
 // today's date as a stable YYYY-MM-DD key (local time)
 function todayKey() {
   const d = new Date();

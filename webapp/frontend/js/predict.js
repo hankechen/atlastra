@@ -131,7 +131,8 @@ function onInput(e) {
 let FIXTURES = {};                 // eventId -> fixture object (for input handler)
 
 async function loadLeaderboard() {
-  const rows = await fetchLeaderboard(PRED_KEY, 'alltime', 25);
+  const r = await syncScore(PRED_KEY, 'alltime', predStore().total);   // post my total if signed in
+  const rows = (r && r.leaderboard) ? r.leaderboard : await fetchLeaderboard(PRED_KEY, 'alltime', 25);
   document.getElementById('leaderboard').innerHTML =
     leaderboardHTML(rows, Auth.user && Auth.user.username, 'Pts') + signInNudge();
 }

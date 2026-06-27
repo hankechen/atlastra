@@ -144,7 +144,9 @@ function renderDone(solved, score, guessesUsed, replay) {
 async function loadBoard() {
   const card = document.getElementById('lbCard'); if (!card) return;
   if (mode !== 'daily') { card.innerHTML = '<div class="card-h"><h3>Practice mode</h3></div><div class="lb-empty">Practice scores aren\'t ranked. Play the Daily puzzle to hit the global board.</div>'; return; }
-  const rows = await fetchLeaderboard('quiz', todayKey());
+  const mine = (loadStats(QKEY, QDEF).daily[todayKey()] || {}).score || 0;
+  const r = await syncScore('quiz', todayKey(), mine);           // post today's score if signed in
+  const rows = (r && r.leaderboard) ? r.leaderboard : await fetchLeaderboard('quiz', todayKey());
   card.innerHTML = `<div class="card-h"><h3>Today's Leaderboard</h3><span class="see">${todayKey()}</span></div>
     ${leaderboardHTML(rows, Auth.user && Auth.user.username, 'Points')}${signInNudge()}`;
 }

@@ -142,7 +142,12 @@ function renderLB(rows) {
   card.innerHTML = `<div class="card-h"><h3>Global Leaderboard</h3><span class="see">Best streak</span></div>
     ${leaderboardHTML(rows, Auth.user && Auth.user.username, 'Streak')}${signInNudge()}`;
 }
-async function loadBoard() { try { renderLB(await fetchLeaderboard(STATS_KEY, 'alltime')); } catch { /* offline */ } }
+async function loadBoard() {
+  try {
+    const r = await syncScore(STATS_KEY, 'alltime', loadStats(STATS_KEY, DEFAULTS).best);  // post my best if signed in
+    renderLB(r && r.leaderboard ? r.leaderboard : await fetchLeaderboard(STATS_KEY, 'alltime'));
+  } catch { /* offline */ }
+}
 
 renderScoreboard();
 renderMetrics();

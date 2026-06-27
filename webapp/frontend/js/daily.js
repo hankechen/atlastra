@@ -92,7 +92,9 @@ function renderFinal(score, res, replay) {
 
 async function loadBoard() {
   const card = document.getElementById('lbCard'); if (!card) return;
-  const rows = await fetchLeaderboard('daily', todayKey());
+  const mine = (loadStats(DKEY, DDEF).history[todayKey()] || {}).score || 0;
+  const r = await syncScore('daily', todayKey(), mine);          // post today's score if signed in
+  const rows = (r && r.leaderboard) ? r.leaderboard : await fetchLeaderboard('daily', todayKey());
   card.innerHTML = `<div class="card-h"><h3>Today's Leaderboard</h3><span class="see">global</span></div>
     ${leaderboardHTML(rows, Auth.user && Auth.user.username, 'Score')}${signInNudge()}`;
 }

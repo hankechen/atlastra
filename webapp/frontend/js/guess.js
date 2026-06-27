@@ -142,7 +142,12 @@ function renderLB(rows) {
   card.innerHTML = `<div class="card-h"><h3>Global Leaderboard</h3><span class="see">Total points</span></div>
     ${leaderboardHTML(rows, Auth.user && Auth.user.username, 'Points')}${signInNudge()}`;
 }
-async function loadBoard() { try { renderLB(await fetchLeaderboard('guess', 'alltime')); } catch { /* offline */ } }
+async function loadBoard() {
+  try {
+    const r = await syncScore('guess', 'alltime', loadGame().points);   // post my score if signed in
+    renderLB(r && r.leaderboard ? r.leaderboard : await fetchLeaderboard('guess', 'alltime'));
+  } catch { /* offline */ }
+}
 
 renderScoreboard();
 nextRound();
