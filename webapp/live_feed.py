@@ -213,6 +213,7 @@ def timeline(eid: int) -> dict:
                 "added_time": i.get("addedTime"), "klass": i.get("incidentClass")}
         if typ == "goal":
             base.update(player=(i.get("player") or {}).get("name"),
+                        assist=(i.get("assist1") or {}).get("name"),
                         home_score=i.get("homeScore"), away_score=i.get("awayScore"))
         elif typ == "card":
             base.update(player=i.get("playerName") or (i.get("player") or {}).get("name"),

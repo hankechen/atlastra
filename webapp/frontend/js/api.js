@@ -107,10 +107,12 @@ function timeAgo(ts) {
 
 let _notifTimer = null;
 async function notifTick() {
-  const teams = new Set(Store.list('teams').map(t => t.name));
+  const followedTeams = new Set(Store.list('teams').map(t => t.name));  // explicitly followed
   const players = Store.list('players');
-  players.forEach(p => { if (p.team) teams.add(p.team); });
   const followedPlayers = new Set(players.map(p => p.name));
+  // matches worth watching = followed teams + the clubs of followed players
+  const teams = new Set(followedTeams);
+  players.forEach(p => { if (p.team) teams.add(p.team); });
   if (!teams.size) { updateNotifBadge(); return; }
   let d; try { d = await api('/api/live?recent=60&upcoming=60'); } catch { return; }
   const st = Notif.state(); st.status = st.status || {}; st.kick = st.kick || {}; st.goals = st.goals || {};
@@ -145,12 +147,18 @@ async function notifTick() {
       if (st.goals[key]) continue;
       st.goals[key] = 1;
       if (firstRun) continue;                 // seed silently — don't replay past goals
-      const followed = ev.player && followedPlayers.has(ev.player);
-      const team = ev.side === 'home' ? m.home : m.away;
-      fresh.push({ id: 'g' + key, ts: Date.now(), icon: followed ? '⭐' : '⚽',
-        title: followed ? `${ev.player} scored!` : `Goal — ${team}`,
+      const team = ev.side === 'home' ? m.home : m.away;   // the team the goal counts for
+      const ownGoal = ev.klass === 'ownGoal';
+      // Notify only when a followed entity is involved: my player scored, my player
+      // assisted, or my team scored. (Own goals aren't credited to the scorer.)
+      let icon, title;
+      if (!ownGoal && ev.player && followedPlayers.has(ev.player)) { icon = '⭐'; title = `${ev.player} scored!`; }
+      else if (ev.assist && followedPlayers.has(ev.assist)) { icon = '🅰️'; title = `${ev.assist} with an assist!`; }
+      else if (followedTeams.has(team)) { icon = '⚽'; title = `${team} scored!`; }
+      else continue;                          // goal doesn't involve anyone you follow
+      fresh.push({ id: 'g' + key, ts: Date.now(), icon, title,
         body: `${m.home} ${ev.home_score}-${ev.away_score} ${m.away} · ${ev.minute}'`,
-        href: `/match.html?id=${m.event_id}`, big: followed });
+        href: `/match.html?id=${m.event_id}`, big: true });
     }
   }
   st.seeded = 1; Notif.saveState(st);
@@ -179,7 +187,7 @@ function renderNotifPanel() {
       <span class="nitem-ic">${i.icon || '🔔'}</span>
       <span class="nitem-tx"><b>${i.title}</b><span>${i.body || ''}</span></span>
       <span class="nitem-ago">${timeAgo(i.ts)}</span></a>`).join('')
-    : `<div class="npanel-empty">No alerts yet.<br>Follow players and teams to get notified when they play or score.</div>`;
+    : `<div class="npanel-empty">No alerts yet.<br>Follow players and teams to get notified when they score or assist in live matches.</div>`;
   p.innerHTML = `<div class="npanel-h"><b>Notifications</b>${items.length ? '<button id="nclear">Clear</button>' : ''}</div>
     ${permBtn}<div class="npanel-list">${list}</div>`;
   const pb = document.getElementById('nperm');
