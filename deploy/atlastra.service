@@ -1,0 +1,17 @@
+[Unit]
+Description=Atlastra soccer analytics server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/atlastra
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/atlastra/.env
+ExecStart=/opt/atlastra/venv/bin/python -m webapp.server
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
