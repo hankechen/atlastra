@@ -90,7 +90,11 @@ function answer(saidHigher) {
     if (correct) {
       streak += 1;
       const g = loadStats(STATS_KEY, DEFAULTS);
-      if (streak > g.best) { g.best = streak; saveStats(STATS_KEY, g); }
+      if (streak > g.best) {
+        g.best = streak; saveStats(STATS_KEY, g);
+        // new personal best -> global leaderboard (ranked by best streak)
+        postScore(STATS_KEY, 'alltime', g.best).then(res => { if (res && res.leaderboard) renderLB(res.leaderboard); });
+      }
       renderScoreboard();
       next();
     } else {
@@ -132,6 +136,15 @@ async function restart() {
   renderBoard();
 }
 
+// ---- global leaderboard (best streak) ----
+function renderLB(rows) {
+  const card = document.getElementById('lbCard'); if (!card) return;
+  card.innerHTML = `<div class="card-h"><h3>Global Leaderboard</h3><span class="see">Best streak</span></div>
+    ${leaderboardHTML(rows, Auth.user && Auth.user.username, 'Streak')}${signInNudge()}`;
+}
+async function loadBoard() { try { renderLB(await fetchLeaderboard(STATS_KEY, 'alltime')); } catch { /* offline */ } }
+
 renderScoreboard();
 renderMetrics();
 restart();
+loadBoard();

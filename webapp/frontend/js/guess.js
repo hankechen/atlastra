@@ -109,6 +109,8 @@ function submitGuess() {
   g.points += earned;
   saveGame(g);
   renderScoreboard();
+  // cumulative points -> global leaderboard (max-kept, so the running total ranks)
+  postScore('guess', 'alltime', g.points).then(res => { if (res && res.leaderboard) renderLB(res.leaderboard); });
 
   const photo = c.photo
     ? `<img src="${c.photo}" alt="" onerror="this.remove()">` : `<span class="ini">${initials(c.name)}</span>`;
@@ -134,5 +136,14 @@ document.getElementById('resetBtn').onclick = () => {
   renderScoreboard();
 };
 
+// ---- global leaderboard (total points) ----
+function renderLB(rows) {
+  const card = document.getElementById('lbCard'); if (!card) return;
+  card.innerHTML = `<div class="card-h"><h3>Global Leaderboard</h3><span class="see">Total points</span></div>
+    ${leaderboardHTML(rows, Auth.user && Auth.user.username, 'Points')}${signInNudge()}`;
+}
+async function loadBoard() { try { renderLB(await fetchLeaderboard('guess', 'alltime')); } catch { /* offline */ } }
+
 renderScoreboard();
 nextRound();
+loadBoard();
