@@ -381,6 +381,11 @@ function attachSearchDropdown(input) {
         row(`/team.html?name=${encodeURIComponent(t.team)}`,
             `<span class="crest-pic">${crestHTML(t.team_logo, 'crest-md') || '🛡️'}</span>`,
             t.team, esc(t.league))).join('');
+      const national = (d.national || []).slice(0, 4);
+      if (national.length) html += '<div class="dd-h">National Teams</div>' + national.map(t =>
+        row(`/nat.html?id=${t.team_id}`,
+            `<span class="crest-pic">${flagISO2(t.cc) || '🏳️'}</span>`,
+            t.team, 'National team')).join('');
       html = html ? html + `<a class="dd-all" href="/search.html?q=${encodeURIComponent(q)}">See all results for “${esc(q)}” →</a>`
         : '<div class="dd-empty">No results</div>';
       dd.innerHTML = html;

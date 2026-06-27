@@ -1917,6 +1917,18 @@ class SoccerDB:
             WHERE strip_accents(lower(t.team_name)) LIKE strip_accents(lower('%'||?||'%'))
             ORDER BY t.team_name LIMIT 8
         """, [q]).df()
+        # national teams from the international feed (link to /nat.html via SofaScore id)
+        ndf = self.con.execute("""
+            SELECT team, any_value(cc) AS cc, any_value(team_id) AS team_id, count(*) AS n
+            FROM (
+                SELECT home_team AS team, home_country AS cc, home_team_id AS team_id
+                FROM live_matches WHERE tournament_group = 'International' AND home_country IS NOT NULL
+                UNION ALL
+                SELECT away_team, away_country, away_team_id
+                FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL)
+            WHERE strip_accents(lower(team)) LIKE strip_accents(lower('%'||?||'%'))
+            GROUP BY team ORDER BY n DESC, team LIMIT 8
+        """, [q]).df()
         return {
             "query": q,
             "players": [{"player": r.player_name, "team": r.team, "position": r.position,
@@ -1927,6 +1939,8 @@ class SoccerDB:
                         for r in pdf.itertuples()],
             "teams": [{"team": r.team_name, "league": r.league, "country": r.country,
                        "team_logo": self.team_logo(r.team_name)} for r in tdf.itertuples()],
+            "national": [{"team": r.team, "team_id": _i(r.team_id), "cc": r.cc}
+                         for r in ndf.itertuples()],
         }
 
     def web_match_search(self, team_a: str, team_b: str, since: str | None = None) -> dict:

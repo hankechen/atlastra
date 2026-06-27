@@ -13,8 +13,9 @@ async function runSearch(q) {
     return;
   }
   const d = await api('/api/search?q=' + encodeURIComponent(q));
+  const nat = d.national || [];
   document.getElementById('pcount').textContent = d.players.length ? d.players.length + ' found' : '';
-  document.getElementById('tcount').textContent = d.teams.length ? d.teams.length + ' found' : '';
+  document.getElementById('tcount').textContent = (d.teams.length + nat.length) ? (d.teams.length + nat.length) + ' found' : '';
 
   pEl.innerHTML = d.players.length ? d.players.map(p => `
     <div class="sr" onclick="location.href='${playerHref(p.player)}'">
@@ -24,13 +25,21 @@ async function runSearch(q) {
       <span class="srend">${p.goals ?? 0}G · ${p.assists ?? 0}A</span>
     </div>`).join('') : '<div class="empty">No players.</div>';
 
-  tEl.innerHTML = d.teams.length ? d.teams.map(t => `
+  const clubRows = d.teams.map(t => `
     <div class="sr" onclick="location.href='${teamHref(t.team)}'">
       <span class="pic crest-pic">${crestHTML(t.team_logo, 'crest-md') || '🛡️'}</span>
       <span class="srx"><div class="nm">${t.team}</div>
         <div class="sub">${t.league} · ${t.country}</div></span>
       <span class="srend">›</span>
-    </div>`).join('') : '<div class="empty">No teams.</div>';
+    </div>`).join('');
+  const natRows = nat.map(t => `
+    <div class="sr" onclick="location.href='/nat.html?id=${t.team_id}'">
+      <span class="pic crest-pic">${flagISO2(t.cc) || '🏳️'}</span>
+      <span class="srx"><div class="nm">${t.team}</div>
+        <div class="sub">National team</div></span>
+      <span class="srend">›</span>
+    </div>`).join('');
+  tEl.innerHTML = (clubRows + natRows) || '<div class="empty">No teams.</div>';
 }
 
 const box = document.getElementById('searchBox');
