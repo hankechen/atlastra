@@ -60,6 +60,7 @@ setInterval(() => { if (!document.hidden) loadLiveWidget(); }, 30000);
 
   // Games rail: quick links into the games hub (mirrors the sidebar Games group).
   const GAMES = [
+    ['predict', 'Score Predictor', 'Call the scores, earn points', '/predict.html'],
     ['daily', 'Daily Challenge', "Today's puzzle · streak", '/daily.html'],
     ['guess', 'Guess the Rating', 'Read the line, guess the rating', '/guess.html'],
     ['higherlower', 'Higher or Lower', 'Pick the bigger stat', '/higherlower.html'],

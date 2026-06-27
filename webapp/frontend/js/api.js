@@ -441,6 +441,7 @@ const ICONS = {
   higherlower: '<path d="M7 21V5M7 5 3.5 8.5M7 5l3.5 3.5M17 3v16m0 0 3.5-3.5M17 19l-3.5-3.5"/>',
   mystery: '<circle cx="12" cy="8.4" r="3.4"/><path d="M5.5 20c0-3.4 2.9-5.2 6.5-5.2s6.5 1.8 6.5 5.2"/><path d="M10.4 7.6a1.7 1.7 0 013.3.6c0 1.1-1.6 1.4-1.6 2.4"/>',
   draft: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M4 8h16M4 16h16M12 8v8"/><circle cx="12" cy="12" r="2"/>',
+  predict: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M12 6v12"/><circle cx="7.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="16.5" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
   award: '<circle cx="12" cy="14" r="5"/><path d="M9 9.6 6.5 3M15 9.6 17.5 3"/><path d="m12 11.7.9 1.8 2 .3-1.45 1.4.35 2L12 16.5l-1.8.95.35-2L9.1 14.1l2-.3z" fill="currentColor" stroke="none"/>',
   biggame: '<path d="M12 3c1 3-2 4-2 7a2 2 0 004 0c0-1 .5-2 .5-2 1 1 2.5 2.9 2.5 5a5 5 0 01-10 0c0-3.6 4-5.6 5-10z"/>',
   budget: '<ellipse cx="12" cy="6.3" rx="7" ry="3"/><path d="M5 6.3v5.4c0 1.7 3.1 3 7 3s7-1.3 7-3V6.3"/><path d="M5 11.7v5.4c0 1.7 3.1 3 7 3s7-1.3 7-3v-5.4"/>',
@@ -479,6 +480,7 @@ const NAV_ANALYTICS = [
 ];
 // Games & engagement hub
 const NAV_GAMES = [
+  ['Score Predictor', 'predict', '/predict.html'],
   ['Daily Challenge', 'daily', '/daily.html'],
   ['Guess the Rating', 'guess', '/guess.html'],
   ['Higher or Lower', 'higherlower', '/higherlower.html'],
