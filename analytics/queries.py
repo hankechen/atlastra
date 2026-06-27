@@ -1018,9 +1018,11 @@ class SoccerDB:
             key = frozenset((m["home"], m["away"]))
             if key not in idx:
                 idx[key] = len(ties)
-                ties.append({"a": m["home"], "b": m["away"], "legs": [], "agg": {}})
+                ties.append({"a": m["home"], "b": m["away"], "legs": [], "agg": {}, "live": False})
             t = ties[idx[key]]
             t["legs"].append(m)
+            if m.get("live"):                        # any in-play leg marks the tie live
+                t["live"] = True
             if m["home_goals"] is not None:
                 t["agg"][m["home"]] = t["agg"].get(m["home"], 0) + m["home_goals"]
                 t["agg"][m["away"]] = t["agg"].get(m["away"], 0) + m["away_goals"]
@@ -1074,9 +1076,9 @@ class SoccerDB:
                 d[prefix + "_" + k] = v
             return d
 
-        def tie_dict(a, b, ga, gb, winner, legs):
+        def tie_dict(a, b, ga, gb, winner, legs, live=False):
             wt = a if winner == "a" else b if winner == "b" else None
-            d = {"winner": winner, "winner_team": wt, "two_legs": len(legs) > 1,
+            d = {"winner": winner, "winner_team": wt, "live": live, "two_legs": len(legs) > 1,
                  "legs": [{"home": l["home"], "away": l["away"],
                            "home_goals": l["home_goals"], "away_goals": l["away_goals"]}
                           for l in legs],
@@ -1096,13 +1098,14 @@ class SoccerDB:
             for t in ordered[rnd]:
                 a, b, agg = t["a"], t["b"], t["agg"]
                 ga, gb = agg.get(a), agg.get(b)
+                live = t.get("live", False)
                 if nxt:                              # winner = whoever advanced
                     winner = "a" if a in next_teams else "b" if b in next_teams else None
-                elif ga is not None and gb is not None and ga != gb:
-                    winner = "a" if ga > gb else "b"
+                elif not live and ga is not None and gb is not None and ga != gb:
+                    winner = "a" if ga > gb else "b"  # deepest round: scoreline, but not mid-match
                 else:
                     winner = None
-                out.append(tie_dict(a, b, ga, gb, winner, t["legs"]))
+                out.append(tie_dict(a, b, ga, gb, winner, t["legs"], live))
             result[rnd] = out
 
         # extend the skeleton from the deepest played round through the Final
@@ -1283,6 +1286,36 @@ class SoccerDB:
         if df.empty:
             return {"available": False, "season": season, "rounds": [],
                     "bracket": [], "groups": [], "champion": None}
+        # Real-time overlay: the live feed (pipeline/load_live) tracks the running WC
+        # far faster than the static wc_matches snapshot, so for any match in both,
+        # prefer the live score / winner / status and resolve knockout slots as teams
+        # advance — keeping the bracket and results current while matches play out.
+        df["live"] = False
+        try:
+            lv = self.con.execute("""
+                SELECT event_id, home_team, home_country, away_team, away_country,
+                       home_score, away_score, winner_code, status_type
+                FROM live_matches
+                WHERE tournament_key = 'WC' OR tournament_name ILIKE '%world cup%'
+            """).df()
+        except Exception:                            # noqa: BLE001 -- table may not exist
+            lv = pd.DataFrame()
+        lmap = {int(r.event_id): r for r in lv.itertuples()} if not lv.empty else {}
+        for i in df.index:
+            eid = df.at[i, "event_id"]
+            lm = None if pd.isna(eid) else lmap.get(int(eid))
+            if lm is None:
+                continue
+            if lm.status_type in ("inprogress", "finished") and lm.home_score is not None:
+                df.at[i, "home_goals"], df.at[i, "away_goals"] = lm.home_score, lm.away_score
+            if lm.winner_code is not None:
+                df.at[i, "winner_code"] = lm.winner_code
+            if lm.status_type == "inprogress":
+                df.at[i, "live"] = True
+            if lm.home_country and not df.at[i, "home_cc"]:   # fill a placeholder slot
+                df.at[i, "home"], df.at[i, "home_cc"] = lm.home_team, lm.home_country
+            if lm.away_country and not df.at[i, "away_cc"]:
+                df.at[i, "away"], df.at[i, "away_cc"] = lm.away_team, lm.away_country
         cc = {}
         for r in df.itertuples():
             cc.setdefault(r.home, r.home_cc)
@@ -1316,7 +1349,8 @@ class SoccerDB:
             if sub.empty:
                 continue
             ms = [{"home": r.home, "away": r.away, "event_id": _i(r.event_id),
-                   "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals)}
+                   "home_goals": _i(r.home_goals), "away_goals": _i(r.away_goals),
+                   "live": bool(r.live)}
                   for r in sub.sort_values("date").itertuples()]
             ko_ties[rnd] = self._ucl_round_ties(ms)
         labels = {r: self._WC_KO[r][1] for r in seq}

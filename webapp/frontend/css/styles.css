@@ -1395,6 +1395,9 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .bkt-tie{width:100%;position:relative;background:var(--card2);border:1px solid var(--border);
   border-radius:9px;overflow:hidden;cursor:pointer;transition:border-color .12s,transform .12s}
 .bkt-tie:hover{border-color:var(--accent);transform:translateY(-1px)}
+.bkt-tie.live{border-color:var(--red);box-shadow:0 0 0 1px var(--red) inset}
+.bkt-live-tag{position:absolute;top:-7px;right:8px;background:var(--red);color:#fff;font-size:9px;
+  font-weight:800;letter-spacing:.4px;padding:1px 6px;border-radius:6px;line-height:1.5}
 .bkt-row{display:flex;align-items:center;gap:7px;padding:6px 9px;font-size:13px;color:var(--text)}
 .bkt-row+.bkt-row{border-top:1px solid var(--border)}
 .bkt-row.win{font-weight:800}

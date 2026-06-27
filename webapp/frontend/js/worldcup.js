@@ -28,10 +28,10 @@ function bktSide(t, k) {
 }
 function bktTie(t) {
   const click = t.event_id ? ` onclick="location.href='/match.html?id=${t.event_id}'"` : '';
-  return `<div class="bkt-tie-wrap"><div class="bkt-tie"${click}>${bktSide(t, 'a')}${bktSide(t, 'b')}</div></div>`;
+  const live = t.live ? '<span class="bkt-live-tag">● LIVE</span>' : '';
+  return `<div class="bkt-tie-wrap"><div class="bkt-tie${t.live ? ' live' : ''}"${click}>${bktSide(t, 'a')}${bktSide(t, 'b')}${live}</div></div>`;
 }
-async function loadBracket() {
-  const d = await wc();
+function renderBracket(d) {
   const b = d.bracket || [];
   if (!b.length) { _content().innerHTML = '<div class="empty">No knockout matches for this edition.</div>'; return; }
   _content().innerHTML = `<section class="card"><div class="bkt">${b.map(r => `
@@ -39,6 +39,20 @@ async function loadBracket() {
       <div class="bkt-rh">${r.label}</div>
       <div class="bkt-col-body">${r.ties.map(bktTie).join('')}</div>
     </div>`).join('')}</div></section>`;
+}
+let _wcTimer = null;
+async function loadBracket() {
+  clearInterval(_wcTimer);
+  renderBracket(await wc());
+  // keep the bracket live: re-fetch every 30s while it's the open tab so scores,
+  // winners and newly-resolved knockout slots update without a reload.
+  _wcTimer = setInterval(async () => {
+    if (document.hidden || curSub !== 'bracket') return;
+    try {
+      _cache[curSeason] = await api('/api/worldcup?season=' + encodeURIComponent(curSeason));
+      if (curSub === 'bracket') renderBracket(_cache[curSeason]);
+    } catch { /* keep last good render */ }
+  }, 30000);
 }
 
 // ---- Results (matches by round) ----
@@ -144,7 +158,7 @@ function render() {
 // once a knockout result exists (or the edition is finished), open on the Bracket.
 async function pickDefaultTab() {
   const d = await wc();
-  const koPlayed = (d.bracket || []).some(r => r.ties.some(t => t.winner));
+  const koPlayed = (d.bracket || []).some(r => r.ties.some(t => t.winner || t.live));
   curSub = koPlayed ? 'bracket' : 'standings';
 }
 
