@@ -424,7 +424,12 @@ def _live_refresher():
     games are live, slower when idle. Set ATLASTRA_NO_LIVE_REFRESH=1 to disable."""
     import time
     from pipeline import load_live as live
-    FULL_EVERY = 180
+    # Gentle cadence so a single (proxy) IP doesn't trip SofaScore's per-IP rate
+    # limit: the live experience rides on the cheap 1-call overlay; the heavy
+    # all-competitions sweep runs rarely. All tunable via env.
+    FULL_EVERY = int(os.environ.get("ATLASTRA_FULL_EVERY", "1800"))   # full sweep every 30 min
+    LIVE_POLL = int(os.environ.get("ATLASTRA_LIVE_POLL", "45"))       # overlay while games are live
+    IDLE_POLL = int(os.environ.get("ATLASTRA_IDLE_POLL", "300"))      # nothing live -> back off
     last_full = 0.0
     n_live = 0
     while True:
@@ -436,7 +441,7 @@ def _live_refresher():
                 n_live = live.update_live_overlay()
         except Exception as e:                 # noqa: BLE001 -- network/scrape hiccup
             print(f"live refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
-        time.sleep(25 if n_live else 90)
+        time.sleep(LIVE_POLL if n_live else IDLE_POLL)
 
 
 if __name__ == "__main__":

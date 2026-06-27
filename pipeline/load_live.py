@@ -73,10 +73,11 @@ COLS = ["event_id", "tournament_key", "tournament_name", "tournament_group",
 _PROXY = os.environ.get("SOFASCORE_PROXY") or None
 
 
-def _get(path: str, retries: int = 2) -> dict:
+def _get(path: str, retries: int = 1) -> dict:
     """Bare GET -- NO extra headers (CORS headers trip SofaScore's bot challenge;
-    the default browser-TLS fingerprint alone is accepted). Retries a couple of
-    times because SofaScore intermittently 404s/throttles otherwise-valid paths."""
+    the default browser-TLS fingerprint alone is accepted). One light retry for a
+    transient blip, but NEVER retry a 403 -- a hard block won't clear and just
+    burns through the (single, rate-limited) proxy IP."""
     last = None
     for i in range(retries + 1):
         try:
@@ -85,8 +86,9 @@ def _get(path: str, retries: int = 2) -> dict:
             return r.json()
         except Exception as e:                        # noqa: BLE001
             last = e
-            if i < retries:
-                time.sleep(0.8)
+            if "403" in str(e) or i >= retries:
+                break
+            time.sleep(0.8)
     raise last
 
 
