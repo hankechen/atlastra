@@ -25,6 +25,7 @@ so it is safe to run on a loop/cron for a near-live feed:
     python -m pipeline.load_live           # one refresh
     while :; do python -m pipeline.load_live; sleep 30; done   # poor-man's live
 """
+import os
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -66,6 +67,12 @@ COLS = ["event_id", "tournament_key", "tournament_name", "tournament_group",
         "home_score", "away_score", "winner_code", "updated_at"]
 
 
+# Optional outbound proxy for SofaScore (datacenter IPs are 403-blocked, so a
+# residential proxy is needed when running from a cloud host). Set SOFASCORE_PROXY
+# to e.g. http://user:pass@host:port.
+_PROXY = os.environ.get("SOFASCORE_PROXY") or None
+
+
 def _get(path: str, retries: int = 2) -> dict:
     """Bare GET -- NO extra headers (CORS headers trip SofaScore's bot challenge;
     the default browser-TLS fingerprint alone is accepted). Retries a couple of
@@ -73,7 +80,7 @@ def _get(path: str, retries: int = 2) -> dict:
     last = None
     for i in range(retries + 1):
         try:
-            r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=30)
+            r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=30, proxy=_PROXY)
             r.raise_for_status()
             return r.json()
         except Exception as e:                        # noqa: BLE001

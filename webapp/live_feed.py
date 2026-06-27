@@ -14,6 +14,7 @@ Responses are cached in-memory with a short TTL so the dashboard can poll every
 30-60s without hammering SofaScore: live data (header/stats/timeline) gets a short
 TTL, mostly-static data (lineups/shotmap/player stats/heatmap) a longer one.
 """
+import os
 import sys
 import threading
 import time
@@ -24,6 +25,10 @@ import tls_requests
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import SOFASCORE_BASE
+
+# Optional residential proxy for SofaScore (datacenter IPs are 403-blocked). Set
+# SOFASCORE_PROXY=http://user:pass@host:port to route the live calls through it.
+_PROXY = os.environ.get("SOFASCORE_PROXY") or None
 
 _CACHE: dict[str, tuple[float, object]] = {}
 _LOCK = threading.Lock()
@@ -38,7 +43,7 @@ def _get(path: str, ttl: float):
         if hit and now - hit[0] < ttl:
             return hit[1]
     try:
-        r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=25)
+        r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=25, proxy=_PROXY)
         data = r.json() if r.status_code == 200 else None
     except Exception:  # noqa: BLE001 -- network/parse hiccup -> treat as no data
         data = None
@@ -384,7 +389,7 @@ def team_image(team_id: int):
             return hit[1]
     res = None
     try:
-        r = tls_requests.get(f"{SOFASCORE_BASE}/team/{int(team_id)}/image", timeout=15)
+        r = tls_requests.get(f"{SOFASCORE_BASE}/team/{int(team_id)}/image", timeout=15, proxy=_PROXY)
         if r.status_code == 200 and (r.headers.get("content-type") or "").startswith("image/"):
             res = (r.content, r.headers["content-type"])
     except Exception:  # noqa: BLE001
