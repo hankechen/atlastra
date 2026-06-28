@@ -602,12 +602,13 @@ function matchRow(m) {
     ? `<span class="live">● LIVE</span>` : `<span class="tag">${matchDay(m.kickoff_ts)}</span>`;
   const bold = (side) => m.winner === (side === 'home' ? 1 : 2) ? ' won' : '';
   const href = m.event_id != null ? ` onclick="location.href='/match.html?id=${m.event_id}'" style="cursor:pointer"` : '';
+  const venue = m.venue ? `<div class="match-venue"${href}>📍 ${m.venue}</div>` : '';
   return `<div class="match"${href}>
     <span class="${clk}">${matchClock(m)}</span>
     <span class="tm${bold('home')}">${teamBadge(m, 'home')}<span class="nm">${m.home}</span>${rankBadge(m.home_rank)}</span>
     <span class="sc">${score}</span>
     <span class="tm away${bold('away')}">${rankBadge(m.away_rank)}<span class="nm">${m.away}</span>${teamBadge(m, 'away')}</span>
-    ${tag}</div>`;
+    ${tag}</div>${venue}`;
 }
 
 // player list row used by rankings / trending

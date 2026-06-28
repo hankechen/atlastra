@@ -229,8 +229,11 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/spotlight":
             return d.web_spotlight()
         if path == "/api/live":
-            return d.web_live(int(q.get("recent", ["40"])[0]),
-                              int(q.get("upcoming", ["40"])[0]))
+            res = d.web_live(int(q.get("recent", ["40"])[0]),
+                             int(q.get("upcoming", ["40"])[0]))
+            for m in res.get("live", []):     # venue from the (warmed) event detail, live only
+                m["venue"] = live_feed.venue(m["event_id"])
+            return res
         if path == "/api/standings":
             return d.web_standings(q.get("league", ["ENG-Premier League"])[0])
         if path == "/api/player":

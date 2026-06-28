@@ -114,6 +114,18 @@ def prewarm_team(tid: int) -> None:
                 _QUEUE.setdefault(p, now)
 
 
+def venue(eid: int):
+    """Stadium · city for a match, from the (already-warmed for live games) event
+    detail. Cache-only -> never adds relay work; returns None if not cached."""
+    d = _get(f"/event/{eid}", ttl=3600, queue=False) or {}
+    v = (d.get("event") or {}).get("venue") or {}
+    if not v:
+        return None
+    parts = [(v.get("stadium") or {}).get("name") or v.get("name"),
+             (v.get("city") or {}).get("name")]
+    return " · ".join(p for p in parts if p) or None
+
+
 def prewarm_players(eid: int, player_ids) -> None:
     """Queue each player's club + this-match heatmap so the lineup player modal opens
     instantly. Called when a lineup is viewed -> the relay fetches them in the

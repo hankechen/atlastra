@@ -188,6 +188,8 @@ a{color:inherit;text-decoration:none}
 .match .sc{font-weight:800;font-size:15px;text-align:center;letter-spacing:1px;white-space:nowrap}
 .match .live{color:var(--red);font-weight:700;font-size:10px;text-align:right;white-space:nowrap}
 .match .tag{color:var(--muted);font-size:10px;text-align:right;white-space:nowrap}
+.match:has(+ .match-venue){border-bottom:none}
+.match-venue{padding:0 4px 10px 34px;margin-top:-4px;color:var(--muted);font-size:11.5px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .live-group{margin-bottom:16px}
 
 /* Live Matches page (#feed): larger, roomier match rows than the compact home widget */
