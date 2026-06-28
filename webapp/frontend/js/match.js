@@ -2,8 +2,8 @@ renderSidebar('Live Matches');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const EID = new URLSearchParams(location.search).get('id');
-const TABS = [['preview', 'Preview'], ['predict', 'Predict'], ['lineups', 'Lineups'], ['prediction', 'Odds'], ['stats', 'Stats'],
-              ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['moments', 'Key Moments'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
+const TABS = [['preview', 'Preview'], ['predict', 'Predict'], ['lineups', 'Lineups'], ['moments', 'Key Moments'], ['prediction', 'Odds'], ['stats', 'Stats'],
+              ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
 const TAB_KEYS = TABS.map(([k]) => k);
 let head = null, timer = null;
 const _urlTab = new URLSearchParams(location.search).get('tab');
