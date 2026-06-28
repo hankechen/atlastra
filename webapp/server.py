@@ -113,10 +113,13 @@ def match_api(path: str, q: dict) -> dict:
         return live_feed.statistics(eid)
     if path == "/api/match/lineups":
         d = live_feed.lineups(eid)
-        players = []
+        starters, players = [], []
         for side in ("home", "away"):
             s = d.get(side) or {}
+            starters += (s.get("starting_xi") or [])
             players += (s.get("starting_xi") or []) + (s.get("substitutes") or [])
+        # background-warm each starter's club + heatmap so the player modal is instant
+        live_feed.prewarm_players(eid, [p.get("id") for p in starters])
         if players:
             with SoccerDB(read_only=DB_READ_ONLY) as db:
                 rmap = db.ratings_by_name([p.get("name") for p in players])

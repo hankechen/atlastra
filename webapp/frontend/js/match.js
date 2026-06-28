@@ -308,8 +308,8 @@ async function openPlayerModal(id) {
   // deployed server this is relay-fetched, so wait while it's pending.
   (async () => {
     let cl = await api('/api/player_club?id=' + id).catch(() => null);
-    for (let i = 0; i < 6 && cl && cl.available === false && cl.pending; i++) {
-      await new Promise(r => setTimeout(r, 3000));
+    for (let i = 0; i < 10 && cl && cl.available === false && cl.pending; i++) {
+      await new Promise(r => setTimeout(r, 2000));
       cl = await api('/api/player_club?id=' + id).catch(() => null);
     }
     const ce = wrap.querySelector('#pmClub'), cr = wrap.querySelector('#pmCrest');

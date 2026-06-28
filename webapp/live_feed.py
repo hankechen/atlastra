@@ -114,6 +114,23 @@ def prewarm_team(tid: int) -> None:
                 _QUEUE.setdefault(p, now)
 
 
+def prewarm_players(eid: int, player_ids) -> None:
+    """Queue each player's club + this-match heatmap so the lineup player modal opens
+    instantly. Called when a lineup is viewed -> the relay fetches them in the
+    background while the user reads the lineup, so a click finds them cached. Already-
+    cached paths (e.g. a live match the pusher pre-warms) are skipped."""
+    if not CACHE_MODE:
+        return
+    now = time.time()
+    with _LOCK:
+        for pid in player_ids:
+            if not pid:
+                continue
+            for p in (f"/player/{pid}", f"/event/{eid}/player/{pid}/heatmap"):
+                if p not in _PUSH_CACHE:
+                    _QUEUE.setdefault(p, now)
+
+
 def queue_has(prefix: str) -> bool:
     """True if some path under `prefix` is queued but not yet cached -- i.e. the
     client should keep waiting (data is coming) rather than show 'unavailable'."""
