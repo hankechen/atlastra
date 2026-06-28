@@ -47,7 +47,7 @@ def fetch_image(url: str):
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from analytics.queries import SoccerDB  # noqa: E402
-from config import FOCUS_SEASON  # noqa: E402
+from config import FOCUS_SEASON, SOFASCORE_BASE  # noqa: E402
 from webapp import auth  # noqa: E402
 
 
@@ -444,11 +444,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, b"", "text/plain")
             return
-        if u.path == "/api/sofa_team_img":             # SofaScore crest via TLS bypass
-            tid = parse_qs(u.query).get("id", [""])[0]
-            res = live_feed.team_image(int(tid)) if tid.isdigit() else None
-            if res:
-                self._send(200, res[0], res[1])
+        if u.path == "/api/sofa_team_img":             # SofaScore crest -> 302 so the user's browser
+            tid = parse_qs(u.query).get("id", [""])[0]  # loads it directly (real Chrome TLS); the
+            if tid.isdigit():                           # server itself is WAF-blocked from SofaScore
+                self.send_response(302)
+                self.send_header("Location", f"{SOFASCORE_BASE}/team/{int(tid)}/image")
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
             else:
                 self._send(404, b"", "text/plain")
             return
