@@ -52,16 +52,19 @@ def _fetch_direct(path: str):
         return None
 
 
-def _get(path: str, ttl: float):
+def _get(path: str, ttl: float, queue: bool = True):
     """Cached bare GET. Returns parsed JSON dict, or None on non-200 (e.g. a 404
-    heatmap for a player who never came on)."""
+    heatmap for a player who never came on). queue=False = cache-only in relay mode:
+    don't enqueue a miss for the pusher to fetch (used for low-value bulk lookups like
+    per-player rating estimates, which would otherwise flood the relay)."""
     now = time.time()
     if CACHE_MODE:                       # serve from pushed cache; queue misses
         with _LOCK:
             hit = _PUSH_CACHE.get(path)
             if hit and now - hit[0] < ttl:
                 return hit[1]
-            _QUEUE[path] = _QUEUE.get(path, now)
+            if queue:
+                _QUEUE[path] = _QUEUE.get(path, now)
             return hit[1] if hit else None   # serve stale while the pusher refetches
     with _LOCK:
         hit = _CACHE.get(path)
@@ -227,7 +230,7 @@ def season_estimate(player_id: int, position: str | None = None) -> int | None:
     lineup line (G/D/M/F) used to pick the calibration intercept. Cached 7 days."""
     if not player_id:
         return None
-    seas = _get(f"/player/{player_id}/statistics/seasons", ttl=604800)
+    seas = _get(f"/player/{player_id}/statistics/seasons", ttl=604800, queue=False)
     tot_r, tot_a = 0.0, 0                             # appearance-weighted sums
     for blk in ((seas or {}).get("uniqueTournamentSeasons") or [])[:5]:
         ut = (blk.get("uniqueTournament") or {}).get("id")
@@ -235,7 +238,7 @@ def season_estimate(player_id: int, position: str | None = None) -> int | None:
         if not ut or not sns:
             continue
         ov = _get(f"/player/{player_id}/unique-tournament/{ut}/season/{sns[0]['id']}/statistics/overall",
-                  ttl=604800)
+                  ttl=604800, queue=False)
         st = (ov or {}).get("statistics") or {}
         rt, ap = st.get("rating"), st.get("appearances") or 0
         if rt and ap >= 2:
