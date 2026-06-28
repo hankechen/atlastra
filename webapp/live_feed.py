@@ -314,6 +314,76 @@ def timeline(eid: int) -> dict:
     return {"available": True, "events": events}
 
 
+# ---- key moments + generated commentary -------------------------------------
+_SITUATION = {"assisted": "an assist", "regular": "open play", "fast-break": "a fast break",
+              "set-piece": "a set piece", "corner": "a corner", "penalty": "the spot",
+              "free-kick": "a free kick", "throw-in-set-piece": "a throw-in",
+              "fast_break": "a fast break"}
+_BODY = {"head": "header", "left-foot": "left-footed effort",
+         "right-foot": "right-footed effort", "other": "effort"}
+
+
+def _mclock(mn, at):
+    return f"{mn}+{at}'" if at else (f"{mn}'" if mn is not None else "")
+
+
+def key_moments(eid: int) -> dict:
+    """A chronological feed of the match's KEY events -- goals + red cards (from
+    incidents) and the big chances/notable shots (from the shot map, by xG + outcome)
+    -- each with a one-line auto-generated commentary string. Rule-based off the
+    structured SofaScore data: no model, no API key, always available."""
+    hdr = header(eid)
+    if not hdr.get("available"):
+        return {"available": False, "moments": []}
+    sm, tl = shotmap(eid), timeline(eid)
+    if not sm.get("available") and not tl.get("available"):
+        return {"available": False, "moments": []}   # still loading -> wrapper flags pending
+    home, away = hdr.get("home"), hdr.get("away")
+    team = lambda is_home: home if is_home else away
+    moments = []
+
+    for e in (tl.get("events") or []):
+        mn, at, side = e.get("minute"), e.get("added_time"), e.get("side")
+        if e.get("type") == "goal":
+            tm = team(side == "home")
+            txt = f"GOAL — {tm}! {e.get('player')} makes it {e.get('home_score')}-{e.get('away_score')}"
+            txt += f", set up by {e['assist']}." if e.get("assist") else "."
+            moments.append({"minute": mn, "added_time": at, "kind": "goal", "side": side,
+                            "icon": "⚽", "text": txt})
+        elif e.get("type") == "card" and "red" in (e.get("klass") or "").lower():
+            tm = team(side == "home")
+            moments.append({"minute": mn, "added_time": at, "kind": "red", "side": side,
+                            "icon": "🟥", "text": f"Red card — {e.get('player')} ({tm}) is sent off."})
+
+    for s in (sm.get("shots") or []):
+        if s.get("is_goal"):
+            continue                                  # goals already covered (with assist + score)
+        xg = s.get("xg") or 0
+        st = s.get("shot_type")
+        if not (xg >= 0.30 or (st == "save" and xg >= 0.15) or st == "post"):
+            continue
+        tm = team(s.get("is_home"))
+        body = _BODY.get(s.get("body_part"), "effort")
+        sit = _SITUATION.get(s.get("situation"))
+        frm = f" from {sit}" if sit else ""
+        xgs = f" (xG {xg:.2f})" if xg else ""
+        if st == "save":
+            icon, txt = "🧤", f"Big chance for {tm}! {s.get('player')}'s {body}{frm} forces a save{xgs}."
+        elif st == "post":
+            icon, txt = "🪵", f"Off the woodwork! {s.get('player')} ({tm}) strikes the frame{xgs}."
+        elif st == "block":
+            icon, txt = "🧱", f"{s.get('player')}'s {body}{frm} is blocked{xgs}."
+        else:
+            icon, txt = "😬", f"Big chance missed! {s.get('player')} ({tm}) sends a {body}{frm} off target{xgs}."
+        moments.append({"minute": s.get("minute"), "added_time": s.get("added_time"),
+                        "kind": "chance", "side": "home" if s.get("is_home") else "away",
+                        "icon": icon, "text": txt})
+
+    moments.sort(key=lambda m: ((m.get("minute") if m.get("minute") is not None else 0),
+                                m.get("added_time") or 0))
+    return {"available": True, "home": home, "away": away, "moments": moments}
+
+
 # ---- per-player stats -------------------------------------------------------
 def _player_rows(side: dict, team_name: str, is_home: bool, cards: dict) -> list:
     rows = []

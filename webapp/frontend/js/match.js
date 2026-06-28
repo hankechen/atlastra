@@ -3,7 +3,7 @@ attachSearchDropdown(document.getElementById('searchBox'));
 
 const EID = new URLSearchParams(location.search).get('id');
 const TABS = [['preview', 'Preview'], ['predict', 'Predict'], ['lineups', 'Lineups'], ['prediction', 'Odds'], ['stats', 'Stats'],
-              ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
+              ['shotmap', 'Shot Map'], ['timeline', 'Timeline'], ['moments', 'Key Moments'], ['players', 'Players'], ['heatmaps', 'Heatmaps']];
 const TAB_KEYS = TABS.map(([k]) => k);
 let head = null, timer = null;
 const _urlTab = new URLSearchParams(location.search).get('tab');
@@ -67,7 +67,7 @@ function renderTabs() {
   el.querySelectorAll('.tab').forEach(t => t.onclick = () => { active = t.dataset.k; renderTabs(); loadActive(); });
 }
 const body = () => document.getElementById('tabBody');
-const LOADERS = { preview: loadPreview, predict: loadPredict, stats: loadStatsTab, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, players: loadPlayers, heatmaps: loadHeatmaps };
+const LOADERS = { preview: loadPreview, predict: loadPredict, stats: loadStatsTab, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, moments: loadKeyMoments, players: loadPlayers, heatmaps: loadHeatmaps };
 async function loadActive(refresh) {
   if (!refresh) body().innerHTML = '<section class="card"><div class="placeholder-note">Loading…</div></section>';
   try { await LOADERS[active](); } catch { body().innerHTML = '<section class="card"><div class="placeholder-note">Could not load this section.</div></section>'; }
@@ -418,6 +418,25 @@ async function loadTimeline() {
   body().innerHTML = `<section class="card"><div class="card-h"><h3>Match Timeline</h3></div><div class="tl">${rows}</div></section>`;
 }
 
+// ---- Key Moments (auto-generated commentary from goals + big chances) ----
+async function loadKeyMoments() {
+  const d = await A('/api/match/key-moments');
+  if (!d.available || !d.moments.length) {
+    body().innerHTML = empty('No key moments yet — goals and big chances will appear here with commentary.');
+    return;
+  }
+  const rows = d.moments.map(m => {
+    const mins = (m.minute ?? '') + (m.added_time ? '+' + m.added_time : '');
+    return `<div class="km-row km-${m.kind} ${m.side || ''}">
+      <span class="km-min">${mins}'</span>
+      <span class="km-ic">${m.icon || '•'}</span>
+      <span class="km-tx">${esc(m.text)}</span></div>`;
+  }).join('');
+  body().innerHTML = `<section class="card"><div class="card-h"><h3>Key Moments</h3>
+      <span class="see">auto-generated commentary · goals &amp; big chances</span></div>
+    <div class="km">${rows}</div></section>`;
+}
+
 // ---- Players (sortable) ----
 const PCOLS = [
   ['name', 'Player', 1], ['rating', 'Rating', 0], ['minutes', 'Min', 0], ['goals', 'G', 0],
@@ -559,7 +578,7 @@ const empty = (msg) => `<section class="card"><div class="placeholder-note">${es
   if (head?.status === 'inprogress') {
     timer = setInterval(async () => {
       await loadHeader();
-      if (['stats', 'timeline', 'players', 'prediction', 'preview'].includes(active)) loadActive(true);
+      if (['stats', 'timeline', 'moments', 'players', 'prediction', 'preview'].includes(active)) loadActive(true);
       if (head?.status !== 'inprogress') clearInterval(timer);   // stop once final
     }, 30000);
   }

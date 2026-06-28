@@ -142,6 +142,8 @@ def match_api(path: str, q: dict) -> dict:
         return live_feed.shotmap(eid)
     if path == "/api/match/timeline":
         return live_feed.timeline(eid)
+    if path == "/api/match/key-moments":
+        return live_feed.key_moments(eid)
     if path == "/api/match/player-stats":
         d = live_feed.player_stats(eid)
         names = [p.get("name") for p in d.get("players", [])]
