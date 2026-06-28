@@ -18,6 +18,7 @@ Run it wherever SofaScore is reachable. Config via env:
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
 from datetime import datetime
@@ -31,21 +32,55 @@ TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN")
 FULL_EVERY = int(os.environ.get("PUSH_FULL_EVERY", "1800"))
 LIVE_POLL = int(os.environ.get("PUSH_LIVE_POLL", "60"))
 IDLE_POLL = int(os.environ.get("PUSH_IDLE_POLL", "300"))
+QUEUE_POLL = int(os.environ.get("PUSH_QUEUE_POLL", "8"))   # match-detail relay interval
 
 
-def _push(rows: list[dict], prune: bool):
-    """POST rows to the server (plain HTTP to OUR server -- no bot bypass needed)."""
-    body = json.dumps({"rows": rows, "prune": prune}, default=str).encode()
+def _post(endpoint: str, payload: dict):
+    """POST JSON to OUR server (plain HTTP -- no bot bypass needed)."""
+    body = json.dumps(payload, default=str).encode()
     req = urllib.request.Request(
-        f"{SERVER}/api/ingest/live", data=body, method="POST",
+        f"{SERVER}{endpoint}", data=body, method="POST",
         headers={"Content-Type": "application/json", "X-Ingest-Token": TOKEN})
     with urllib.request.urlopen(req, timeout=40) as resp:
         return resp.status, json.loads(resp.read() or b"{}")
 
 
+def _push(rows: list[dict], prune: bool):
+    return _post("/api/ingest/live", {"rows": rows, "prune": prune})
+
+
+def _fetch(path: str):
+    """Fetch one SofaScore path directly (this machine isn't blocked). None on error
+    so the server negative-caches 404s (e.g. a heatmap for a player who didn't play)."""
+    try:
+        return live._get(path)
+    except Exception:                                     # noqa: BLE001
+        return None
+
+
+def _service_queue():
+    """Relay loop: fetch the SofaScore paths the server needs (match detail,
+    lineups, national teams, ...) and push the JSON back, so the WAF-blocked
+    server can serve match pages from cache."""
+    req = urllib.request.Request(f"{SERVER}/api/ingest/queue",
+                                 headers={"X-Ingest-Token": TOKEN})
+    while True:
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                paths = (json.loads(resp.read() or b"{}")).get("paths") or []
+            if paths:
+                items = [{"path": p, "body": _fetch(p)} for p in paths[:40]]
+                status, r = _post("/api/ingest/cache", {"items": items})
+                print(f"{datetime.now():%H:%M:%S} relayed {len(items)} match-detail path(s) -> {status}", flush=True)
+        except Exception as e:                            # noqa: BLE001
+            print(f"{datetime.now():%H:%M:%S} queue error: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(QUEUE_POLL)
+
+
 def main():
     if not TOKEN:
         sys.exit("ATLASTRA_INGEST_TOKEN is required (must match the server).")
+    threading.Thread(target=_service_queue, daemon=True).start()   # match-detail relay
     last_full = 0.0
     n_live = 0
     while True:

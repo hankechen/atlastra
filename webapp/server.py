@@ -100,6 +100,7 @@ CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
 def match_api(path: str, q: dict) -> dict:
     eid = int(q.get("id", [0])[0])
     if path == "/api/match":
+        live_feed.prewarm(eid)             # batch-queue all tabs' paths on first open
         h = live_feed.header(eid)
         if h.get("available") and (h.get("home_national") or h.get("away_national")):
             with SoccerDB(read_only=DB_READ_ONLY) as db:   # FIFA rank for national-team sides
@@ -161,7 +162,15 @@ def api(path: str, q: dict) -> dict | list:
     # match-detail routes are exactly /api/match or /api/match/... — must NOT
     # swallow sibling routes like /api/match_search or /api/match_preview.
     if path == "/api/match" or path.startswith("/api/match/"):
-        return match_api(path, q)
+        r = match_api(path, q)
+        # if data isn't here yet because the remote scraper hasn't filled the cache,
+        # flag it pending so the client waits instead of showing "unavailable".
+        if isinstance(r, dict) and r.get("available") is False:
+            try:
+                r["pending"] = live_feed.queue_has(f"/event/{int(q.get('id', [0])[0])}")
+            except (TypeError, ValueError):
+                pass
+        return r
     if path == "/api/national_team":          # SofaScore live proxy (no DB)
         return live_feed.national_team(int(q.get("id", [0])[0]))
     if path == "/api/player_club":
@@ -380,10 +389,22 @@ class Handler(BaseHTTPRequestHandler):
             n_live = live.ingest_rows(rows, prune=bool(b.get("prune")))
             self._json({"ok": True, "received": len(rows), "live": n_live})
             return
+        if u.path == "/api/ingest/cache":              # match-detail JSON pushed from the scraper
+            if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
+                self._json({"error": "unauthorized"}, 401)
+                return
+            self._json({"ok": True, "stored": live_feed.cache_put(b.get("items") or [])})
+            return
         self._json({"error": "Not found"}, 404)
 
     def do_GET(self):
         u = urlparse(self.path)
+        if u.path == "/api/ingest/queue":              # SofaScore paths the pusher should fetch
+            if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
+                self._json({"error": "unauthorized"}, 401)
+                return
+            self._json({"paths": live_feed.queue_pending()})
+            return
         if u.path == "/api/auth/me":
             self._json({"user": auth.user_for_token(self._cookie("atla_session"))})
             return

@@ -11,7 +11,19 @@ let active = TAB_KEYS.includes(_urlTab) ? _urlTab : null;   // resolved after he
 let playersCache = null, playerSort = { key: 'rating', dir: -1 };
 const heatCache = {};                       // player_id -> {points}
 
-const A = (p) => api(p + (p.includes('?') ? '&' : '?') + 'id=' + encodeURIComponent(EID));
+// Fetch a match endpoint. The deployed server can't reach SofaScore directly --
+// a remote scraper fills its cache on demand -- so if the data isn't there yet the
+// server returns {available:false, pending:true}; wait for the relay then retry.
+// Genuinely-empty data comes back pending:false, so this doesn't spin on those.
+async function A(p) {
+  const url = p + (p.includes('?') ? '&' : '?') + 'id=' + encodeURIComponent(EID);
+  let r = await api(url);
+  for (let i = 0; i < 8 && r && r.available === false && r.pending; i++) {
+    await new Promise(res => setTimeout(res, 3000));
+    r = await api(url);
+  }
+  return r;
+}
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const pct = (h, a) => { const t = (+h || 0) + (+a || 0); return t ? Math.round((+h || 0) / t * 100) : 50; };
 
@@ -533,6 +545,7 @@ const empty = (msg) => `<section class="card"><div class="placeholder-note">${es
 // ---- boot + live polling ----
 (async () => {
   if (!EID) { document.getElementById('hero').innerHTML = empty('No match selected.'); return; }
+  document.getElementById('hero').innerHTML = '<div class="placeholder-note">Loading match…</div>';
   await loadHeader();
   if (!active) active = head?.status === 'notstarted' ? 'predict' : 'lineups';   // default by status
   renderTabs();

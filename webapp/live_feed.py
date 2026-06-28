@@ -33,23 +33,89 @@ _PROXY = os.environ.get("SOFASCORE_PROXY") or None
 _CACHE: dict[str, tuple[float, object]] = {}
 _LOCK = threading.Lock()
 
+# Pull-through cache mode (ATLASTRA_SOFA_CACHE=1): the cloud host is WAF-blocked
+# from SofaScore, so instead of fetching, _get serves from a cache that a
+# non-blocked machine fills. On a miss/stale it records the path in a queue; the
+# remote pusher polls the queue, fetches the path, and POSTs the JSON back.
+CACHE_MODE = os.environ.get("ATLASTRA_SOFA_CACHE") == "1"
+_PUSH_CACHE: dict[str, tuple[float, object]] = {}   # path -> (ts, data | None)
+_QUEUE: dict[str, float] = {}                        # path -> first-requested ts
+
+
+def _fetch_direct(path: str):
+    """Real SofaScore GET (only where SofaScore is reachable). Parsed JSON or None.
+    NO extra headers -- a bare browser-TLS request passes the bot challenge."""
+    try:
+        r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=25, proxy=_PROXY)
+        return r.json() if r.status_code == 200 else None
+    except Exception:  # noqa: BLE001 -- network/parse hiccup -> treat as no data
+        return None
+
 
 def _get(path: str, ttl: float):
     """Cached bare GET. Returns parsed JSON dict, or None on non-200 (e.g. a 404
-    heatmap for a player who never came on). NO extra headers -- see module docs."""
+    heatmap for a player who never came on)."""
     now = time.time()
+    if CACHE_MODE:                       # serve from pushed cache; queue misses
+        with _LOCK:
+            hit = _PUSH_CACHE.get(path)
+            if hit and now - hit[0] < ttl:
+                return hit[1]
+            _QUEUE[path] = _QUEUE.get(path, now)
+            return hit[1] if hit else None   # serve stale while the pusher refetches
     with _LOCK:
         hit = _CACHE.get(path)
         if hit and now - hit[0] < ttl:
             return hit[1]
-    try:
-        r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=25, proxy=_PROXY)
-        data = r.json() if r.status_code == 200 else None
-    except Exception:  # noqa: BLE001 -- network/parse hiccup -> treat as no data
-        data = None
+    data = _fetch_direct(path)
     with _LOCK:
         _CACHE[path] = (now, data)
     return data
+
+
+def queue_pending(limit: int = 40) -> list[str]:
+    """Paths the cloud server needs fetched (oldest first). Prunes stale requests."""
+    now = time.time()
+    with _LOCK:
+        for p in [p for p, t in _QUEUE.items() if now - t > 180]:
+            _QUEUE.pop(p, None)
+        return [p for p, _ in sorted(_QUEUE.items(), key=lambda kv: kv[1])][:limit]
+
+
+def prewarm(eid: int) -> None:
+    """Queue all of a match's core SofaScore paths at once (called when the match is
+    first opened) so the relay fetches them in one batch -- every tab is then ready
+    together instead of each tab triggering its own ~one-cycle wait. player-stats is
+    composed from these same paths, so it needs no separate entry."""
+    if not CACHE_MODE:
+        return
+    now = time.time()
+    with _LOCK:
+        for p in (f"/event/{eid}", f"/event/{eid}/lineups", f"/event/{eid}/incidents",
+                  f"/event/{eid}/statistics", f"/event/{eid}/shotmap"):
+            if p not in _PUSH_CACHE:
+                _QUEUE.setdefault(p, now)
+
+
+def queue_has(prefix: str) -> bool:
+    """True if some path under `prefix` is queued but not yet cached -- i.e. the
+    client should keep waiting (data is coming) rather than show 'unavailable'."""
+    if not CACHE_MODE:
+        return False
+    with _LOCK:
+        return any(p.startswith(prefix) and p not in _PUSH_CACHE for p in _QUEUE)
+
+
+def cache_put(items: list[dict]) -> int:
+    """Store pushed {path, body} responses and clear them from the queue."""
+    now = time.time()
+    with _LOCK:
+        for it in items or []:
+            p = it.get("path")
+            if p:
+                _PUSH_CACHE[p] = (now, it.get("body"))
+                _QUEUE.pop(p, None)
+    return len(items or [])
 
 
 def _num(d: dict, *keys):
