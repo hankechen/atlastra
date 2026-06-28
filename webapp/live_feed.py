@@ -97,6 +97,20 @@ def prewarm(eid: int) -> None:
                 _QUEUE.setdefault(p, now)
 
 
+def prewarm_team(tid: int) -> None:
+    """Queue a national team's direct paths at once. Without this only /team/{id}
+    is queued on the first call (national_team early-returns before the others), so
+    squad/results/fixtures would each lag a relay cycle behind the header."""
+    if not CACHE_MODE:
+        return
+    now = time.time()
+    with _LOCK:
+        for p in (f"/team/{tid}", f"/team/{tid}/players",
+                  f"/team/{tid}/events/last/0", f"/team/{tid}/events/next/0"):
+            if p not in _PUSH_CACHE:
+                _QUEUE.setdefault(p, now)
+
+
 def queue_has(prefix: str) -> bool:
     """True if some path under `prefix` is queued but not yet cached -- i.e. the
     client should keep waiting (data is coming) rather than show 'unavailable'."""

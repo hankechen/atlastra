@@ -66,18 +66,7 @@ function renderSquad(squad) {
 
 const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-(async () => {
-  if (!ID) { document.getElementById('natName').textContent = 'No team selected'; return; }
-  // The deployed server fetches this from SofaScore via a remote scraper on demand,
-  // so the first hit may be {available:false, pending:true} -- wait for the relay.
-  const url = '/api/national_team?id=' + encodeURIComponent(ID);
-  document.getElementById('natName').textContent = 'Loading…';
-  let d = await api(url);
-  for (let i = 0; i < 8 && d && d.available === false && d.pending; i++) {
-    await new Promise(r => setTimeout(r, 3000));
-    d = await api(url);
-  }
-  if (!d.available) { document.getElementById('natName').textContent = 'Team not found'; return; }
+function render(d) {
   const flag = (typeof HOME_NATION !== 'undefined' && HOME_NATION[d.name]
     ? flagEmoji(HOME_NATION[d.name]) : flagISO2(d.country_code)) || '';
   document.getElementById('crumb').textContent = d.name;
@@ -89,4 +78,26 @@ const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</
   document.getElementById('fixtures').innerHTML =
     d.fixtures.length ? d.fixtures.map(r => eventRow(r, true)).join('') : '<div class="muted">No upcoming fixtures.</div>';
   renderSquad(d.squad);
+}
+
+(async () => {
+  if (!ID) { document.getElementById('natName').textContent = 'No team selected'; return; }
+  // On the deployed server this is relay-fetched from SofaScore on demand: the header
+  // arrives first, then squad/results/fixtures, then the latest XI -- each a relay
+  // cycle apart. Wait for availability, then keep refreshing (re-rendering) until the
+  // sub-data is all in.
+  const url = '/api/national_team?id=' + encodeURIComponent(ID);
+  document.getElementById('natName').textContent = 'Loading…';
+  let d = await api(url);
+  for (let i = 0; i < 8 && d && d.available === false && d.pending; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    d = await api(url);
+  }
+  if (!d.available) { document.getElementById('natName').textContent = 'Team not found'; return; }
+  render(d);
+  for (let i = 0; i < 8 && (!d.squad.length || !d.latest_xi); i++) {
+    await new Promise(r => setTimeout(r, 3500));
+    const n = await api(url).catch(() => null);
+    if (n && n.available) { d = n; render(d); }
+  }
 })();

@@ -173,6 +173,7 @@ def api(path: str, q: dict) -> dict | list:
         return r
     if path == "/api/national_team":          # SofaScore live proxy (no DB)
         tid = int(q.get("id", [0])[0])
+        live_feed.prewarm_team(tid)           # batch-queue squad/results/fixtures with the header
         r = live_feed.national_team(tid)
         if isinstance(r, dict) and r.get("available") is False:
             r["pending"] = live_feed.queue_has(f"/team/{tid}")
