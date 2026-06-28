@@ -1,4 +1,4 @@
-renderSidebar('Rankings & Awards');
+renderSidebar('Rankings');
 attachSearchDropdown(document.getElementById('searchBox'));
 
 const MODES = [['position', 'By Position'], ['season', 'Best Seasons (All-Time)']];

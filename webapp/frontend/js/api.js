@@ -482,7 +482,7 @@ const NAV_MAIN = [
 ];
 const NAV_ANALYTICS = [
   // leaderboards
-  ['Rankings & Awards', 'award', '/rankings.html'],
+  ['Rankings', 'rankings', '/rankings.html'],
   ['Stat Leaders', 'rankings', '/leaders.html'],
   ['Big Game Index', 'biggame', '/biggame.html'],
   // discovery & tools
