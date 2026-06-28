@@ -128,7 +128,5 @@ function render() {
 })();
 
 // search -> jump to unified search results on Enter
-document.getElementById('searchBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.value.trim())
-    location.href = '/search.html?q=' + encodeURIComponent(e.target.value.trim());
-});
+// topbar search = the global player/team/match dropdown (same as Home)
+attachSearchDropdown(document.getElementById('searchBox'));

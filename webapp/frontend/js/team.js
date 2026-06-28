@@ -93,6 +93,5 @@ function ordinal(n) {
 
 const params = new URLSearchParams(location.search);
 load(params.get('name') || 'Arsenal');
-document.getElementById('searchBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.value.trim()) location.href = '/team.html?name=' + encodeURIComponent(e.target.value.trim());
-});
+// topbar search = the global player/team/match dropdown (same as Home)
+attachSearchDropdown(document.getElementById('searchBox'));

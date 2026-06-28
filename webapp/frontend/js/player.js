@@ -340,9 +340,7 @@ const careerStatVal = () => document.getElementById('careerStat').value;
 load(current, 'xa', params.get('season'));      // ?season=2324 deep-links a season
 document.getElementById('careerStat').onchange = (e) => load(current, e.target.value, curSeason);
 document.getElementById('seasonSel').onchange = (e) => load(current, careerStatVal(), e.target.value);
-document.getElementById('searchBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.value.trim()) {
-    current = e.target.value.trim(); curSeason = null; load(current, careerStatVal());
-  }
-});
+// topbar search = the global player/team/match dropdown (same as Home), not an
+// Enter-to-reload-this-profile box, so search is consistent across the app.
+attachSearchDropdown(document.getElementById('searchBox'));
 

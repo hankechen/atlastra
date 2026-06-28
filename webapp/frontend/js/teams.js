@@ -148,6 +148,5 @@ async function loadNational() {
 })();
 
 // search -> jump to a team page on Enter
-document.getElementById('searchBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.value.trim()) location.href = teamHref(e.target.value.trim());
-});
+// topbar search = the global player/team/match dropdown (same as Home)
+attachSearchDropdown(document.getElementById('searchBox'));
