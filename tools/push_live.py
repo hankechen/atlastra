@@ -34,6 +34,8 @@ LIVE_POLL = int(os.environ.get("PUSH_LIVE_POLL", "60"))
 IDLE_POLL = int(os.environ.get("PUSH_IDLE_POLL", "300"))
 QUEUE_POLL = int(os.environ.get("PUSH_QUEUE_POLL", "3"))   # on-demand match-detail relay interval
 WARM_LIVE = int(os.environ.get("PUSH_WARM_LIVE", "5"))     # pre-warm this many in-play matches' detail
+WARM_EVERY = int(os.environ.get("PUSH_WARM_EVERY", "60"))  # how often to re-warm live matches
+_WARMED_CLUBS = set()                                      # player ids whose (static) club is cached
 WC_EVERY = int(os.environ.get("PUSH_WC_EVERY", "900"))     # World Cup leaders/standings refresh
 WC_SEASON = os.environ.get("PUSH_WC_SEASON", "2026")       # current edition to keep fresh
 
@@ -62,18 +64,51 @@ def _fetch(path: str):
 
 
 def _warm_matches(eids):
-    """Pre-fetch + push the core detail for these matches so opening them on the site
-    is INSTANT (no waiting for the on-demand relay). Same path set the server batch-
-    queues when a match is opened."""
+    """Pre-fetch + push detail for these matches so they open INSTANTLY on the site --
+    the core match detail (header/lineups/timeline/stats/shotmap) AND each starter's
+    club (static, fetched once) + heatmap, so the lineup player modal has no on-click
+    lag. Returns the number of paths warmed."""
     items = []
     for eid in eids:
+        lu = None
         for suf in ("", "/lineups", "/incidents", "/statistics", "/shotmap"):
-            items.append({"path": f"/event/{eid}{suf}", "body": _fetch(f"/event/{eid}{suf}")})
-    if items:
+            body = _fetch(f"/event/{eid}{suf}")
+            if suf == "/lineups":
+                lu = body
+            items.append({"path": f"/event/{eid}{suf}", "body": body})
+        for side in ("home", "away"):                     # starters' club + heatmap
+            for pl in ((lu or {}).get(side) or {}).get("players", []) or []:
+                if pl.get("substitute"):
+                    continue
+                pid = (pl.get("player") or {}).get("id")
+                if not pid:
+                    continue
+                hp = f"/event/{eid}/player/{pid}/heatmap"
+                items.append({"path": hp, "body": _fetch(hp)})
+                if pid not in _WARMED_CLUBS:              # club is static -> fetch once
+                    items.append({"path": f"/player/{pid}", "body": _fetch(f"/player/{pid}")})
+                    _WARMED_CLUBS.add(pid)
+    for i in range(0, len(items), 30):                    # push in modest chunks
         try:
-            _post("/api/ingest/cache", {"items": items})
+            _post("/api/ingest/cache", {"items": items[i:i + 30]})
         except Exception:                                 # noqa: BLE001
             pass
+    return len(items)
+
+
+def _service_warm():
+    """Keep the in-play matches hot (core detail + starters' club/heatmap) so they --
+    and their player modals -- open instantly. Independent of the live-score push so
+    scores stay snappy."""
+    while True:
+        try:
+            eids = [r["event_id"] for r in live.fetch_live_only()][:WARM_LIVE]
+            if eids:
+                n = _warm_matches(eids)
+                print(f"{datetime.now():%H:%M:%S} warmed {len(eids)} live match(es) ({n} paths)", flush=True)
+        except Exception as e:                            # noqa: BLE001
+            print(f"{datetime.now():%H:%M:%S} warm error: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(WARM_EVERY)
 
 
 def _service_queue():
@@ -114,6 +149,7 @@ def main():
     if not TOKEN:
         sys.exit("ATLASTRA_INGEST_TOKEN is required (must match the server).")
     threading.Thread(target=_service_queue, daemon=True).start()   # match-detail relay
+    threading.Thread(target=_service_warm, daemon=True).start()    # pre-warm live matches + players
     threading.Thread(target=_service_wc, daemon=True).start()      # World Cup hub data
     last_full = 0.0
     n_live = 0
@@ -127,13 +163,6 @@ def main():
             status, resp = _push(rows, prune=full)
             print(f"{datetime.now():%H:%M:%S} {'FULL' if full else 'live'} "
                   f"pushed {len(rows)} rows ({n_live} in-play) -> {status} {resp}", flush=True)
-            # pre-warm the in-play matches' detail so they open instantly on the site
-            if WARM_LIVE:
-                live_eids = [r["event_id"] for r in rows
-                             if r.get("status_type") == "inprogress"][:WARM_LIVE]
-                if live_eids:
-                    _warm_matches(live_eids)
-                    print(f"{datetime.now():%H:%M:%S} warmed {len(live_eids)} live match(es)", flush=True)
         except Exception as e:                            # noqa: BLE001
             print(f"{datetime.now():%H:%M:%S} push error: {type(e).__name__}: {str(e)[:140]}", flush=True)
         time.sleep(LIVE_POLL if n_live else IDLE_POLL)
