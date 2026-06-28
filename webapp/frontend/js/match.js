@@ -167,7 +167,17 @@ async function loadPrediction() {
   const oddsRows = d.books.map((b, i) => `<tr><td class="tl">Bookmaker ${i + 1}</td>
     <td>${b.odds.home}</td><td>${b.odds.draw}</td><td>${b.odds.away}</td></tr>`).join('');
   const liveOdds = head?.status === 'inprogress';
-  body().innerHTML = `<section class="card">
+  const s = d.score;
+  const resLabel = s && (s.result === 'draw' ? 'Draw' : `${teams[s.result]} win`);
+  const aspCard = s ? `<section class="card asp-card">
+      <div class="card-h"><h3>Atlastra Prediction</h3><span class="see">${s.live ? '<span class="live">● projected final</span>' : 'most likely scoreline'}</span></div>
+      <div class="asp">
+        <span class="asp-tm">${esc(teams.home)}</span>
+        <span class="asp-sc">${s.home}<span class="asp-dash">–</span>${s.away}</span>
+        <span class="asp-tm">${esc(teams.away)}</span></div>
+      <div class="asp-note">🔮 Atlastra predicts ${s.live ? 'this finishes' : 'a final'} <b>${esc(teams.home)} ${s.home}–${s.away} ${esc(teams.away)}</b> · ${esc(resLabel)} (${s.result_conf}% likely)</div>
+    </section>` : '';
+  body().innerHTML = aspCard + `<section class="card">
       <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live odds</span> · ' : ''}${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}</span></div>
       <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% implied</span></div>
       <div class="pr-bar">${seg('home', 'h')}${seg('draw', 'd')}${seg('away', 'a')}</div>

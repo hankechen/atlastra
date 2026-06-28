@@ -14,6 +14,7 @@ Responses are cached in-memory with a short TTL so the dashboard can poll every
 30-60s without hammering SofaScore: live data (header/stats/timeline) gets a short
 TTL, mostly-static data (lineups/shotmap/player stats/heatmap) a longer one.
 """
+import math
 import os
 import sys
 import threading
@@ -533,6 +534,69 @@ def prediction(eid: int) -> dict:
     return {"available": True, "n_books": len(books), "consensus": cons,
             "predicted": max(cons, key=cons.get),
             "books": [{"odds": b["odds"]} for b in books]}
+
+
+# ---- Atlastra score prediction ----------------------------------------------
+def _pois(k: int, lam: float) -> float:
+    return math.exp(-lam) * lam ** k / math.factorial(k)
+
+
+def score_prediction(eid: int, consensus: dict | None) -> dict | None:
+    """Atlastra's most-likely final scoreline. A bivariate-Poisson model: fit the two
+    teams' expected goals so the implied win/draw/loss matches the market 1X2
+    (consensus), assuming a typical ~2.7-goal game, then take the modal scoreline. For
+    a LIVE match it projects forward -- scales the remaining expected goals by the time
+    left and adds them to the current score, so the call updates as the game unfolds."""
+    if not consensus:
+        return None
+    p_home = (consensus.get("home") or 0) / 100.0
+    p_away = (consensus.get("away") or 0) / 100.0
+    if p_home <= 0 and p_away <= 0:
+        return None
+    TG = 2.7                                          # baseline total expected goals
+    # fit the goal supremacy S (home_xg - away_xg) to the market win/loss split
+    best_s, best_err = 0.0, 9e9
+    s = -3.0
+    while s <= 3.0001:
+        lh, la = max((TG + s) / 2, 0.04), max((TG - s) / 2, 0.04)
+        mh = [_pois(h, lh) for h in range(8)]
+        ma = [_pois(a, la) for a in range(8)]
+        ph = sum(mh[h] * ma[a] for h in range(8) for a in range(8) if h > a)
+        pa = sum(mh[h] * ma[a] for h in range(8) for a in range(8) if h < a)
+        err = (ph - p_home) ** 2 + (pa - p_away) ** 2
+        if err < best_err:
+            best_err, best_s = err, s
+        s += 0.1
+    lh, la = max((TG + best_s) / 2, 0.04), max((TG - best_s) / 2, 0.04)
+
+    hdr = header(eid)
+    live = hdr.get("status") == "inprogress" and hdr.get("home_score") is not None
+    base_h = base_a = 0
+    if live:
+        minute = hdr.get("minute") or 0
+        rem = max(0.04, (94 - min(minute, 94)) / 90.0)   # fraction of match left (+stoppage)
+        lh, la = lh * rem, la * rem
+        base_h, base_a = hdr.get("home_score") or 0, hdr.get("away_score") or 0
+
+    mh = [_pois(h, lh) for h in range(7)]
+    ma = [_pois(a, la) for a in range(7)]
+    res = lambda h, a: "home" if h > a else "away" if a > h else "draw"  # noqa: E731
+    pr = {"home": 0.0, "draw": 0.0, "away": 0.0}
+    dist = []
+    for h in range(7):
+        for a in range(7):
+            p = mh[h] * ma[a]
+            fh, fa = base_h + h, base_a + a
+            pr[res(fh, fa)] += p
+            dist.append((p, fh, fa))
+    fav = max(pr, key=pr.get)
+    # the headline score is the most likely EXACT score consistent with that favoured
+    # result -- so a clear away favourite reads as e.g. 0-1, not a 1-1 draw that merely
+    # happens to be the single most probable cell.
+    bp, bh, ba = max((c for c in dist if res(c[1], c[2]) == fav), key=lambda x: x[0])
+    return {"home": bh, "away": ba, "result": fav,
+            "result_conf": round(pr[fav] * 100), "confidence": round(bp * 100),
+            "live": live}
 
 
 # ---- national team (squad + recent results + fixtures) ----------------------

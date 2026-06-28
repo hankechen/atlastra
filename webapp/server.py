@@ -159,7 +159,10 @@ def match_api(path: str, q: dict) -> dict:
     if path == "/api/match/heatmap":
         return live_feed.player_heatmap(eid, int(q.get("player_id", [0])[0]))
     if path == "/api/match/prediction":
-        return live_feed.prediction(eid)
+        d = live_feed.prediction(eid)
+        if d.get("available"):
+            d["score"] = live_feed.score_prediction(eid, d.get("consensus"))
+        return d
     raise KeyError(path)
 
 

@@ -767,6 +767,15 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .km-row.km-goal{background:rgba(85,112,240,.10)}
 .km-row.km-goal .km-tx{font-weight:700}
 .km-row.km-red{background:rgba(240,80,80,.08)}
+.asp-card{background:linear-gradient(135deg,rgba(85,112,240,.12),rgba(125,92,245,.05))}
+.asp{display:flex;align-items:center;justify-content:center;gap:14px;padding:14px 4px 6px}
+.asp-tm{flex:1;font-weight:700;font-size:15px}
+.asp-tm:first-child{text-align:right}
+.asp-tm:last-child{text-align:left}
+.asp-sc{font-size:46px;font-weight:800;letter-spacing:1px;white-space:nowrap;background:linear-gradient(135deg,#6d8bff,#9a7cff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.asp-dash{margin:0 9px;-webkit-text-fill-color:var(--muted);color:var(--muted)}
+.asp-note{text-align:center;color:var(--muted);font-size:12.5px;padding:2px 4px 6px}
+.asp-note b{color:var(--text)}
 
 /* player stats table */
 .pl-tbl th{cursor:pointer;white-space:nowrap}
