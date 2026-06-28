@@ -172,9 +172,17 @@ def api(path: str, q: dict) -> dict | list:
                 pass
         return r
     if path == "/api/national_team":          # SofaScore live proxy (no DB)
-        return live_feed.national_team(int(q.get("id", [0])[0]))
+        tid = int(q.get("id", [0])[0])
+        r = live_feed.national_team(tid)
+        if isinstance(r, dict) and r.get("available") is False:
+            r["pending"] = live_feed.queue_has(f"/team/{tid}")
+        return r
     if path == "/api/player_club":
-        return live_feed.player_club(int(q.get("id", [0])[0]))
+        pid = int(q.get("id", [0])[0])
+        r = live_feed.player_club(pid)
+        if isinstance(r, dict) and r.get("available") is False:
+            r["pending"] = live_feed.queue_has(f"/player/{pid}")
+        return r
     if path == "/api/scout_report":           # gather data (DB), then generate via Claude
         with SoccerDB(read_only=DB_READ_ONLY) as d:
             data = d.web_player(q.get("name", ["Pedri"])[0], q.get("career_stat", ["xa"])[0],

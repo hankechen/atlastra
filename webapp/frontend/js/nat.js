@@ -68,7 +68,15 @@ const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</
 
 (async () => {
   if (!ID) { document.getElementById('natName').textContent = 'No team selected'; return; }
-  const d = await api('/api/national_team?id=' + encodeURIComponent(ID));
+  // The deployed server fetches this from SofaScore via a remote scraper on demand,
+  // so the first hit may be {available:false, pending:true} -- wait for the relay.
+  const url = '/api/national_team?id=' + encodeURIComponent(ID);
+  document.getElementById('natName').textContent = 'Loading…';
+  let d = await api(url);
+  for (let i = 0; i < 8 && d && d.available === false && d.pending; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    d = await api(url);
+  }
   if (!d.available) { document.getElementById('natName').textContent = 'Team not found'; return; }
   const flag = (typeof HOME_NATION !== 'undefined' && HOME_NATION[d.name]
     ? flagEmoji(HOME_NATION[d.name]) : flagISO2(d.country_code)) || '';
