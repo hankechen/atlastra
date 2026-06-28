@@ -18,8 +18,8 @@ const heatCache = {};                       // player_id -> {points}
 async function A(p) {
   const url = p + (p.includes('?') ? '&' : '?') + 'id=' + encodeURIComponent(EID);
   let r = await api(url);
-  for (let i = 0; i < 8 && r && r.available === false && r.pending; i++) {
-    await new Promise(res => setTimeout(res, 3000));
+  for (let i = 0; i < 12 && r && r.available === false && r.pending; i++) {
+    await new Promise(res => setTimeout(res, 2000));
     r = await api(url);
   }
   return r;

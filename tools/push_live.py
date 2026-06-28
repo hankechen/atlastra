@@ -32,7 +32,8 @@ TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN")
 FULL_EVERY = int(os.environ.get("PUSH_FULL_EVERY", "1800"))
 LIVE_POLL = int(os.environ.get("PUSH_LIVE_POLL", "60"))
 IDLE_POLL = int(os.environ.get("PUSH_IDLE_POLL", "300"))
-QUEUE_POLL = int(os.environ.get("PUSH_QUEUE_POLL", "8"))   # match-detail relay interval
+QUEUE_POLL = int(os.environ.get("PUSH_QUEUE_POLL", "3"))   # on-demand match-detail relay interval
+WARM_LIVE = int(os.environ.get("PUSH_WARM_LIVE", "5"))     # pre-warm this many in-play matches' detail
 WC_EVERY = int(os.environ.get("PUSH_WC_EVERY", "900"))     # World Cup leaders/standings refresh
 WC_SEASON = os.environ.get("PUSH_WC_SEASON", "2026")       # current edition to keep fresh
 
@@ -58,6 +59,21 @@ def _fetch(path: str):
         return live._get(path)
     except Exception:                                     # noqa: BLE001
         return None
+
+
+def _warm_matches(eids):
+    """Pre-fetch + push the core detail for these matches so opening them on the site
+    is INSTANT (no waiting for the on-demand relay). Same path set the server batch-
+    queues when a match is opened."""
+    items = []
+    for eid in eids:
+        for suf in ("", "/lineups", "/incidents", "/statistics", "/shotmap"):
+            items.append({"path": f"/event/{eid}{suf}", "body": _fetch(f"/event/{eid}{suf}")})
+    if items:
+        try:
+            _post("/api/ingest/cache", {"items": items})
+        except Exception:                                 # noqa: BLE001
+            pass
 
 
 def _service_queue():
@@ -111,6 +127,13 @@ def main():
             status, resp = _push(rows, prune=full)
             print(f"{datetime.now():%H:%M:%S} {'FULL' if full else 'live'} "
                   f"pushed {len(rows)} rows ({n_live} in-play) -> {status} {resp}", flush=True)
+            # pre-warm the in-play matches' detail so they open instantly on the site
+            if WARM_LIVE:
+                live_eids = [r["event_id"] for r in rows
+                             if r.get("status_type") == "inprogress"][:WARM_LIVE]
+                if live_eids:
+                    _warm_matches(live_eids)
+                    print(f"{datetime.now():%H:%M:%S} warmed {len(live_eids)} live match(es)", flush=True)
         except Exception as e:                            # noqa: BLE001
             print(f"{datetime.now():%H:%M:%S} push error: {type(e).__name__}: {str(e)[:140]}", flush=True)
         time.sleep(LIVE_POLL if n_live else IDLE_POLL)
