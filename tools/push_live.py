@@ -7,7 +7,7 @@ the rows to the server's /api/ingest/live endpoint, so the deployed app shows li
 scores + a real-time bracket without the server ever touching SofaScore.
 
 Run it wherever SofaScore is reachable. Config via env:
-    ATLASTRA_SERVER         server base URL   (default https://16-59-15-84.sslip.io)
+    ATLASTRA_SERVER         server base URL   (default https://atlastra.duckdns.org)
     ATLASTRA_INGEST_TOKEN   shared secret (must match the server's)   [required]
     PUSH_FULL_EVERY         full window scrape interval, s   (default 1800)
     PUSH_LIVE_POLL          in-play overlay interval while live, s   (default 60)
@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline import load_live as live   # noqa: E402  (scrapes SofaScore via tls_requests)
 
-SERVER = (os.environ.get("ATLASTRA_SERVER") or "https://16-59-15-84.sslip.io").rstrip("/")
+SERVER = (os.environ.get("ATLASTRA_SERVER") or "https://atlastra.duckdns.org").rstrip("/")
 TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN")
 FULL_EVERY = int(os.environ.get("PUSH_FULL_EVERY", "1800"))
 LIVE_POLL = int(os.environ.get("PUSH_LIVE_POLL", "60"))
