@@ -122,7 +122,8 @@ def venue(eid: int):
     if not v:
         return None
     parts = [(v.get("stadium") or {}).get("name") or v.get("name"),
-             (v.get("city") or {}).get("name")]
+             (v.get("city") or {}).get("name"),
+             (v.get("country") or {}).get("name")]
     return " · ".join(p for p in parts if p) or None
 
 
