@@ -17,7 +17,7 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>ATLASTRA_INGEST_TOKEN</key><string>REPLACE_WITH_TOKEN</string>
-    <key>ATLASTRA_SERVER</key><string>https://atlastra.duckdns.org</string>
+    <key>ATLASTRA_SERVER</key><string>https://16-59-15-84.sslip.io</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

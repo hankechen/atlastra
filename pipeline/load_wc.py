@@ -27,6 +27,7 @@ import tls_requests
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config import DB_PATH, SOFASCORE_BASE  # noqa: E402
+from analytics.queries import connect_retry  # noqa: E402
 import duckdb  # noqa: E402
 
 WC = 16                  # SofaScore uniqueTournament id for the FIFA World Cup
@@ -98,18 +99,19 @@ def _cc(team: dict) -> str | None:
     return ((team.get("country") or {}).get("alpha2") if team.get("national") else None)
 
 
-def main() -> None:
+def fetch_wc_rows(only_season: str | None = None) -> dict:
+    """Scrape the World Cup matches/standings/leaders into row lists (no DB writes),
+    so a non-blocked machine can fetch and push them to a WAF-blocked server. Pass
+    only_season (e.g. '2026') to refresh just the current edition -- historical World
+    Cups don't change, so a periodic push only needs the live one."""
     seasons = (_get(f"/unique-tournament/{WC}/seasons") or {}).get("seasons") or []
     wanted = []
     for s in seasons:
         yr = (s.get("year") or "").strip()
-        if yr.isdigit() and int(yr) >= MIN_YEAR:
+        if yr.isdigit() and int(yr) >= MIN_YEAR and (only_season is None or yr == only_season):
             wanted.append((yr, s["id"]))
     wanted.sort()
 
-    # Fetch EVERYTHING first (slow network), then write in one brief transaction —
-    # keeps the DuckDB write lock held for a moment, not the whole scrape, so it
-    # doesn't fight the live server / refresh daemon for the file.
     match_rows, stand_rows, leader_rows = [], [], []
     for season, sid in wanted:
         events: dict[int, dict] = {}
@@ -163,22 +165,45 @@ def main() -> None:
                                     tm.get("name"), st.get(key), st.get("appearances")))
                 lrows += 1
         print(f"  {season}: {len(events)} matches, {srows} standings, {lrows} leader rows")
+    return {"matches": match_rows, "standings": stand_rows, "leaders": leader_rows}
 
-    con = duckdb.connect(str(DB_PATH))
-    con.execute("DROP TABLE IF EXISTS wc_matches")   # rebuilt wholesale; schema may change
-    con.execute(MATCH_DDL)
-    con.execute(STAND_DDL)
-    con.execute(LEADERS_DDL)
-    con.execute("DELETE FROM wc_standings")
-    con.execute("DELETE FROM wc_leaders")
-    con.executemany(
-        "INSERT OR REPLACE INTO wc_matches VALUES (?,?,to_timestamp(?),?,?,?,?,?,?,?,?,?,?,?)",
-        match_rows)
-    con.executemany("INSERT INTO wc_standings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", stand_rows)
-    con.executemany("INSERT INTO wc_leaders VALUES (?,?,?,?,?,?,?,?)", leader_rows)
-    total = con.execute("SELECT COUNT(*) FROM wc_matches").fetchone()[0]
-    con.close()
-    print(f"\nwc_matches: {total} rows across {len(wanted)} World Cups")
+
+def write_wc_rows(data: dict) -> dict:
+    """Write pushed/scraped WC rows. Season-scoped: replaces only the seasons present
+    in `data` (so pushing just 2026 leaves historical World Cups intact)."""
+    matches = data.get("matches") or []
+    standings = data.get("standings") or []
+    leaders = data.get("leaders") or []
+    seasons = ({str(r[1]) for r in matches} | {str(r[0]) for r in standings}
+               | {str(r[0]) for r in leaders})
+    con = connect_retry(DB_PATH, read_only=False)
+    try:
+        con.execute(MATCH_DDL)
+        con.execute(STAND_DDL)
+        con.execute(LEADERS_DDL)
+        for s in seasons:
+            con.execute("DELETE FROM wc_matches WHERE season = ?", [s])
+            con.execute("DELETE FROM wc_standings WHERE season = ?", [s])
+            con.execute("DELETE FROM wc_leaders WHERE season = ?", [s])
+        if matches:
+            con.executemany(
+                "INSERT OR REPLACE INTO wc_matches VALUES (?,?,to_timestamp(?),?,?,?,?,?,?,?,?,?,?,?)",
+                matches)
+        if standings:
+            con.executemany("INSERT INTO wc_standings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", standings)
+        if leaders:
+            con.executemany("INSERT INTO wc_leaders VALUES (?,?,?,?,?,?,?,?)", leaders)
+    finally:
+        con.close()
+    return {"matches": len(matches), "standings": len(standings),
+            "leaders": len(leaders), "seasons": sorted(seasons)}
+
+
+def main() -> None:
+    data = fetch_wc_rows()
+    write_wc_rows(data)
+    print(f"\nwc: {len(data['matches'])} matches, {len(data['standings'])} standings, "
+          f"{len(data['leaders'])} leader rows")
 
 
 if __name__ == "__main__":

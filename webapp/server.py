@@ -404,6 +404,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "stored": live_feed.cache_put(b.get("items") or [])})
             return
+        if u.path == "/api/ingest/wc":                 # World Cup matches/standings/leaders pushed in
+            if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
+                self._json({"error": "unauthorized"}, 401)
+                return
+            from pipeline import load_wc
+            self._json({"ok": True, **load_wc.write_wc_rows(b.get("data") or {})})
+            return
         self._json({"error": "Not found"}, 404)
 
     def do_GET(self):

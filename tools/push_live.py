@@ -7,7 +7,7 @@ the rows to the server's /api/ingest/live endpoint, so the deployed app shows li
 scores + a real-time bracket without the server ever touching SofaScore.
 
 Run it wherever SofaScore is reachable. Config via env:
-    ATLASTRA_SERVER         server base URL   (default https://atlastra.duckdns.org)
+    ATLASTRA_SERVER         server base URL   (default https://16-59-15-84.sslip.io)
     ATLASTRA_INGEST_TOKEN   shared secret (must match the server's)   [required]
     PUSH_FULL_EVERY         full window scrape interval, s   (default 1800)
     PUSH_LIVE_POLL          in-play overlay interval while live, s   (default 60)
@@ -27,12 +27,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline import load_live as live   # noqa: E402  (scrapes SofaScore via tls_requests)
 
-SERVER = (os.environ.get("ATLASTRA_SERVER") or "https://atlastra.duckdns.org").rstrip("/")
+SERVER = (os.environ.get("ATLASTRA_SERVER") or "https://16-59-15-84.sslip.io").rstrip("/")
 TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN")
 FULL_EVERY = int(os.environ.get("PUSH_FULL_EVERY", "1800"))
 LIVE_POLL = int(os.environ.get("PUSH_LIVE_POLL", "60"))
 IDLE_POLL = int(os.environ.get("PUSH_IDLE_POLL", "300"))
 QUEUE_POLL = int(os.environ.get("PUSH_QUEUE_POLL", "8"))   # match-detail relay interval
+WC_EVERY = int(os.environ.get("PUSH_WC_EVERY", "900"))     # World Cup leaders/standings refresh
+WC_SEASON = os.environ.get("PUSH_WC_SEASON", "2026")       # current edition to keep fresh
 
 
 def _post(endpoint: str, payload: dict):
@@ -77,10 +79,26 @@ def _service_queue():
         time.sleep(QUEUE_POLL)
 
 
+def _service_wc():
+    """Periodically re-scrape the current World Cup (matches/standings/stat leaders)
+    and push it -- those are warehouse tables the server can't refresh itself."""
+    from pipeline import load_wc
+    while True:
+        try:
+            data = load_wc.fetch_wc_rows(WC_SEASON)
+            status, r = _post("/api/ingest/wc", {"data": data})
+            print(f"{datetime.now():%H:%M:%S} WC pushed {len(data['leaders'])} leaders / "
+                  f"{len(data['matches'])} matches / {len(data['standings'])} standings -> {status}", flush=True)
+        except Exception as e:                            # noqa: BLE001
+            print(f"{datetime.now():%H:%M:%S} WC push error: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(WC_EVERY)
+
+
 def main():
     if not TOKEN:
         sys.exit("ATLASTRA_INGEST_TOKEN is required (must match the server).")
     threading.Thread(target=_service_queue, daemon=True).start()   # match-detail relay
+    threading.Thread(target=_service_wc, daemon=True).start()      # World Cup hub data
     last_full = 0.0
     n_live = 0
     while True:
