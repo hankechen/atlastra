@@ -89,9 +89,8 @@ async function render() {
     players.length ? players.map(draw).join('') : `<div class="empty">No players found.</div>`;
 }
 
-document.getElementById('searchBox').addEventListener('input', (e) => {
-  search = e.target.value.trim();
-  clearTimeout(timer); timer = setTimeout(render, 200);
-});
+// topbar search = the global player/team/match dropdown (same as Home), not a
+// directory filter, so the search behaves consistently across the app.
+attachSearchDropdown(document.getElementById('searchBox'));
 
 render();
