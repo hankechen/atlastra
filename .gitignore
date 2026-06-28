@@ -16,3 +16,4 @@ downloaded_files/
 # Generated reports (regenerable via analytics/story.py)
 reports/
 data/scout_reports.sqlite
+logs/

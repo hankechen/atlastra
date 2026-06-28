@@ -302,5 +302,41 @@ def update_live_overlay() -> int:
     return len(rows)
 
 
+def ingest_rows(rows: list[dict], prune: bool = False) -> int:
+    """Upsert live_matches rows that were scraped ELSEWHERE and pushed in (the cloud
+    server can't reach SofaScore, so a non-blocked machine scrapes and POSTs the
+    rows here). Server stamps updated_at so the feed's freshness reflects ingest
+    time. With prune=True also drops rows outside the live window (use on the full
+    push, not the in-play overlay push). Returns the in-play count."""
+    con = connect_retry(DB_PATH, read_only=False)
+    try:
+        con.execute(DDL)
+        if rows:
+            ua = datetime.now()
+            clean = []
+            for r in rows:
+                r = {k: r.get(k) for k in COLS}
+                r["updated_at"] = ua
+                clean.append(r)
+            df = pd.DataFrame(clean)[COLS]
+            con.register("live_df", df)
+            assigns = ", ".join(f"{c}=excluded.{c}" for c in COLS if c != "event_id")
+            con.execute(f"INSERT INTO live_matches ({','.join(COLS)}) "
+                        f"SELECT {','.join(COLS)} FROM live_df "
+                        f"ON CONFLICT (event_id) DO UPDATE SET {assigns}")
+            con.unregister("live_df")
+        if prune:
+            now = int(time.time())
+            lo = now - (LIVE_DAYS_BACK + 1) * 86400
+            hi = now + (LIVE_DAYS_AHEAD + 1) * 86400
+            con.execute("DELETE FROM live_matches WHERE start_timestamp IS NOT NULL "
+                        "AND (start_timestamp < ? OR start_timestamp > ?)", [lo, hi])
+        n_live = con.execute("SELECT count(*) FILTER (WHERE status_type='inprogress') "
+                             "FROM live_matches").fetchone()[0]
+    finally:
+        con.close()
+    return n_live
+
+
 if __name__ == "__main__":
     load_live()

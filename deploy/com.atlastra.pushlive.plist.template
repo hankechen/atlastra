@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS LaunchAgent: scrape SofaScore locally and push the live feed to the
+     Atlastra server. Install: replace REPLACE_WITH_TOKEN, copy to
+     ~/Library/LaunchAgents/com.atlastra.pushlive.plist, then:
+       launchctl load -w ~/Library/LaunchAgents/com.atlastra.pushlive.plist
+     Stop:  launchctl unload ~/Library/LaunchAgents/com.atlastra.pushlive.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.atlastra.pushlive</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/hanke/soccer-analytics/venv/bin/python3</string>
+    <string>-m</string><string>tools.push_live</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/hanke/soccer-analytics</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ATLASTRA_INGEST_TOKEN</key><string>REPLACE_WITH_TOKEN</string>
+    <key>ATLASTRA_SERVER</key><string>https://16-59-15-84.sslip.io</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/hanke/soccer-analytics/logs/pushlive.log</string>
+  <key>StandardErrorPath</key><string>/Users/hanke/soccer-analytics/logs/pushlive.log</string>
+</dict>
+</plist>

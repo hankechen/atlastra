@@ -68,7 +68,11 @@ PORT = 8000
 # feed). With the refresher off, stay read-only so other processes can use the
 # warehouse concurrently.
 LIVE_REFRESH = os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1"
-DB_READ_ONLY = not LIVE_REFRESH
+# Live data can instead be PUSHED in from a machine that can reach SofaScore (this
+# host's datacenter IP is bot-blocked). When an ingest token is set, the server
+# must be read-write to accept those writes even with the local refresher off.
+INGEST_TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN") or None
+DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN)
 
 
 def _finite(o):
@@ -363,6 +367,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Invalid submission."}, 400)
                 return
             self._json(auth.submit_score(game, period, user["id"], user["username"], score))
+            return
+        if u.path == "/api/ingest/live":               # live feed pushed from a non-blocked scraper
+            if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
+                self._json({"error": "unauthorized"}, 401)
+                return
+            rows = b.get("rows") or []
+            if not isinstance(rows, list):
+                self._json({"error": "rows must be a list"}, 400)
+                return
+            from pipeline import load_live as live
+            n_live = live.ingest_rows(rows, prune=bool(b.get("prune")))
+            self._json({"ok": True, "received": len(rows), "live": n_live})
             return
         self._json({"error": "Not found"}, 404)
 
