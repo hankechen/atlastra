@@ -304,15 +304,21 @@ async function openPlayerModal(id) {
   wrap.querySelector('.pm-x').onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   document.addEventListener('keydown', onKey);
-  // club team (so a national-team player shows the club they play for)
-  api('/api/player_club?id=' + id).then(cl => {
+  // club team (so a national-team player shows the club they play for); on the
+  // deployed server this is relay-fetched, so wait while it's pending.
+  (async () => {
+    let cl = await api('/api/player_club?id=' + id).catch(() => null);
+    for (let i = 0; i < 6 && cl && cl.available === false && cl.pending; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      cl = await api('/api/player_club?id=' + id).catch(() => null);
+    }
     const ce = wrap.querySelector('#pmClub'), cr = wrap.querySelector('#pmCrest');
     if (!cl || !cl.team) return;
     if (cr && cl.logo) cr.innerHTML = `<img class="pm-club-crest" src="${cl.logo}" alt="" title="${esc(cl.team)}" onerror="this.remove()">`;
     if (ce) ce.innerHTML = cl.national
       ? esc(cl.team)
       : `<span class="pm-club-lbl">Club:</span> <a onclick="event.stopPropagation();location.href='/team.html?name=${encodeURIComponent(cl.team)}'">${esc(cl.team)}</a>`;
-  }).catch(() => {});
+  })();
   try {
     const h = await A('/api/match/heatmap?player_id=' + id);
     const cv = wrap.querySelector('#pmHeat');
