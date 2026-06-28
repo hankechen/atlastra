@@ -259,7 +259,7 @@ function subsCol(s, label) {
 }
 
 // ---- player match-stats modal (opened from a lineup chip / sub) ----
-let _luStats = null, _luNames = {};        // SofaScore id -> match-stats row / name
+let _luStats = null, _luNames = {}, _luAtlas = {};  // SofaScore id -> stats / name / {rating,est}
 async function ensureLineupStats() {
   if (_luStats) return _luStats;
   const d = await A('/api/match/player-stats');
@@ -296,7 +296,8 @@ async function openPlayerModal(id) {
         <div class="pm-headright"><span class="pm-crest" id="pmCrest"></span>${chip}</div></div>
       <div class="pm-grid">${grid}</div>
       <div class="pm-heat"><div class="pm-heat-h">Match heatmap</div><canvas id="pmHeat" width="300" height="195"></canvas></div>
-      <a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}">View full season profile →</a>
+      ${(_luAtlas[id] && _luAtlas[id].rating != null && !_luAtlas[id].est)
+        ? `<a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}">View full season profile →</a>` : ''}
     </div>`;
   document.body.appendChild(wrap);
   const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
@@ -330,10 +331,12 @@ async function loadLineups() {
   const d = await A('/api/match/lineups');
   if (!d.available) { body().innerHTML = empty('Lineups not published yet.'); return; }
   const note = d.confirmed ? '' : '<div class="placeholder-note" style="margin-bottom:10px">⚠ Predicted lineup — not yet confirmed.</div>';
-  // id -> name (incl. subs) so the player-stats modal has a name even with no stats
+  // id -> name (incl. subs) so the player-stats modal has a name even with no stats;
+  // also keep the Atlastra rating/est so the modal only offers a profile link for a
+  // player actually IN our DB (a real, non-estimated rating).
   for (const side of [d.home, d.away])
     for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
-      if (p.id != null) _luNames[p.id] = p.name;
+      if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; }
   // per-player match stats -> goal/assist icons on the chips (+ the modal); fresh
   // each load so icons reflect the latest score.
   const ps = await A('/api/match/player-stats');

@@ -223,12 +223,16 @@ class SoccerDB:
             """,
             [surname],
         ).fetchall()
-        if len(cands) == 1:
-            return int(cands[0][0])
         if not cands:
             return None
+        # A lone surname match used to be returned outright -- but that wrongly maps a
+        # DIFFERENT person who merely shares a surname (a non-DB 'Antoine Saliba' ->
+        # our 'William Saliba'). Require a consistent first name (one a prefix of the
+        # other), UNLESS our stored name is just the surname (no first name to compare,
+        # e.g. 'Kudus'), where the surname match is all we have.
         hits = [c for c in cands
-                if any(w.startswith(first) or first.startswith(w)
+                if len(_fold(c[1]).split()) == 1
+                or any(w.startswith(first) or first.startswith(w)
                        for w in _fold(c[1]).split())]
         return int(hits[0][0]) if len(hits) == 1 else None
 
