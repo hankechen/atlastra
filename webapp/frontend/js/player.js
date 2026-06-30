@@ -344,6 +344,24 @@ function drawCareer(career, stat) {
 // ---- boot ----
 const params = new URLSearchParams(location.search);
 let current = params.get('name') || 'Pedri';
+
+// Back button: if we arrived from a match (the match page tags its profile links
+// with from=match&eid=…), go straight back to that match; otherwise fall back to
+// the browser's history when there is somewhere to return to.
+(function () {
+  const back = document.getElementById('backBtn');
+  if (!back) return;
+  if (params.get('from') === 'match' && params.get('eid')) {
+    back.textContent = '← Back to match';
+    back.href = '/match.html?id=' + encodeURIComponent(params.get('eid'));
+    back.style.display = '';
+  } else if (history.length > 1) {
+    back.textContent = '← Back';
+    back.href = '#';
+    back.addEventListener('click', (e) => { e.preventDefault(); history.back(); });
+    back.style.display = '';
+  }
+})();
 const careerStatVal = () => document.getElementById('careerStat').value;
 load(current, 'xa', params.get('season'));      // ?season=2324 deep-links a season
 document.getElementById('careerStat').onchange = (e) => load(current, e.target.value, curSeason);

@@ -1567,7 +1567,12 @@ html.light .cmt-sort.active{color:var(--accent)}
 .sb-toggle{display:none}
 .sb-backdrop{display:none}
 @media (max-width: 820px) {
-  .app{grid-template-columns:1fr}
+  /* minmax(0,…) + min-width:0 let the flexible tracks/items actually SHRINK to the
+     screen (a plain 1fr keeps its content's min-content width and overflows, which
+     made the whole page wider than the phone and forced a zoom-out). */
+  .app{grid-template-columns:minmax(0,1fr)}
+  .main{min-width:0}
+  .main .grid>*{min-width:0}
   /* sidebar becomes a slide-in drawer toggled by the hamburger */
   .sidebar{position:fixed;top:0;left:0;z-index:60;width:min(286px,85vw);height:100vh;
     transform:translateX(-100%);transition:transform .22s ease;box-shadow:6px 0 30px rgba(0,0,0,.5)}
@@ -1580,15 +1585,28 @@ html.light .cmt-sort.active{color:var(--accent)}
     width:42px;height:42px;background:var(--elev);border:2px solid var(--border2);border-radius:10px;
     color:var(--text);font-size:18px;line-height:1;cursor:pointer}
   /* tighten the shell */
-  .main{padding:0 12px 36px;max-width:100%}
+  /* hard stop on page-level horizontal overflow: clip (not a scroll container, so
+     the sticky topbar still works; .main is auto-height so nothing vertical clips).
+     Anything legitimately wide (tables, brackets) has its own overflow-x:auto. */
+  .main{padding:0 12px 36px;max-width:100%;overflow-x:clip}
   .topbar{padding:10px 12px;margin:0 -12px 6px;gap:10px}
-  .search{padding:9px 12px;max-width:none}
+  .search{padding:9px 12px;max-width:none;min-width:0}
+  .search input{min-width:0;flex:1}
   .search .kbd{display:none}
+  /* the hero's decorative SVG uses preserveAspectRatio=slice and bleeds past the
+     edge on narrow screens -- the gradient background stays, just drop the lines */
+  .hero-deco{display:none}
   .tb-icons{gap:13px}
   .card{padding:14px}
-  .breadcrumb{padding:12px 0 6px}
+  .breadcrumb{padding:13px 0 6px;font-size:14px}
+  /* bigger, more readable text on phones */
+  body{font-size:15.5px}
+  .search,.search input{font-size:15px}
+  .card-h h3{font-size:13px}
+  .prow .nm,.match .nm,.lu-nm,.pcard .nm,.dd-row .nm{font-size:15px}
+  .prow .sub,.match .sub{font-size:13px}
   /* stack EVERY multi-column content grid (inline grid-template-columns overridden) */
-  .main .grid{grid-template-columns:1fr !important;gap:14px}
+  .main .grid{grid-template-columns:minmax(0,1fr) !important;gap:14px}
   /* shrink big headings + wrap page-head action rows */
   .hero{padding:22px 18px}
   .hero h1{font-size:28px}
@@ -1612,4 +1630,50 @@ html.light .cmt-sort.active{color:var(--accent)}
   /* hero stat strip scrolls instead of clipping the last item */
   .hero-stats{gap:18px;margin-top:18px;padding-top:16px;overflow-x:auto}
   .hero-stats .s{flex:none}
+}
+
+/* contextual back button (e.g. player profile opened from a match) */
+.back-btn{display:inline-flex;align-items:center;gap:6px;margin:16px 0 -4px;padding:7px 14px;
+  background:var(--card2);border:1px solid var(--border2);border-radius:20px;color:var(--text);
+  font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;transition:border-color .12s,color .12s}
+.back-btn:hover{border-color:var(--accent);color:var(--accent2)}
+
+@media (max-width: 820px) {
+  /* Live feed rows: hide the FIFA-rank badge (it crowded the score and pushed the
+     team names out) and shrink the roomy desktop sizes so names + score fit. */
+  .match .fifa-rank{display:none}
+  #feed .match{gap:9px;padding:13px 6px}
+  #feed .match .tm{font-size:14.5px;gap:8px}
+  #feed .match .crest{width:24px;height:24px;border-radius:5px}
+  #feed .match .nflag{font-size:22px}
+  #feed .match .sc{font-size:20px;min-width:auto;letter-spacing:1px}
+  #feed .match .min{font-size:13px;min-width:38px}
+}
+
+@media (max-width: 820px) {
+  /* lineup pitch: narrow it so the outer players' chips/badges (at the 0%/100%
+     edges) have room, and shrink the chips themselves. */
+  .lineup-pitch{width:calc(100% - 44px)}
+  .luc{width:58px}
+  .luc-dot{width:34px;height:34px;font-size:13px;border-width:1.5px}
+  .luc-nm{font-size:10.5px;margin-top:3px}
+  .luc-ev{font-size:10px}
+  .luc-rt,.luc-ar{font-size:9px;padding:0 3.5px;bottom:-5px;border-radius:4px}
+  .luc-rt{right:-7px}
+  .luc-ar{left:-7px}
+  .luc-ar.est{padding:0 3px;border-width:1px}
+  .luc-cap{width:13px;height:13px;line-height:13px;font-size:8.5px;left:-6px;top:-5px}
+}
+
+@media (max-width: 820px) {
+  /* match-page header: drop the FIFA-rank badges (they jammed the score) and
+     shrink the big desktop sizes so team names fit on one line. */
+  .mh-team .fifa-rank{display:none}
+  .mh-row{gap:8px}
+  .mh-team{font-size:15px;gap:8px;min-width:0}
+  .mh-team .nflag{font-size:24px}
+  .mh-team .crest{width:26px;height:26px}
+  .mh-name{min-width:0;overflow:hidden}
+  .mh-score{font-size:28px;letter-spacing:1px}
+  .mh-score .dash{margin:0 5px}
 }

@@ -310,7 +310,7 @@ async function openPlayerModal(id) {
       <div class="pm-grid">${grid}</div>
       <div class="pm-heat"><div class="pm-heat-h">Match heatmap</div><canvas id="pmHeat" width="300" height="195"></canvas></div>
       ${(_luAtlas[id] && _luAtlas[id].rating != null && !_luAtlas[id].est)
-        ? `<a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}">View full season profile →</a>` : ''}
+        ? `<a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}&from=match&eid=${EID}">View full season profile →</a>` : ''}
     </div>`;
   document.body.appendChild(wrap);
   const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
@@ -474,7 +474,7 @@ function renderPlayers() {
       <tbody>${rows.map(p => `<tr class="${p.started ? '' : 'sub-row'}">
         ${PCOLS.map(([k]) => k === 'name'
           ? `<td class="tl"><span class="pl-no">${p.number ?? ''}</span>${p.has_profile
-              ? `<a class="pl-name-link" href="/player.html?name=${encodeURIComponent(p.name)}" title="View ${esc(p.name)}'s profile">${esc(p.name)}</a>`
+              ? `<a class="pl-name-link" href="/player.html?name=${encodeURIComponent(p.name)}&from=match&eid=${EID}" title="View ${esc(p.name)}'s profile">${esc(p.name)}</a>`
               : esc(p.name)} <span class="muted">${esc(p.position || '')} · ${esc((p.team || '').slice(0, 12))}</span></td>`
           : k === 'rating'
             ? `<td>${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : '—'}</td>`
@@ -577,7 +577,7 @@ async function loadPreview() {
   const recent = (t) => `<div class="pv-recent"><div class="pv-form-pills">${t.recent.map(r => fp(r.result)).join('') || '<span class="muted" style="font-size:12px">No recent matches</span>'}</div>
     ${t.recent.slice(0, 5).map(r => `<div class="pv-rec-row">${fp(r.result)}<b>${r.gf}–${r.ga}</b><span>vs ${esc(r.opponent)}</span></div>`).join('')}</div>`;
   const keyc = (t) => `<div class="pv-keycol"><h5>${esc(t.name)}</h5>${(t.key || []).length
-    ? t.key.map(k => `<a class="pv-kpl" href="/player.html?name=${encodeURIComponent(k.player)}"><span class="pv-kpl-ph">${avatarHTML(k.photo, k.player)}</span><span class="pv-kpl-tx"><b>${esc(k.player)}</b><span>${esc(k.position)}${k.club ? ' · ' + esc(k.club) : ''}</span></span><span class="pv-kpl-rat">${k.rating}</span></a>`).join('')
+    ? t.key.map(k => `<a class="pv-kpl" href="/player.html?name=${encodeURIComponent(k.player)}&from=match&eid=${EID}"><span class="pv-kpl-ph">${avatarHTML(k.photo, k.player)}</span><span class="pv-kpl-tx"><b>${esc(k.player)}</b><span>${esc(k.position)}${k.club ? ' · ' + esc(k.club) : ''}</span></span><span class="pv-kpl-rat">${k.rating}</span></a>`).join('')
     : '<div class="muted" style="font-size:12px;padding:6px 0">No top-5-league players in the squad.</div>'}</div>`;
   body().innerHTML = `
     ${p ? `<section class="card pv-pred"><div class="card-h"><h3>Projection</h3><span class="muted" style="font-size:12px">bookmaker consensus</span></div>
