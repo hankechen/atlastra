@@ -36,6 +36,7 @@ async function load(name) {
   const titem = { id: d.team, name: d.team, league: d.league, crest: d.team_logo };
   const syncT = () => { const on = Store.has('teams', d.team); tf.classList.toggle('on', on); tf.textContent = on ? '✓ Following' : '★ Follow'; };
   tf.onclick = () => { Store.toggle('teams', titem); syncT(); };
+  wireFavBtn(document.getElementById('teamFav'), 'favClubs', { name: d.team, crest: d.team_logo });
   syncT();
   document.getElementById('tleague').textContent = d.league;
   document.getElementById('tcountry').textContent = d.country;

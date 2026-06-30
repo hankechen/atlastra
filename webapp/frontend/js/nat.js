@@ -72,6 +72,17 @@ function render(d) {
   document.getElementById('crumb').textContent = d.name;
   document.getElementById('natName').innerHTML = `${flag} ${esc(d.name)}`;
   document.getElementById('natSub').textContent = d.manager ? `👔 ${d.manager}` : '';
+
+  // Follow (stored among teams so live alerts + "Teams you follow" pick it up;
+  // isNat/natId let the profile link it back to this page) + profile Favourite.
+  const fitem = { id: 'nat:' + ID, name: d.name, cc: d.country_code, isNat: true, natId: ID };
+  const nf = document.getElementById('natFollow');
+  const syncNF = () => { const on = Store.has('teams', 'nat:' + ID);
+    nf.classList.toggle('on', on); nf.textContent = on ? '✓ Following' : '★ Follow'; };
+  nf.onclick = () => { Store.toggle('teams', fitem); syncNF(); };
+  syncNF();
+  wireFavBtn(document.getElementById('natFav'), 'favNations', { name: d.name, cc: d.country_code, natId: ID });
+
   renderLatestXI(d.latest_xi);
   document.getElementById('results').innerHTML =
     d.results.length ? d.results.map(r => eventRow(r, false)).join('') : '<div class="muted">No recent results.</div>';

@@ -23,7 +23,7 @@ const Auth = {
   async me() { try { this.user = (await api('/api/auth/me')).user; } catch { this.user = null; } return this.user; },
   async signup(username, password) { this.user = (await apiPost('/api/auth/signup', { username, password })).user; return this.user; },
   async login(username, password) { this.user = (await apiPost('/api/auth/login', { username, password })).user; return this.user; },
-  async google(credential) { this.user = (await apiPost('/api/auth/google', { credential })).user; return this.user; },
+  async google(credential) { const r = await apiPost('/api/auth/google', { credential }); this.user = r.user; return r; },
   async logout() { try { await apiPost('/api/auth/logout'); } catch { /* ignore */ } this.user = null; },
   pushSoon() { clearTimeout(this._t); this._t = setTimeout(() => this.push(), 800); },
   async push() { if (this.user) { try { await apiPost('/api/user/data', { data: Store._read() }); } catch { /* offline */ } } },
@@ -67,12 +67,32 @@ const Store = {
       try { localStorage.setItem(ATLA_KEY, JSON.stringify(s)); } catch { /* quota */ }
     }
     return Object.assign({ name: 'Guest Scout', username: '', bio: '', picture: '',
-      country: '', city: '', favClubs: [], favPlayers: [], memberSince: s.profile.memberSince }, s.profile);
+      country: '', city: '', favClubs: [], favPlayers: [], favNations: [],
+      memberSince: s.profile.memberSince }, s.profile);
   },
   setProfile(patch) { const s = this._read(); s.profile = Object.assign({}, s.profile, patch); this._write(s); },
   name() { return this.profile().name || 'Guest Scout'; },
   setName(n) { this.setProfile({ name: (n || '').trim() || 'Guest Scout' }); },
+  // profile showcase favourites (favClubs / favPlayers / favNations), keyed by name
+  hasFav(key, name) { return (this.profile()[key] || []).some(x => x.name === name); },
+  toggleFav(key, item) {
+    const list = (this.profile()[key] || []).slice();
+    const i = list.findIndex(x => x.name === item.name);
+    if (i >= 0) list.splice(i, 1); else list.push(item);
+    this.setProfile({ [key]: list });
+    return i < 0;                                 // true if now favourited
+  },
 };
+
+// Wire a one-tap "♡ Favourite" toggle button -> a profile showcase list, so a fan
+// can mark a favourite straight from a player/team/national-team page.
+function wireFavBtn(btn, key, item) {
+  if (!btn) return;
+  const sync = () => { const on = Store.hasFav(key, item.name);
+    btn.classList.toggle('on', on); btn.textContent = on ? '♥ Favourited' : '♡ Favourite'; };
+  btn.onclick = () => { Store.toggleFav(key, item); sync(); };
+  sync();
+}
 
 // ---- Notifications: poll the live feed, alert on followed teams/players --------
 // No push backend — a client-side engine polls /api/live (+ /api/match/timeline
@@ -283,7 +303,7 @@ async function mountGoogleSignin(modal, onErr, onDone) {
   google.accounts.id.initialize({
     client_id: cfg.google_client_id,
     callback: async (resp) => {
-      try { await Auth.google(resp.credential); onDone(); }
+      try { const r = await Auth.google(resp.credential); onDone(r && r.google_name); }
       catch (ex) { onErr(ex.message || 'Google sign-in failed.'); }
     },
   });
@@ -349,7 +369,17 @@ function openAuthModal(mode = 'login') {
   // Google sign-in (only shows if a client id is configured server-side).
   mountGoogleSignin(el,
     (msg) => { const e = document.getElementById('authErr'); if (e) e.textContent = msg; },
-    async () => { sessionStorage.setItem('atla_synced', '1'); try { await Auth.pull(); } catch { /* */ } close(); location.reload(); });
+    async (googleName) => {
+      sessionStorage.setItem('atla_synced', '1');
+      try { await Auth.pull(); } catch { /* */ }
+      // first Google sign-in: use the Google account name as the display name,
+      // unless this account already set a custom one (server data wins on pull).
+      if (googleName) {
+        const cur = (Store._read().profile || {}).name;
+        if (!cur || cur === 'Guest Scout') { Store.setName(googleName); try { await Auth.push(); } catch { /* */ } }
+      }
+      close(); location.reload();
+    });
 }
 async function initAuth() {
   await Auth.me();
@@ -366,8 +396,28 @@ async function initAuth() {
   refreshAuthUI();
 }
 
-if (document.readyState !== 'loading') { initNotifications(); initAuth(); }
-else document.addEventListener('DOMContentLoaded', () => { initNotifications(); initAuth(); });
+// Mobile: a hamburger in the topbar slides the sidebar in as a drawer, with a
+// backdrop that closes it; tapping any nav link (or Escape) closes it too.
+function initMobileNav() {
+  const topbar = document.querySelector('.topbar');
+  if (!topbar || document.querySelector('.sb-toggle')) return;
+  const btn = document.createElement('button');
+  btn.className = 'sb-toggle'; btn.setAttribute('aria-label', 'Menu'); btn.innerHTML = '☰';
+  topbar.insertBefore(btn, topbar.firstChild);
+  const backdrop = document.createElement('div');
+  backdrop.className = 'sb-backdrop';
+  document.body.appendChild(backdrop);
+  const close = () => document.body.classList.remove('sb-open');
+  btn.addEventListener('click', () => document.body.classList.toggle('sb-open'));
+  backdrop.addEventListener('click', close);
+  const sb = document.getElementById('sidebar');
+  if (sb) sb.addEventListener('click', (e) => { if (e.target.closest('a')) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+
+function _boot() { initNotifications(); initAuth(); initMobileNav(); }
+if (document.readyState !== 'loading') _boot();
+else document.addEventListener('DOMContentLoaded', _boot);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };
 const initials = (n) => n.replace(/[^A-Za-z .'-]/g, '').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
 const eurM = (v) => v == null ? '—' : '€' + (v / 1e6).toFixed(0) + 'M';

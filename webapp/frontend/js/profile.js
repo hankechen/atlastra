@@ -23,6 +23,9 @@ function renderHead() {
     ${c.crest ? `<img src="${c.crest}" alt="">` : '🛡️'}<span>${esc(c.name)}</span></a>`;
   const favPlayerChip = (pl) => `<a class="pf-favchip" href="/player.html?name=${encodeURIComponent(pl.name)}">
     ${pl.photo ? `<img src="${pl.photo}" alt="">` : `<i>${initials(pl.name)}</i>`}<span>${esc(pl.name)}</span></a>`;
+  const favNationChip = (n) => `<a class="pf-favchip"${n.natId ? ` href="/nat.html?id=${n.natId}"` : ''}>
+    <i>${flagISO2(n.cc) || initials(n.name)}</i><span>${esc(n.name)}</span></a>`;
+  const favNations = p.favNations || [];
 
   document.getElementById('pfHead').innerHTML = `
     <div class="pf-ava">${ava}</div>
@@ -36,6 +39,7 @@ function renderHead() {
       ${p.bio ? `<p class="pf-bio">${esc(p.bio)}</p>` : ''}
       ${p.favClubs.length ? `<div class="pf-fav"><span class="pf-fav-lbl">Favourite ${p.favClubs.length > 1 ? 'clubs' : 'club'}</span><div class="pf-favchips">${p.favClubs.map(favClubChip).join('')}</div></div>` : ''}
       ${p.favPlayers.length ? `<div class="pf-fav"><span class="pf-fav-lbl">Favourite ${p.favPlayers.length > 1 ? 'players' : 'player'}</span><div class="pf-favchips">${p.favPlayers.map(favPlayerChip).join('')}</div></div>` : ''}
+      ${favNations.length ? `<div class="pf-fav"><span class="pf-fav-lbl">Favourite national ${favNations.length > 1 ? 'teams' : 'team'}</span><div class="pf-favchips">${favNations.map(favNationChip).join('')}</div></div>` : ''}
       <div class="pf-stats">
         <div class="pf-stat"><b>${counts.players}</b><span>Following</span></div>
         <div class="pf-stat"><b>${counts.teams}</b><span>Teams</span></div>
@@ -74,6 +78,10 @@ function renderEdit() {
           <div class="pf-favchips" id="edPlayers"></div>
           <div class="pf-fav-add"><input id="edPlayerSearch" placeholder="Add a player…"><div class="card-dd" id="edPlayerDD"></div></div>
         </div>
+        <div class="pf-field"><label>Favourite national teams</label>
+          <div class="pf-favchips" id="edNations"></div>
+          <div class="pf-fav-add"><input id="edNationSearch" placeholder="Add a national team…"><div class="card-dd" id="edNationDD"></div></div>
+        </div>
         <div class="pf-edit-actions">
           <button class="btn btn-primary" id="edSave">Save profile</button>
           <button class="btn btn-ghost" id="edCancel">Cancel</button>
@@ -109,23 +117,27 @@ function renderEdit() {
   renderFavChips();
   favSearch('edClubSearch', 'edClubDD', 'teams', 'favClubs');
   favSearch('edPlayerSearch', 'edPlayerDD', 'players', 'favPlayers');
+  favSearch('edNationSearch', 'edNationDD', 'national', 'favNations');
 
   document.getElementById('edCancel').onclick = () => { editing = false; draft = null; renderHead(); };
   document.getElementById('edSave').onclick = () => {
     Store.setProfile({ name: draft.name.trim() || 'Guest Scout', username: draft.username.trim(),
       bio: draft.bio.trim(), city: draft.city.trim(), country: draft.country.trim(),
-      picture: draft.picture, favClubs: draft.favClubs, favPlayers: draft.favPlayers });
+      picture: draft.picture, favClubs: draft.favClubs, favPlayers: draft.favPlayers,
+      favNations: draft.favNations || [] });
     editing = false; draft = null; renderHead(); renderTabs(); renderBody(); renderSidebar('My Profile');
   };
 }
 
 function renderFavChips() {
   const chip = (item, key) => `<span class="pf-favchip editable">
-    ${item.crest || item.photo ? `<img src="${item.crest || item.photo}" alt="">` : `<i>${initials(item.name)}</i>`}
+    ${item.crest || item.photo ? `<img src="${item.crest || item.photo}" alt="">`
+      : `<i>${(item.cc ? flagISO2(item.cc) : '') || initials(item.name)}</i>`}
     <span>${esc(item.name)}</span>
     <button class="pf-favchip-rm" data-key="${key}" data-id="${esc(item.name)}">✕</button></span>`;
   document.getElementById('edClubs').innerHTML = draft.favClubs.map(c => chip(c, 'favClubs')).join('') || '<span class="pf-fav-none">None yet</span>';
   document.getElementById('edPlayers').innerHTML = draft.favPlayers.map(p => chip(p, 'favPlayers')).join('') || '<span class="pf-fav-none">None yet</span>';
+  document.getElementById('edNations').innerHTML = (draft.favNations || []).map(n => chip(n, 'favNations')).join('') || '<span class="pf-fav-none">None yet</span>';
   document.querySelectorAll('.pf-favchip-rm').forEach(b => b.onclick = () => {
     draft[b.dataset.key] = draft[b.dataset.key].filter(x => x.name !== b.dataset.id); renderFavChips();
   });
@@ -138,18 +150,23 @@ function favSearch(inputId, ddId, kind, listKey) {
     const q = input.value.trim();
     if (q.length < 2) { hide(); return; }
     api('/api/search?q=' + encodeURIComponent(q)).then(r => {
-      const rows = (kind === 'teams' ? (r.teams || []) : (r.players || [])).slice(0, 6);
+      const rows = (kind === 'teams' ? (r.teams || []) : kind === 'national' ? (r.national || [])
+        : (r.players || [])).slice(0, 6);
       if (!rows.length) { hide(); return; }
       dd.innerHTML = rows.map(x => {
         const name = x.team || x.player, img = x.team_logo || x.photo || '';
-        return `<div class="card-dd-it" data-n="${esc(name)}" data-img="${esc(img)}">
-          <b>${esc(name)}</b><span>${esc(x.league || [x.team, x.position].filter(Boolean).join(' · '))}</span></div>`;
+        const sub = kind === 'national' ? 'National team' : (x.league || [x.team, x.position].filter(Boolean).join(' · '));
+        return `<div class="card-dd-it" data-n="${esc(name)}" data-img="${esc(img)}" data-cc="${esc(x.cc || '')}" data-nat="${esc(x.team_id || '')}">
+          <b>${esc(name)}</b><span>${esc(sub)}</span></div>`;
       }).join('');
       dd.style.display = 'block';
       dd.querySelectorAll('.card-dd-it').forEach(el => el.onclick = () => {
         const name = el.dataset.n;
         if (!draft[listKey].some(x => x.name === name)) {
-          draft[listKey].push(kind === 'teams' ? { name, crest: el.dataset.img } : { name, photo: el.dataset.img });
+          draft[listKey].push(
+            kind === 'teams' ? { name, crest: el.dataset.img }
+            : kind === 'national' ? { name, cc: el.dataset.cc, natId: el.dataset.nat }
+            : { name, photo: el.dataset.img });
         }
         input.value = ''; hide(); renderFavChips();
       });
@@ -183,10 +200,13 @@ function playerCard(p, listKey) {
   </div>`;
 }
 function teamCard(t) {
+  const href = t.isNat ? `/nat.html?id=${t.natId}` : `/team.html?name=${encodeURIComponent(t.name)}`;
+  const crest = t.isNat ? `<span class="pf-crest" style="font-size:22px">${flagISO2(t.cc) || '🏳️'}</span>`
+    : `<span class="pf-crest">${crestHTML(t.crest, 'crest') || '🛡️'}</span>`;
   return `<div class="pf-pcard">
-    <a class="pf-pcard-main" href="/team.html?name=${encodeURIComponent(t.name)}">
-      <span class="pf-crest">${crestHTML(t.crest, 'crest') || '🛡️'}</span>
-      <span class="pf-pc-tx"><b>${esc(t.name)}</b><span>${esc(t.league || '')}</span></span>
+    <a class="pf-pcard-main" href="${href}">
+      ${crest}
+      <span class="pf-pc-tx"><b>${esc(t.name)}</b><span>${esc(t.isNat ? 'National team' : (t.league || ''))}</span></span>
     </a>
     <button class="pf-rm" data-k="teams" data-id="${esc(t.id || t.name)}" title="Remove">✕</button>
   </div>`;

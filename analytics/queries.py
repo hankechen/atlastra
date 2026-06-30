@@ -56,11 +56,31 @@ FOTMOB_PLAYER_IMG = "https://images.fotmob.com/image_resources/playerimages/{}.p
 FOTMOB_TEAM_IMG = "https://images.fotmob.com/image_resources/logo/teamlogo/{}.png"
 
 
+# Letters NFKD/strip_accents leaves alone (they're distinct letters, not accented
+# ASCII) but that our warehouse spells inconsistently -- e.g. 'Ørjan Nyland' (ø) vs
+# 'Martin Odegaard' (o). Fold them so SofaScore 'Ødegaard' matches our 'Odegaard'.
+_SPECIAL_LETTERS = (("ø", "o"), ("æ", "ae"), ("å", "a"), ("ð", "d"), ("þ", "th"),
+                    ("ß", "ss"), ("ł", "l"), ("đ", "d"), ("ı", "i"))
+
+
 def _fold(s):
-    """Accent-folded lowercase string (e.g. 'Dembélé' -> 'dembele')."""
+    """Accent + special-letter folded lowercase string ('Dembélé'->'dembele',
+    'Ødegaard'->'odegaard')."""
     import unicodedata
     s = unicodedata.normalize("NFKD", str(s or ""))
-    return "".join(c for c in s if not unicodedata.combining(c)).lower()
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    for a, b in _SPECIAL_LETTERS:
+        s = s.replace(a, b)
+    return s
+
+
+def _fold_sql(expr):
+    """SQL counterpart of _fold(): strip_accents + lower + special-letter folding,
+    so name matching is robust to ø/å/æ/… (applied to both column and parameter)."""
+    s = f"strip_accents(lower({expr}))"
+    for a, b in _SPECIAL_LETTERS:
+        s = f"replace({s}, '{a}', '{b}')"
+    return s
 
 
 def _norm_team(s):
@@ -183,19 +203,19 @@ class SoccerDB:
         """Case-insensitive partial match. Ranks exact, then whole-word (so
         'Saka' -> Bukayo Saka, not Wan-Bis*saka*), then substring; ties by
         minutes."""
+        fp, fq = _fold_sql("p.player_name"), _fold_sql("?")
         df = self.con.execute(
-            """
+            f"""
             SELECT p.player_id, p.player_name, sum(ps.minutes) AS mins
             FROM players p JOIN player_season_stats ps USING(player_id)
-            WHERE strip_accents(lower(p.player_name)) LIKE '%' || strip_accents(lower(?)) || '%'
+            WHERE {fp} LIKE '%' || {fq} || '%'
             GROUP BY 1, 2
             ORDER BY
-              (strip_accents(lower(p.player_name)) = strip_accents(lower(?))) DESC,
+              ({fp} = {fq}) DESC,
               -- whole-word match: pad with spaces and treat '-' as a boundary, so
               -- 'Mbappe' matches both 'Ethan Mbappe' and 'Kylian Mbappe-Lottin'
               -- (then minutes break the tie -> Kylian), not Wan-Bis*saka*.
-              ((' ' || replace(strip_accents(lower(p.player_name)), '-', ' ') || ' ')
-                 LIKE '% ' || strip_accents(lower(?)) || ' %') DESC,
+              ((' ' || replace({fp}, '-', ' ') || ' ') LIKE '% ' || {fq} || ' %') DESC,
               mins DESC
             LIMIT 1
             """,
@@ -215,11 +235,11 @@ class SoccerDB:
             return None
         first, surname = _fold(parts[0]), parts[-1]
         cands = self.con.execute(
-            """
+            f"""
             SELECT p.player_id, p.player_name, sum(ps.minutes) AS mins
             FROM players p JOIN player_season_stats ps USING(player_id)
-            WHERE (' ' || replace(strip_accents(lower(p.player_name)), '-', ' ') || ' ')
-                  LIKE '% ' || strip_accents(lower(?)) || ' %'
+            WHERE (' ' || replace({_fold_sql("p.player_name")}, '-', ' ') || ' ')
+                  LIKE '% ' || {_fold_sql("?")} || ' %'
             GROUP BY 1, 2 ORDER BY mins DESC
             """,
             [surname],
@@ -320,9 +340,12 @@ class SoccerDB:
                 sea = FOCUS_SEASON if FOCUS_SEASON in seasons else max(seasons)
                 out[n] = int(round(max(r for s, r in rows if s == sea)))  # best of League/UCL
                 continue
+            # fall back to the datamb composite, but ONLY for the CURRENT season --
+            # a stale rating (e.g. Nyland's 96.6 from 2024/25) is worse than none.
             r = self.con.execute(
-                "SELECT rating FROM player_ratings WHERE player_id=? AND rating IS NOT NULL "
-                "ORDER BY (season=?) DESC, minutes DESC LIMIT 1", [pid, FOCUS_SEASON]).fetchone()
+                "SELECT rating FROM player_ratings WHERE player_id=? AND season=? "
+                "AND rating IS NOT NULL ORDER BY minutes DESC LIMIT 1",
+                [pid, FOCUS_SEASON]).fetchone()
             if r is not None:
                 out[n] = int(round(r[0]))
         return out

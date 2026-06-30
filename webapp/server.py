@@ -13,7 +13,6 @@ import json
 import math
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -147,23 +146,13 @@ def match_api(path: str, q: dict) -> dict:
         if players:
             with SoccerDB(read_only=DB_READ_ONLY) as db:
                 rmap = db.ratings_by_name([p.get("name") for p in players])
-            # estimate (SofaScore season form) for players not in our DB — in
-            # parallel, since each is a couple of network calls.
-            need = {p.get("id"): p.get("position") for p in players
-                    if rmap.get(p.get("name")) is None and p.get("id")}
-            ests = {}
-            if need:
-                with ThreadPoolExecutor(max_workers=8) as ex:
-                    futs = {ex.submit(live_feed.season_estimate, pid, pos): pid
-                            for pid, pos in need.items()}
-                    for f in as_completed(futs):
-                        ests[futs[f]] = f.result()
+            # Only show our real combined League/UCL rating; players not in our DB
+            # get no rating (the SofaScore season-form estimate was too coarse --
+            # e.g. a 97 keeper next to a 13 -- so it's disabled for now).
             for p in players:
                 r = rmap.get(p.get("name"))
-                if r is not None:                       # our combined League/UCL rating
+                if r is not None:
                     p["atlas_rating"], p["atlas_est"] = r, False
-                elif ests.get(p.get("id")) is not None:  # estimated from SofaScore
-                    p["atlas_rating"], p["atlas_est"] = ests[p["id"]], True
         return d
     if path == "/api/match/shotmap":
         return live_feed.shotmap(eid)
@@ -408,7 +397,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             cookie = (f"atla_session={tok}; Path=/; HttpOnly; SameSite=Lax; "
                       f"Max-Age={auth.SESSION_DAYS * 86400}")
-            self._json({"user": user}, extra_headers=[("Set-Cookie", cookie)])
+            self._json({"user": user, "google_name": info.get("name")},
+                       extra_headers=[("Set-Cookie", cookie)])
             return
         if u.path == "/api/auth/logout":
             auth.logout(self._cookie("atla_session"))

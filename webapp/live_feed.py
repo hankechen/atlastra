@@ -738,8 +738,15 @@ def fixture_preview(eid: int) -> dict:
     hid, aid = h["home_id"], h["away_id"]
     pred = prediction(eid)
     td = (_get(f"/event/{eid}/h2h", ttl=600) or {}).get("teamDuel")
+    # In cache mode each of those calls queues a miss for the relay rather than
+    # fetching directly; until the relay fills them the preview would render empty.
+    # Flag that as pending so the client waits + retries instead of showing blanks.
+    pending = CACHE_MODE and (
+        queue_has(f"/team/{hid}/events/last/0") or queue_has(f"/team/{aid}/events/last/0")
+        or queue_has(f"/team/{hid}/players") or queue_has(f"/team/{aid}/players")
+        or queue_has(f"/event/{eid}/h2h"))
     return {
-        "available": True, "event_id": eid, "competition": h.get("competition"),
+        "available": True, "pending": pending, "event_id": eid, "competition": h.get("competition"),
         "round": h.get("round"), "kickoff_ts": h.get("start_ts"), "status": h.get("status"),
         "home": {"name": h["home"], "id": hid, "country": h.get("home_country"),
                  "national": h.get("home_national"), "recent": _form_for(hid), "squad": _squad_names(hid)},

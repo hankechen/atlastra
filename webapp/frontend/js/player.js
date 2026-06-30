@@ -186,6 +186,7 @@ async function load(name, careerStat = 'xa', season = null) {
   fb.onclick = () => { Store.toggle('players', item); syncF(); };
   wb.onclick = () => { Store.toggle('watchlist', item); syncW(); };
   syncF(); syncW();
+  wireFavBtn(document.getElementById('favBtn'), 'favPlayers', { name: p.name, photo: p.photo });
 
   // Big Game Index card (only if match-log data is available for this player)
   api('/api/big_game?name=' + encodeURIComponent(p.name)).then((b) => {

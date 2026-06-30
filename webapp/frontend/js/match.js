@@ -521,9 +521,11 @@ function drawPoints(canvas, points) {
   }
   const cw = W / GW, ch = H / GH;
   ctx.save(); ctx.filter = 'blur(8px)';
+  // SofaScore width axis: low-y = player's RIGHT side, so mirror rows (as the
+  // season heatmap does) -- otherwise a left winger's heat lands on the right.
   for (let r = 0; r < GH; r++) for (let c = 0; c < GW; c++) {
     const v = grid[r][c] / (max || 1);
-    if (v > 0.05) { ctx.fillStyle = heatColor(v); ctx.fillRect(c * cw, r * ch, cw + 1.5, ch + 1.5); }
+    if (v > 0.05) { ctx.fillStyle = heatColor(v); ctx.fillRect(c * cw, (GH - 1 - r) * ch, cw + 1.5, ch + 1.5); }
   }
   ctx.restore(); drawPitch(ctx, W, H);
 }
@@ -561,7 +563,14 @@ async function loadHeatmaps() {
 
 // ---- Preview (data-driven, works for upcoming national-team fixtures too) ----
 async function loadPreview() {
-  const d = await A('/api/fixture_preview');
+  let d = await A('/api/fixture_preview');
+  // form / squad / h2h come from separate SofaScore calls the relay fills on demand;
+  // wait for them (pending) instead of flashing an empty preview.
+  for (let i = 0; i < 10 && d && d.available && d.pending; i++) {
+    body().innerHTML = '<section class="card"><div class="placeholder-note">Loading preview…</div></section>';
+    await new Promise(r => setTimeout(r, 2500));
+    d = await api('/api/fixture_preview?id=' + encodeURIComponent(EID));
+  }
   if (!d.available) { body().innerHTML = empty('Preview not available for this match.'); return; }
   const H = d.home, AW = d.away, p = d.prediction, h2h = d.h2h;
   const fp = (f) => `<span class="pv-fp ${f === 'W' ? 'w' : f === 'L' ? 'l' : 'd'}">${f}</span>`;

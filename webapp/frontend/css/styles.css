@@ -1562,3 +1562,54 @@ html.light .cmt-sort.active{color:var(--accent)}
 .disc-m-s{text-align:center;font-weight:800;font-size:20px;padding:0 12px;white-space:nowrap;flex:none}
 .disc-comp{font-size:10.5px;color:var(--muted);font-weight:600;letter-spacing:0;margin-top:2px}
 .disc-pens{font-size:10px;color:var(--muted2);font-weight:700}
+
+/* ===== mobile / responsive ===== */
+.sb-toggle{display:none}
+.sb-backdrop{display:none}
+@media (max-width: 820px) {
+  .app{grid-template-columns:1fr}
+  /* sidebar becomes a slide-in drawer toggled by the hamburger */
+  .sidebar{position:fixed;top:0;left:0;z-index:60;width:min(286px,85vw);height:100vh;
+    transform:translateX(-100%);transition:transform .22s ease;box-shadow:6px 0 30px rgba(0,0,0,.5)}
+  body.sb-open .sidebar{transform:translateX(0)}
+  body.sb-open{overflow:hidden}
+  .sb-backdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:55;
+    opacity:0;pointer-events:none;transition:opacity .2s}
+  body.sb-open .sb-backdrop{opacity:1;pointer-events:auto}
+  .sb-toggle{display:inline-flex;align-items:center;justify-content:center;flex:none;
+    width:42px;height:42px;background:var(--elev);border:2px solid var(--border2);border-radius:10px;
+    color:var(--text);font-size:18px;line-height:1;cursor:pointer}
+  /* tighten the shell */
+  .main{padding:0 12px 36px;max-width:100%}
+  .topbar{padding:10px 12px;margin:0 -12px 6px;gap:10px}
+  .search{padding:9px 12px;max-width:none}
+  .search .kbd{display:none}
+  .tb-icons{gap:13px}
+  .card{padding:14px}
+  .breadcrumb{padding:12px 0 6px}
+  /* stack EVERY multi-column content grid (inline grid-template-columns overridden) */
+  .main .grid{grid-template-columns:1fr !important;gap:14px}
+  /* shrink big headings + wrap page-head action rows */
+  .hero{padding:22px 18px}
+  .hero h1{font-size:28px}
+  h2{font-size:21px}
+  .page-head{flex-wrap:wrap;gap:10px}
+  /* let wide tables / standings scroll instead of breaking the layout */
+  .ltbl-wrap,.tbl-wrap,.std-wrap{overflow-x:auto}
+  table{max-width:100%}
+}
+@media (max-width: 480px) {
+  .hero h1{font-size:24px}
+  .main{padding:0 10px 32px}
+  .card{padding:12px}
+}
+@media (max-width: 820px) {
+  /* player header: smaller photo so the info column (meta) isn't squeezed */
+  .ph{grid-template-columns:96px minmax(0,1fr);gap:14px}
+  .ph .photo{width:96px;height:120px}
+  .ph h1{font-size:24px}
+  .ph .meta{gap:10px 16px}
+  /* hero stat strip scrolls instead of clipping the last item */
+  .hero-stats{gap:18px;margin-top:18px;padding-top:16px;overflow-x:auto}
+  .hero-stats .s{flex:none}
+}
