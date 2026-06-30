@@ -1,5 +1,7 @@
 // apply the saved theme ASAP (default dark; .light flips CSS vars)
 if (localStorage.getItem('atla_theme') === 'light') document.documentElement.classList.add('light');
+// apply the saved sidebar-collapsed state ASAP (desktop icon rail; no flash)
+if (localStorage.getItem('atla_sb_collapsed') === '1') document.documentElement.classList.add('sb-collapsed');
 
 // shared helpers + sidebar for the Atlastra UI
 async function api(path) {
@@ -632,7 +634,10 @@ function renderSidebar(active) {
   const leagues = LEAGUES.map(([n, id, c]) =>
     `<a href="/teams.html?league=${encodeURIComponent(n)}" class="navi league"><span class="lglogo"><img src="https://images.fotmob.com/image_resources/logo/leaguelogo/${id}.png" alt="" loading="lazy" onerror="this.parentElement.style.background='${c}';this.remove()"></span><span class="t">${n}</span></a>`).join('');
   document.getElementById('sidebar').innerHTML = `
-    <a class="brand" href="/" aria-label="Atlastra home"><svg class="logo" viewBox="0 0 32 32"><path d="M16 3 L29 28 H3 Z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5570f0"/><stop offset="1" stop-color="#7d5cf5"/></linearGradient></defs></svg>ATLASTRA</a>
+    <div class="sb-top">
+      <a class="brand" href="/" aria-label="Atlastra home"><svg class="logo" viewBox="0 0 32 32"><path d="M16 3 L29 28 H3 Z" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#5570f0"/><stop offset="1" stop-color="#7d5cf5"/></linearGradient></defs></svg><span class="brand-tx">ATLASTRA</span></a>
+      <button class="sb-collapse" id="sbCollapse" title="Collapse sidebar" aria-label="Collapse sidebar"><span class="sbc-ic">«</span></button>
+    </div>
     <div class="sb-scroll">
       ${section('Main', NAV_MAIN)}
       <div class="sb-div"></div>
@@ -650,6 +655,11 @@ function renderSidebar(active) {
     <button class="sb-auth" id="sbAuthBtn">Sign in to sync</button>`;
   renderSubtabs(active);
   refreshAuthUI();
+  const cb = document.getElementById('sbCollapse');
+  if (cb) cb.onclick = () => {
+    const on = document.documentElement.classList.toggle('sb-collapsed');
+    localStorage.setItem('atla_sb_collapsed', on ? '1' : '0');
+  };
 }
 
 // ---- live / fixtures match row (shared by home widget + /live.html) ----
