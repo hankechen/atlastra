@@ -23,6 +23,7 @@ const Auth = {
   async me() { try { this.user = (await api('/api/auth/me')).user; } catch { this.user = null; } return this.user; },
   async signup(username, password) { this.user = (await apiPost('/api/auth/signup', { username, password })).user; return this.user; },
   async login(username, password) { this.user = (await apiPost('/api/auth/login', { username, password })).user; return this.user; },
+  async google(credential) { this.user = (await apiPost('/api/auth/google', { credential })).user; return this.user; },
   async logout() { try { await apiPost('/api/auth/logout'); } catch { /* ignore */ } this.user = null; },
   pushSoon() { clearTimeout(this._t); this._t = setTimeout(() => this.push(), 800); },
   async push() { if (this.user) { try { await apiPost('/api/user/data', { data: Store._read() }); } catch { /* offline */ } } },
@@ -256,6 +257,40 @@ function initNotifications() {
   window.addEventListener('atla-store', () => notifTick());
 }
 // ---- auth UI: sidebar control + sign-in/up modal ----
+// Load Google Identity Services once (only when a Google client id is configured).
+let _gsiPromise = null;
+function loadGsi() {
+  if (_gsiPromise) return _gsiPromise;
+  _gsiPromise = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true; s.defer = true;
+    s.onload = res; s.onerror = rej; document.head.appendChild(s);
+  });
+  return _gsiPromise;
+}
+// Render the "Sign in with Google" button into the auth modal, if enabled.
+async function mountGoogleSignin(modal, onErr, onDone) {
+  let cfg;
+  try { cfg = await api('/api/auth/config'); } catch { return; }
+  if (!cfg.google_client_id || !modal.isConnected) return;
+  const form = modal.querySelector('#authForm');
+  const slot = document.createElement('div');
+  slot.className = 'auth-google';
+  slot.innerHTML = '<div id="gbtn" class="gbtn-wrap"></div><div class="auth-or"><span>or</span></div>';
+  form.parentNode.insertBefore(slot, form);
+  try { await loadGsi(); } catch { slot.remove(); return; }
+  if (!window.google || !modal.isConnected) return;
+  google.accounts.id.initialize({
+    client_id: cfg.google_client_id,
+    callback: async (resp) => {
+      try { await Auth.google(resp.credential); onDone(); }
+      catch (ex) { onErr(ex.message || 'Google sign-in failed.'); }
+    },
+  });
+  google.accounts.id.renderButton(document.getElementById('gbtn'),
+    { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'continue_with', width: 280 });
+}
+
 let _sbActive = null;                          // last active key passed to renderSidebar
 function refreshAuthUI() {
   const btn = document.getElementById('sbAuthBtn'), sub = document.getElementById('sbUserSub');
@@ -311,6 +346,10 @@ function openAuthModal(mode = 'login') {
   };
   setMode(mode);
   document.getElementById('authU').focus();
+  // Google sign-in (only shows if a client id is configured server-side).
+  mountGoogleSignin(el,
+    (msg) => { const e = document.getElementById('authErr'); if (e) e.textContent = msg; },
+    async () => { sessionStorage.setItem('atla_synced', '1'); try { await Auth.pull(); } catch { /* */ } close(); location.reload(); });
 }
 async function initAuth() {
   await Auth.me();
@@ -596,7 +635,9 @@ const matchDay = (ts) => new Date(ts * 1000)
 // One `.match` grid row. The trailing tag is LIVE (red) for in-play, else the date.
 function matchRow(m) {
   const played = m.home_score != null;
-  const score = played ? `${m.home_score} - ${m.away_score}` : 'vs';
+  const pens = (m.home_pens != null && m.away_pens != null)
+    ? `<span class="match-pens">pens ${m.home_pens}-${m.away_pens}</span>` : '';
+  const score = played ? `${m.home_score} - ${m.away_score}${pens}` : 'vs';
   const clk = m.status === 'inprogress' ? 'min live-min' : 'min';
   const tag = m.status === 'inprogress'
     ? `<span class="live">● LIVE</span>` : `<span class="tag">${matchDay(m.kickoff_ts)}</span>`;

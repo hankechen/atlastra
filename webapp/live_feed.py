@@ -96,7 +96,7 @@ def prewarm(eid: int) -> None:
     now = time.time()
     with _LOCK:
         for p in (f"/event/{eid}", f"/event/{eid}/lineups", f"/event/{eid}/incidents",
-                  f"/event/{eid}/statistics", f"/event/{eid}/shotmap"):
+                  f"/event/{eid}/statistics", f"/event/{eid}/shotmap", f"/event/{eid}/managers"):
             if p not in _PUSH_CACHE:
                 _QUEUE.setdefault(p, now)
 
@@ -115,10 +115,12 @@ def prewarm_team(tid: int) -> None:
                 _QUEUE.setdefault(p, now)
 
 
-def venue(eid: int):
-    """Stadium · city for a match, from the (already-warmed for live games) event
-    detail. Cache-only -> never adds relay work; returns None if not cached."""
-    d = _get(f"/event/{eid}", ttl=3600, queue=False) or {}
+def venue(eid: int, warm: bool = False):
+    """Stadium · city for a match, from the event detail. Returns None if not yet
+    cached. warm=True queues the event for the relay on a cache miss (so an
+    upcoming match's venue fills in within a relay cycle); warm=False is cache-only
+    (used for live games, whose detail is already warmed)."""
+    d = _get(f"/event/{eid}", ttl=3600, queue=warm) or {}
     v = (d.get("event") or {}).get("venue") or {}
     if not v:
         return None
@@ -185,6 +187,7 @@ def header(eid: int) -> dict:
     ut = (ev.get("tournament") or {}).get("uniqueTournament") or {}
     ri = ev.get("roundInfo") or {}
     home, away = ev.get("homeTeam") or {}, ev.get("awayTeam") or {}
+    _hs, _as = ev.get("homeScore") or {}, ev.get("awayScore") or {}
 
     def country(team):
         return (team.get("country") or {}).get("alpha2") if team.get("national") else None
@@ -206,8 +209,11 @@ def header(eid: int) -> dict:
         "home_national": bool(home.get("national")),
         "away": away.get("name"), "away_id": away.get("id"), "away_country": country(away),
         "away_national": bool(away.get("national")),
-        "home_score": (ev.get("homeScore") or {}).get("current"),
-        "away_score": (ev.get("awayScore") or {}).get("current"),
+        # `display` is the regulation/ET goals score; `current` folds the penalty
+        # shootout in (a 1-1 final reads as 5-4). Show display + the shootout apart.
+        "home_score": _hs.get("display") if _hs.get("display") is not None else _hs.get("current"),
+        "away_score": _as.get("display") if _as.get("display") is not None else _as.get("current"),
+        "home_pens": _hs.get("penalties"), "away_pens": _as.get("penalties"),
         "xg_available": bool(ev.get("hasXg")),
     }
 
@@ -286,8 +292,12 @@ def lineups(eid: int) -> dict:
     d = _get(f"/event/{eid}/lineups", ttl=60)
     if not d or "home" not in d:
         return {"available": False, "confirmed": False, "home": None, "away": None}
+    mg = _get(f"/event/{eid}/managers", ttl=600) or {}
+    home, away = _lineup_side(d["home"]), _lineup_side(d["away"])
+    home["manager"] = (mg.get("homeManager") or {}).get("name")
+    away["manager"] = (mg.get("awayManager") or {}).get("name")
     return {"available": True, "confirmed": bool(d.get("confirmed")),
-            "home": _lineup_side(d["home"]), "away": _lineup_side(d["away"])}
+            "home": home, "away": away}
 
 
 # ---- shot map ---------------------------------------------------------------

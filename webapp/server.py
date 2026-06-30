@@ -18,7 +18,7 @@ import sys
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 # Same-origin image proxy for the player-card canvas: drawing a remote CDN image
 # onto a canvas taints it and blocks toBlob()/toDataURL() (the download). Serving
@@ -73,6 +73,30 @@ LIVE_REFRESH = os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1"
 # must be read-write to accept those writes even with the local refresher off.
 INGEST_TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN") or None
 DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN)
+
+# Optional "Sign in with Google". Set ATLASTRA_GOOGLE_CLIENT_ID to a Google OAuth
+# Web client id to enable it; left unset, the Google button simply never appears
+# and username/password sign-in is unaffected.
+GOOGLE_CLIENT_ID = os.environ.get("ATLASTRA_GOOGLE_CLIENT_ID") or None
+
+
+def _verify_google(credential):
+    """Validate a Google Identity Services ID token via Google's tokeninfo endpoint
+    (which checks the signature + expiry for us, so no crypto lib is needed) and
+    confirm it was minted for OUR client. -> {sub,email,name} or None."""
+    if not credential or not GOOGLE_CLIENT_ID:
+        return None
+    try:
+        url = "https://oauth2.googleapis.com/tokeninfo?id_token=" + quote(credential)
+        with urllib.request.urlopen(url, timeout=10) as r:
+            d = json.loads(r.read())
+    except Exception:  # noqa: BLE001 -- bad/expired token or network blip
+        return None
+    if d.get("aud") != GOOGLE_CLIENT_ID:
+        return None
+    if d.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        return None
+    return {"sub": d.get("sub"), "email": d.get("email"), "name": d.get("name")}
 
 
 def _finite(o):
@@ -229,13 +253,18 @@ def api(path: str, q: dict) -> dict | list:
                                  (q.get("search", [""])[0] or None),
                                  int(q.get("limit", ["30"])[0]),
                                  scope=q.get("scope", ["league"])[0])
+        if path == "/api/discover":
+            return d.web_discover()
         if path == "/api/spotlight":
             return d.web_spotlight()
         if path == "/api/live":
             res = d.web_live(int(q.get("recent", ["40"])[0]),
                              int(q.get("upcoming", ["40"])[0]))
-            for m in res.get("live", []):     # venue from the (warmed) event detail, live only
+            for m in res.get("live", []):     # live detail is already warmed
                 m["venue"] = live_feed.venue(m["event_id"])
+            # upcoming matches: warm the soonest few so their venue fills via the relay
+            for i, m in enumerate(res.get("upcoming", [])):
+                m["venue"] = live_feed.venue(m["event_id"], warm=(i < 15))
             return res
         if path == "/api/standings":
             return d.web_standings(q.get("league", ["ENG-Premier League"])[0])
@@ -295,6 +324,8 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_archetype(q.get("name", ["Poacher"])[0])
         if path == "/api/team_of_season":
             return d.web_team_of_season()
+        if path == "/api/team_of_week":
+            return d.web_team_of_week()
         if path == "/api/scout":
             return d.web_scout(
                 q.get("pos", ["all"])[0], q.get("metric", ["rating"])[0],
@@ -366,6 +397,19 @@ class Handler(BaseHTTPRequestHandler):
                       f"Max-Age={auth.SESSION_DAYS * 86400}")
             self._json({"user": user}, extra_headers=[("Set-Cookie", cookie)])
             return
+        if u.path == "/api/auth/google":               # Sign in with Google (ID token)
+            info = _verify_google(b.get("credential"))
+            if not info:
+                self._json({"error": "Google sign-in failed. Please try again."}, 401)
+                return
+            user, tok = auth.google_login(info["sub"], info.get("email"), info.get("name"))
+            if not user:
+                self._json({"error": tok}, 400)
+                return
+            cookie = (f"atla_session={tok}; Path=/; HttpOnly; SameSite=Lax; "
+                      f"Max-Age={auth.SESSION_DAYS * 86400}")
+            self._json({"user": user}, extra_headers=[("Set-Cookie", cookie)])
+            return
         if u.path == "/api/auth/logout":
             auth.logout(self._cookie("atla_session"))
             self._json({"ok": True}, extra_headers=[("Set-Cookie", "atla_session=; Path=/; Max-Age=0")])
@@ -420,6 +464,35 @@ class Handler(BaseHTTPRequestHandler):
             from pipeline import load_wc
             self._json({"ok": True, **load_wc.write_wc_rows(b.get("data") or {})})
             return
+        if u.path == "/api/comments":                  # post a comment to a thread
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Sign in to post a comment."}, 401)
+                return
+            comment, err = auth.add_comment(b.get("target"), user["id"],
+                                            user["username"], b.get("body"))
+            if err:
+                self._json({"error": err}, 400)
+                return
+            self._json({"comment": comment})
+            return
+        if u.path == "/api/comments/delete":
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Not signed in."}, 401)
+                return
+            ok = auth.delete_comment(int(b.get("id", 0) or 0), user["id"])
+            self._json({"ok": ok} if ok else {"error": "Can't delete that comment."},
+                       200 if ok else 403)
+            return
+        if u.path == "/api/comments/like":
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Sign in to like comments."}, 401)
+                return
+            res, err = auth.toggle_like(int(b.get("id", 0) or 0), user["id"])
+            self._json(res if res else {"error": err}, 200 if res else 400)
+            return
         self._json({"error": "Not found"}, 404)
 
     def do_GET(self):
@@ -433,6 +506,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/auth/me":
             self._json({"user": auth.user_for_token(self._cookie("atla_session"))})
             return
+        if u.path == "/api/auth/config":               # public: enables the Google button
+            self._json({"google_client_id": GOOGLE_CLIENT_ID})
+            return
         if u.path == "/api/user/data":
             user = auth.user_for_token(self._cookie("atla_session"))
             if not user:
@@ -445,6 +521,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(auth.leaderboard(qq.get("game", [""])[0],
                                         qq.get("period", ["alltime"])[0],
                                         int(qq.get("limit", ["25"])[0])))
+            return
+        if u.path == "/api/comments":                  # public: read a thread's comments
+            qq = parse_qs(u.query)
+            viewer = auth.user_for_token(self._cookie("atla_session"))
+            self._json(auth.list_comments(qq.get("target", [""])[0],
+                                          viewer["id"] if viewer else None,
+                                          qq.get("sort", ["new"])[0]))
             return
         if u.path == "/api/img":                       # binary image proxy (not JSON)
             res = fetch_image(parse_qs(u.query).get("u", [""])[0])

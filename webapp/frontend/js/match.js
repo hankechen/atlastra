@@ -43,6 +43,8 @@ async function loadHeader() {
   const hero = document.getElementById('hero');
   if (!head.available) { hero.innerHTML = '<div class="placeholder-note">Match not found.</div>'; return; }
   const played = head.home_score != null;
+  const pens = (head.home_pens != null && head.away_pens != null)
+    ? `<div class="mh-pens">${head.home_pens}-${head.away_pens} on penalties</div>` : '';
   // each team links to its page: national teams -> /nat.html, clubs -> /team.html
   const teamLink = (side) => {
     const id = head[side + '_id'], name = head[side];
@@ -55,7 +57,7 @@ async function loadHeader() {
     <div class="mh-row">
       <div class="mh-team home"${open('home')}>${badge('home')}<span class="mh-name">${esc(head.home)}</span>${rankBadge(head.home_rank)}</div>
       <div class="mh-score">${played ? `${head.home_score}<span class="dash">-</span>${head.away_score}` : '<span class="vs">vs</span>'}
-        <div class="mh-st">${heroStatus()}</div></div>
+        ${pens}<div class="mh-st">${heroStatus()}</div></div>
       <div class="mh-team away"${open('away')}>${rankBadge(head.away_rank)}<span class="mh-name">${esc(head.away)}</span>${badge('away')}</div>
     </div>`;
 }
@@ -194,6 +196,7 @@ async function loadPrediction() {
 }
 
 // ---- Lineups (formation pitch) ----
+const mgrTag = (name) => name ? `<span class="lp-mgr" title="Manager">👔 ${esc(name)}</span>` : '';
 const _surname = (n) => { const p = String(n || '').trim().split(' '); return p.length > 1 ? p[p.length - 1] : n; };
 
 // formation "4-2-3-1" + XI length -> row sizes [GK, ...lines] (back -> front), or
@@ -248,7 +251,7 @@ function lineupSideList(s, label) {
     <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}</span><span class="lu-pos">${esc(p.position || '')}</span>
     ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   return `<section class="card lu-col">
-    <div class="card-h"><h3>${esc(label)}</h3><span class="see">${esc(s.formation || '')}</span></div>
+    <div class="card-h"><h3>${esc(label)}</h3><span class="see">${[mgrTag(s.manager), esc(s.formation || '')].filter(Boolean).join(' · ')}</span></div>
     ${(s.starting_xi || []).map(row).join('') || '<div class="placeholder-note">No starting XI.</div>'}
     ${(s.substitutes || []).length ? `<div class="lu-sub-h">Substitutes</div>${s.substitutes.map(row).join('')}` : ''}
   </section>`;
@@ -360,14 +363,14 @@ async function loadLineups() {
                 + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');
     body().innerHTML = note + `
       <section class="card">
-        <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b></div>
+        <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b>${mgrTag(d.away?.manager)}</div>
         <div class="lineup-pitch">
           <span class="lp-mid"></span><span class="lp-circle"></span><span class="lp-spot"></span>
           <span class="lp-box top"></span><span class="lp-box bot"></span>
           <span class="lp-six top"></span><span class="lp-six bot"></span>
           ${chips}
         </div>
-        <div class="lp-head h"><b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
+        <div class="lp-head h">${mgrTag(d.home?.manager)}<b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
       </section>
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
         ${subsCol(d.home, head?.home || 'Home')}${subsCol(d.away, head?.away || 'Away')}</div>`;

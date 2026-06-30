@@ -79,14 +79,17 @@
       </section>
     </div>
 
-    <!-- row 2: games / top5 / team of season -->
+    <!-- guest-only "discover" card: a random spotlight / head-to-head / result -->
+    <section class="card discover" id="discover" style="display:none;margin-top:18px"></section>
+
+    <!-- row 2: games / top10 / team of week -->
     <div class="grid" style="grid-template-columns:repeat(3,1fr); margin-top:18px">
       <section class="card"><div class="card-h"><h3>Games</h3><a class="see" href="/daily.html">Daily →</a></div><div class="glist" id="gamesList"></div></section>
-      <section class="card"><div class="card-h"><h3>Atlastra Top 5</h3><a class="see" href="/players.html">See all</a></div><div id="top5"></div></section>
+      <section class="card"><div class="card-h"><h3>Atlastra Top 10</h3><a class="see" href="/players.html">See all</a></div><div id="top5"></div></section>
       <section class="card">
-        <div class="card-h"><h3>Team of the Season (25/26)</h3><a class="see">See all</a></div>
+        <div class="card-h"><h3>World Cup XI</h3><a class="see" href="/worldcup.html">See all</a></div>
         <div class="pitch" id="tof"></div>
-        <div class="muted" style="margin-top:6px;font-size:12px" id="totsNote">Best XI by average match rating</div>
+        <div class="muted" style="margin-top:6px;font-size:12px" id="totsNote">Best XI of the tournament so far</div>
       </section>
     </div>
 

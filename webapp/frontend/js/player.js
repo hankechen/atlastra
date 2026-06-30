@@ -114,6 +114,13 @@ async function load(name, careerStat = 'xa', season = null) {
   document.getElementById('crumb').textContent = p.name;
   document.getElementById('pname').innerHTML = p.name + ' <span class="verified">✔</span>';
 
+  // fan comment thread (mount once per page; keyed by canonical player name)
+  if (window.mountComments && !window._cmtsMounted) {
+    window._cmtsMounted = true;
+    mountComments('player:' + p.name, document.getElementById('comments'),
+      { title: 'Fan Comments', subject: p.name });
+  }
+
   // season selector + pinned-analysis labelling. The stat tiles, League/UCL
   // gauges and avg rating follow the chosen season; the radar / SWOT / archetype
   // / signature actions / heatmap only exist for the pinned (latest) season.

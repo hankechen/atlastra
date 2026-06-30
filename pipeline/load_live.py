@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS live_matches (
     home_team       VARCHAR, home_team_id BIGINT, home_country VARCHAR,
     away_team       VARCHAR, away_team_id BIGINT, away_country VARCHAR,
     home_score      INTEGER, away_score INTEGER,
+    home_pens       INTEGER, away_pens INTEGER,
     winner_code     INTEGER, updated_at TIMESTAMP
 );
 """
@@ -64,7 +65,14 @@ COLS = ["event_id", "tournament_key", "tournament_name", "tournament_group",
         "round_name", "start_timestamp", "status_type", "status_desc", "minute",
         "home_team", "home_team_id", "home_country",
         "away_team", "away_team_id", "away_country",
-        "home_score", "away_score", "winner_code", "updated_at"]
+        "home_score", "away_score", "home_pens", "away_pens", "winner_code", "updated_at"]
+
+
+def _setup(con) -> None:
+    """Create the table and backfill the penalty columns on a pre-existing one."""
+    con.execute(DDL)
+    con.execute("ALTER TABLE live_matches ADD COLUMN IF NOT EXISTS home_pens INTEGER")
+    con.execute("ALTER TABLE live_matches ADD COLUMN IF NOT EXISTS away_pens INTEGER")
 
 
 # Optional outbound proxy for SofaScore (datacenter IPs are 403-blocked, so a
@@ -142,7 +150,11 @@ def _row(ev: dict, now: int, updated_at: datetime) -> dict | None:
         "home_country": country(home),
         "away_team": away.get("name"), "away_team_id": away.get("id"),
         "away_country": country(away),
-        "home_score": hs.get("current"), "away_score": as_.get("current"),
+        # `display` is the regulation/ET goals score; `current` folds the penalty
+        # shootout in (a 1-1 game decided on pens reads as 4-5). Show goals + pens apart.
+        "home_score": hs.get("display") if hs.get("display") is not None else hs.get("current"),
+        "away_score": as_.get("display") if as_.get("display") is not None else as_.get("current"),
+        "home_pens": hs.get("penalties"), "away_pens": as_.get("penalties"),
         "winner_code": ev.get("winnerCode"), "updated_at": updated_at,
     }
 
@@ -235,9 +247,9 @@ def load_live() -> int:
     -- it just doesn't add new rows that cycle, while good in-window rows persist."""
     rows = fetch_rows()
     con = connect_retry(DB_PATH, read_only=False)
-    con.execute(DDL)
+    _setup(con)
     if rows:
-        df = pd.DataFrame(rows)[COLS]                 # exact column order
+        df = pd.DataFrame(rows).reindex(columns=COLS)   # exact column order; missing -> NULL
         con.register("live_df", df)
         assigns = ", ".join(f"{c}=excluded.{c}" for c in COLS if c != "event_id")
         con.execute(f"INSERT INTO live_matches ({','.join(COLS)}) "
@@ -288,9 +300,9 @@ def update_live_overlay() -> int:
     rows = fetch_live_only()
     con = connect_retry(DB_PATH, read_only=False)
     try:
-        con.execute(DDL)
+        _setup(con)
         if rows:
-            df = pd.DataFrame(rows)[COLS]
+            df = pd.DataFrame(rows).reindex(columns=COLS)
             con.register("live_df", df)
             assigns = ", ".join(f"{c}=excluded.{c}" for c in COLS if c != "event_id")
             con.execute(f"INSERT INTO live_matches ({','.join(COLS)}) "
@@ -310,7 +322,7 @@ def ingest_rows(rows: list[dict], prune: bool = False) -> int:
     push, not the in-play overlay push). Returns the in-play count."""
     con = connect_retry(DB_PATH, read_only=False)
     try:
-        con.execute(DDL)
+        _setup(con)
         if rows:
             ua = datetime.now()
             clean = []
@@ -318,7 +330,7 @@ def ingest_rows(rows: list[dict], prune: bool = False) -> int:
                 r = {k: r.get(k) for k in COLS}
                 r["updated_at"] = ua
                 clean.append(r)
-            df = pd.DataFrame(clean)[COLS]
+            df = pd.DataFrame(clean).reindex(columns=COLS)
             con.register("live_df", df)
             assigns = ", ".join(f"{c}=excluded.{c}" for c in COLS if c != "event_id")
             con.execute(f"INSERT INTO live_matches ({','.join(COLS)}) "

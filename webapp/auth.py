@@ -13,6 +13,7 @@ server-side and handed to the browser as an HttpOnly cookie.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import sqlite3
 import threading
@@ -39,6 +40,24 @@ def _con() -> sqlite3.Connection:
     c.execute("CREATE TABLE IF NOT EXISTS scores("
               "game TEXT, period TEXT, user_id INTEGER, username TEXT, "
               "score REAL, updated REAL, PRIMARY KEY(game, period, user_id))")
+    # User comments, keyed by a free-form `target` thread (e.g. 'player:Lionel Messi',
+    # 'match:12345', 'team:Arsenal') so the same widget drops onto any page.
+    c.execute("CREATE TABLE IF NOT EXISTS comments("
+              "id INTEGER PRIMARY KEY, target TEXT, user_id INTEGER, username TEXT, "
+              "body TEXT, created REAL)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(target, created)")
+    c.execute("CREATE TABLE IF NOT EXISTS comment_likes("
+              "comment_id INTEGER, user_id INTEGER, PRIMARY KEY(comment_id, user_id))")
+    # Google sign-in: link a Google account to a user (no password). Added by
+    # migration so existing databases pick up the columns. `pw`/`salt` stay NULL
+    # for Google-only accounts (they just can't password-login).
+    cols = {r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()}
+    if "email" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "google_sub" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
+    c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google "
+              "ON users(google_sub) WHERE google_sub IS NOT NULL")
     return c
 
 
@@ -87,6 +106,45 @@ def login(username: str, password: str):
             tok = _new_session(c, row[0])
             c.commit()
             return {"id": row[0], "username": row[3]}, tok
+        finally:
+            c.close()
+
+
+def _unique_username(c: sqlite3.Connection, base: str) -> str:
+    """A free username derived from a Google display name / email local-part."""
+    base = re.sub(r"[^A-Za-z0-9_.]", "", base or "")[:20] or "user"
+    if len(base) < 3:
+        base = (base + "user")[:20]
+    name, i = base, 0
+    while c.execute("SELECT 1 FROM users WHERE username = ?", [name]).fetchone():
+        i += 1
+        name = f"{base[:20 - len(str(i))]}{i}"
+    return name
+
+
+def google_login(sub: str, email: str | None, name: str | None):
+    """Sign in (or auto-create) via a verified Google account. The caller MUST have
+    already verified the Google ID token. -> ({"id","username"}, token) or (None, err)."""
+    if not sub:
+        return None, "Invalid Google sign-in."
+    with _LOCK:
+        c = _con()
+        try:
+            row = c.execute("SELECT id, username FROM users WHERE google_sub = ?", [sub]).fetchone()
+            if not row and email:                       # link to an existing local account by email
+                row = c.execute("SELECT id, username FROM users WHERE email = ? AND google_sub IS NULL",
+                                [email]).fetchone()
+                if row:
+                    c.execute("UPDATE users SET google_sub = ? WHERE id = ?", [sub, row[0]])
+            if not row:                                  # first sign-in -> create an account
+                uname = _unique_username(c, name or (email or "").split("@")[0])
+                uid = c.execute(
+                    "INSERT INTO users(username, email, google_sub, created) VALUES(?,?,?,?)",
+                    [uname, email, sub, time.time()]).lastrowid
+                row = (uid, uname)
+            tok = _new_session(c, row[0])
+            c.commit()
+            return {"id": row[0], "username": row[1]}, tok
         finally:
             c.close()
 
@@ -176,3 +234,101 @@ def leaderboard(game: str, period: str, limit: int = 25) -> list[dict]:
                 for i, r in enumerate(rows)]
     finally:
         c.close()
+
+
+# ---- user comments ----
+COMMENT_MAX = 1500          # body length cap
+COMMENT_MIN_GAP = 5.0       # seconds between a user's posts (anti-spam)
+
+
+def add_comment(target: str, uid: int, username: str, body: str):
+    """Post a comment to a thread. -> (comment_dict, None) or (None, error)."""
+    target = (target or "").strip()[:120]
+    body = (body or "").strip()
+    if not target:
+        return None, "Missing target."
+    if not body:
+        return None, "Comment can't be empty."
+    if len(body) > COMMENT_MAX:
+        return None, f"Comment is too long (max {COMMENT_MAX} characters)."
+    with _LOCK:
+        c = _con()
+        try:
+            last = c.execute("SELECT created, body FROM comments WHERE user_id=? "
+                             "ORDER BY created DESC LIMIT 1", [uid]).fetchone()
+            now = time.time()
+            if last and now - last[0] < COMMENT_MIN_GAP:
+                return None, "You're posting too fast — give it a few seconds."
+            if last and last[1] == body:
+                return None, "Looks like a duplicate of your last comment."
+            cid = c.execute(
+                "INSERT INTO comments(target, user_id, username, body, created) VALUES(?,?,?,?,?)",
+                [target, uid, username, body, now]).lastrowid
+            c.commit()
+        finally:
+            c.close()
+    return {"id": cid, "username": username, "body": body, "created": now,
+            "likes": 0, "liked": False, "mine": True}, None
+
+
+def list_comments(target: str, viewer_uid: int | None = None,
+                  sort: str = "new", limit: int = 200) -> dict:
+    """Comments for a thread + total count. Each carries like count and, for a
+    signed-in viewer, whether they liked it / authored it."""
+    order = "c.created ASC" if sort == "old" else (
+        "likes DESC, c.created DESC" if sort == "top" else "c.created DESC")
+    c = _con()
+    try:
+        rows = c.execute(f"""
+            SELECT c.id, c.username, c.body, c.created, c.user_id,
+                   (SELECT count(*) FROM comment_likes l WHERE l.comment_id = c.id) AS likes,
+                   EXISTS(SELECT 1 FROM comment_likes l
+                          WHERE l.comment_id = c.id AND l.user_id = ?) AS liked
+            FROM comments c WHERE c.target = ?
+            ORDER BY {order} LIMIT ?
+        """, [viewer_uid or -1, target, limit]).fetchall()
+        total = c.execute("SELECT count(*) FROM comments WHERE target=?", [target]).fetchone()[0]
+        items = [{"id": r[0], "username": r[1], "body": r[2], "created": r[3],
+                  "likes": r[5], "liked": bool(r[6]), "mine": r[4] == viewer_uid}
+                 for r in rows]
+        return {"total": total, "comments": items}
+    finally:
+        c.close()
+
+
+def delete_comment(cid: int, uid: int) -> bool:
+    """Delete a comment (author only). -> True if a row was removed."""
+    with _LOCK:
+        c = _con()
+        try:
+            row = c.execute("SELECT user_id FROM comments WHERE id=?", [cid]).fetchone()
+            if not row or row[0] != uid:
+                return False
+            c.execute("DELETE FROM comments WHERE id=?", [cid])
+            c.execute("DELETE FROM comment_likes WHERE comment_id=?", [cid])
+            c.commit()
+            return True
+        finally:
+            c.close()
+
+
+def toggle_like(cid: int, uid: int):
+    """Like/unlike a comment. -> ({"liked","likes"}, None) or (None, error)."""
+    with _LOCK:
+        c = _con()
+        try:
+            if not c.execute("SELECT 1 FROM comments WHERE id=?", [cid]).fetchone():
+                return None, "That comment no longer exists."
+            has = c.execute("SELECT 1 FROM comment_likes WHERE comment_id=? AND user_id=?",
+                            [cid, uid]).fetchone()
+            if has:
+                c.execute("DELETE FROM comment_likes WHERE comment_id=? AND user_id=?", [cid, uid])
+            else:
+                c.execute("INSERT OR IGNORE INTO comment_likes(comment_id, user_id) VALUES(?,?)",
+                          [cid, uid])
+            n = c.execute("SELECT count(*) FROM comment_likes WHERE comment_id=?",
+                          [cid]).fetchone()[0]
+            c.commit()
+            return {"liked": not has, "likes": n}, None
+        finally:
+            c.close()

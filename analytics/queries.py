@@ -9,6 +9,7 @@ Stats that Understat does not provide (duels, dribbles, tackles, interceptions,
 big chances, passes completed, market value, manager, venue) are simply not
 returned; see NOTES.md.
 """
+import random
 import sys
 
 import duckdb
@@ -245,10 +246,23 @@ class SoccerDB:
         "leverkusen": "Leverkusen", "dortmund": "Dortmund", "bayern": "Bayern",
     }
 
+    # punctuation/accent-folded team_name in SQL (mirrors _norm_team) so a query
+    # like 'Paris Saint-Germain' (hyphen) matches our 'Paris Saint Germain' (space).
+    _NORM_TEAM_SQL = "regexp_replace(strip_accents(lower(team_name)), '[^a-z0-9]+', ' ', 'g')"
+    # club-name filler tokens dropped, and spelling synonyms applied, when matching
+    # SofaScore's long forms (e.g. 'FC Bayern München', 'Internazionale') to ours.
+    _TEAM_FILLER = {"fc", "cf", "afc", "ac", "sc", "ssc", "as", "rc", "sl", "sd",
+                    "ud", "cd", "ogc", "rcd", "aj", "us", "ss", "bsc", "vfb", "vfl",
+                    "tsg", "rb", "sk", "fk", "if", "bk", "club", "calcio"}
+    _TEAM_SYN = {"munchen": "munich", "internazionale": "inter",
+                 "moenchengladbach": "gladbach", "monchengladbach": "gladbach"}
+
     def _team_id_like(self, term: str) -> int | None:
+        term = _norm_team(term)
+        if not term:
+            return None
         row = self.con.execute(
-            "SELECT team_id FROM teams "
-            "WHERE strip_accents(lower(team_name)) LIKE strip_accents(lower('%'||?||'%')) "
+            f"SELECT team_id FROM teams WHERE {self._NORM_TEAM_SQL} LIKE '%'||?||'%' "
             "ORDER BY length(team_name) LIMIT 1", [term]).fetchone()
         return None if row is None else int(row[0])
 
@@ -256,7 +270,7 @@ class SoccerDB:
         q = (name or "").strip()
         if not q:
             return None
-        # 1) plain substring match (the canonical case)
+        # 1) plain substring match (the canonical case; punctuation-folded both sides)
         tid = self._team_id_like(q)
         if tid is not None:
             return tid
@@ -264,16 +278,22 @@ class SoccerDB:
         alias = self._TEAM_ALIASES.get(q.lower())
         if alias and (tid := self._team_id_like(alias)) is not None:
             return tid
-        # 3) token-AND: every typed word must appear (handles "Man City" etc.)
-        toks = q.split()
-        if len(toks) > 1:
-            where = " AND ".join(
-                ["strip_accents(lower(team_name)) LIKE strip_accents(lower('%'||?||'%'))"] * len(toks))
-            row = self.con.execute(
-                f"SELECT team_id FROM teams WHERE {where} ORDER BY length(team_name) LIMIT 1",
-                toks).fetchone()
-            if row is not None:
-                return int(row[0])
+        # 3) drop club-filler tokens + apply spelling synonyms (SofaScore long forms
+        #    like 'FC Bayern München' -> our 'Bayern Munich'), then retry as a phrase
+        toks = [self._TEAM_SYN.get(t, t) for t in _norm_team(q).split()
+                if t not in self._TEAM_FILLER]
+        if toks:
+            cleaned = " ".join(toks)
+            if cleaned != _norm_team(q) and (tid := self._team_id_like(cleaned)) is not None:
+                return tid
+            # 4) token-AND fallback: every remaining word must appear
+            if len(toks) > 1:
+                where = " AND ".join([f"{self._NORM_TEAM_SQL} LIKE '%'||?||'%'"] * len(toks))
+                row = self.con.execute(
+                    f"SELECT team_id FROM teams WHERE {where} ORDER BY length(team_name) LIMIT 1",
+                    toks).fetchone()
+                if row is not None:
+                    return int(row[0])
         return None
 
     def have_profiles(self, names: list[str]) -> set[str]:
@@ -1001,7 +1021,8 @@ class SoccerDB:
         return {r: [ko_ties[r][i] for i in order[r]] for r in present}
 
     @staticmethod
-    def _build_bracket(ko_ties: dict, seq: list, labels: dict, decorate) -> list[dict]:
+    def _build_bracket(ko_ties: dict, seq: list, labels: dict, decorate,
+                       order_index: dict | None = None) -> list[dict]:
         """Generic knockout-bracket assembler shared by the UCL & World Cup hubs.
 
         ko_ties: round name -> list of ties (from _ucl_round_ties). seq: full round
@@ -1016,7 +1037,13 @@ class SoccerDB:
         present = [r for r in seq if r in ko_ties]
         if not present:
             return []
-        ordered = SoccerDB._order_ko_ties(ko_ties, present)
+        if order_index:                              # explicit visual order (e.g. WC cup tree)
+            def _seq(t):
+                ev = t["legs"][-1].get("event_id") if t.get("legs") else None
+                return (order_index.get(ev, 10**9),)
+            ordered = {r: sorted(ko_ties[r], key=_seq) for r in present}
+        else:
+            ordered = SoccerDB._order_ko_ties(ko_ties, present)
 
         def side(prefix, team, agg):
             d = {prefix: team, prefix + "_agg": agg}
@@ -1302,8 +1329,19 @@ class SoccerDB:
                   for r in sub.sort_values("date").itertuples()]
             ko_ties[rnd] = self._ucl_round_ties(ms)
         labels = {r: self._WC_KO[r][1] for r in seq}
-        bracket = self._build_bracket(ko_ties, seq, labels,
-                                      lambda t: {"cc": cc.get(t), "rank": self.fifa_rank(t)} if t else {})
+        # true visual order from the SofaScore cup tree (event_id -> position); lets
+        # the bracket align while knockout slots are still 'W##' placeholders.
+        try:
+            obr = self.con.execute(
+                "SELECT event_id, round_order * 1000 + seq AS pos FROM wc_bracket WHERE season = ?",
+                [season]).fetchall()
+            order_index = {int(e): int(p) for e, p in obr} or None
+        except Exception:  # noqa: BLE001 -- table may not exist yet
+            order_index = None
+        bracket = self._build_bracket(
+            ko_ties, seq, labels,
+            lambda t: {"cc": cc.get(t), "rank": self.fifa_rank(t)} if t else {},
+            order_index=order_index)
 
         # group standings tables (Group A, B, … then any extra ranking table last)
         sdf = self.con.execute("""
@@ -1572,6 +1610,112 @@ class SoccerDB:
             "most_dribbles": top("dribbles_completed"),
         }
 
+    def _discover_pool(self, season: str):
+        """Top-rated league players (rating + this season's G/A + photo) -- the pool
+        the player-spotlight and head-to-head discover cards sample from."""
+        return self.con.execute("""
+            SELECT pl.player_name AS name, pl.position_group AS grp, c.rating,
+                   c.classification, COALESCE(f.detailed_position, f.main_position) AS pos,
+                   f.team, v.goals, v.assists, pe.fpid
+            FROM player_ratings_combined c
+            JOIN players pl USING(player_id)
+            LEFT JOIN v_player_profile_full f ON f.player_id = c.player_id
+            LEFT JOIN v_player_season_stats v ON v.player_id = c.player_id AND v.season = ?
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = c.player_id
+            WHERE c.scope='league' AND c.season = ? AND c.rating IS NOT NULL
+            ORDER BY c.rating DESC LIMIT 50
+        """, [season, season]).df()
+
+    def _player_card(self, r) -> dict:
+        ga = []
+        if not pd.isna(r.goals) and r.goals:
+            ga.append(f"{int(r.goals)} goal{'s' if r.goals != 1 else ''}")
+        if not pd.isna(r.assists) and r.assists:
+            ga.append(f"{int(r.assists)} assist{'s' if r.assists != 1 else ''}")
+        return {"player": r["name"], "team": None if pd.isna(r.team) else r.team,
+                "position": None if pd.isna(r.pos) else r.pos, "rating": _i(r.rating),
+                "photo": self.player_photo(None if pd.isna(r.fpid) else int(r.fpid)),
+                "team_logo": self.team_logo(None if pd.isna(r.team) else r.team),
+                "goals": _i(r.goals), "assists": _i(r.assists),
+                "line": " · ".join(ga) if ga else None}
+
+    def web_discover(self, season: str = FOCUS_SEASON) -> dict:
+        """One random 'discover' card for signed-out visitors -- rotates between a
+        player spotlight, a head-to-head, a stat leader and a recent result so the
+        home page feels alive without an account. Returns {} if nothing is available."""
+        def player():
+            df = self._discover_pool(season)
+            if df.empty:
+                return None
+            r = df.iloc[random.randrange(len(df))]
+            return {"type": "player", "kicker": "Player Spotlight",
+                    "blurb": (None if pd.isna(r.classification) else r.classification)
+                    or "One of the season's standouts", **self._player_card(r)}
+
+        def compare():
+            df = self._discover_pool(season)
+            if df.empty:
+                return None
+            grps = [g for g, n in df.groupby("grp").size().items() if n >= 2]
+            if not grps:
+                return None
+            sub = df[df["grp"] == random.choice(grps)]
+            i, j = random.sample(range(len(sub)), 2)
+            a, b = self._player_card(sub.iloc[i]), self._player_card(sub.iloc[j])
+            return {"type": "compare", "kicker": "Head-to-Head", "a": a, "b": b}
+
+        def stat():
+            metrics = [("goals", "Most Goals", "goals", 0), ("assists", "Most Assists", "assists", 0),
+                       ("xg", "Highest xG", "xG", 1), ("chances_created", "Most Chances Created", "created", 0),
+                       ("dribbles_completed", "Most Dribbles", "dribbles", 0)]
+            col, label, unit, rnd = random.choice(metrics)
+            r = self.con.execute(f"""
+                SELECT pl.player_name, v.{col} AS val, v.team, pe.fpid
+                FROM v_player_season_stats v JOIN players pl USING(player_id)
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id = v.player_id
+                WHERE v.season = ? AND v.{col} IS NOT NULL ORDER BY v.{col} DESC LIMIT 1
+            """, [season]).fetchone()
+            if not r:
+                return None
+            val = round(float(r[1]), rnd) if rnd else int(r[1])
+            return {"type": "stat", "kicker": "Stat Leader", "label": label,
+                    "player": r[0], "value": val, "unit": unit, "team": r[2],
+                    "team_logo": self.team_logo(r[2]), "photo": self.player_photo(r[3])}
+
+        def match():
+            df = self.con.execute("""
+                SELECT event_id, home_team, away_team, home_score, away_score,
+                       home_pens, away_pens, tournament_name
+                FROM live_matches
+                WHERE status_type='finished' AND home_score IS NOT NULL
+                ORDER BY start_timestamp DESC LIMIT 20
+            """).df()
+            if df.empty:
+                return None
+            r = df.iloc[random.randrange(len(df))]
+            return {"type": "match", "kicker": "Recent Result",
+                    "event_id": _i(r.event_id), "competition": r.tournament_name,
+                    "home": r.home_team, "away": r.away_team,
+                    "home_logo": self.team_logo(r.home_team), "away_logo": self.team_logo(r.away_team),
+                    "home_score": _i(r.home_score), "away_score": _i(r.away_score),
+                    "home_pens": None if pd.isna(r.home_pens) else int(r.home_pens),
+                    "away_pens": None if pd.isna(r.away_pens) else int(r.away_pens)}
+
+        builders = [player, compare, stat, match]
+        random.shuffle(builders)
+        for b in builders:                       # try kinds in random order; skip empties
+            try:
+                card = b()
+            except Exception:                    # noqa: BLE001 -- never break the home page
+                card = None
+            if card:
+                return card
+        return {}
+
     def web_live(self, limit_recent: int = 40, limit_upcoming: int = 40) -> dict:
         """Live / upcoming / recent matches from the live_matches table
         (pipeline/load_live.py). Three buckets, each a flat list ordered for the UI;
@@ -1582,7 +1726,7 @@ class SoccerDB:
                 SELECT event_id, tournament_key, tournament_name, tournament_group,
                        round_name, start_timestamp, status_type, status_desc, minute,
                        home_team, home_country, away_team, away_country,
-                       home_score, away_score, winner_code,
+                       home_score, away_score, home_pens, away_pens, winner_code,
                        CAST(updated_at AS VARCHAR) AS updated_at
                 FROM live_matches
             """).df()
@@ -1605,6 +1749,8 @@ class SoccerDB:
                 "away": r.away_team, "away_logo": self.team_logo(r.away_team),
                 "away_country": none(r.away_country), "away_rank": self.fifa_rank(r.away_team),
                 "away_score": None if pd.isna(r.away_score) else int(r.away_score),
+                "home_pens": None if pd.isna(r.home_pens) else int(r.home_pens),
+                "away_pens": None if pd.isna(r.away_pens) else int(r.away_pens),
                 "winner": None if pd.isna(r.winner_code) else int(r.winner_code),
             }
 
@@ -2045,6 +2191,61 @@ class SoccerDB:
                      "photo": self.player_photo(r.fpid), "rating": _i(r.atlastra)}
                     for r in rows]
         return {"formation": "4-3-3", "season": _fmt_season(season),
+                "lines": [{"label": k, "players": fmt(v)} for k, v in lines.items()]}
+
+    _WC_LINE = {"G": "GK", "D": "DEF", "M": "MID", "F": "FWD"}  # SofaScore pos -> pitch line
+
+    def web_team_of_week(self, season: str | None = None, min_minutes: int = 150) -> dict:
+        """World Cup best XI (4-3-3) ranked by actual World Cup average match
+        rating. Source is wc_player_stats (SofaScore per-player tournament rating,
+        scraped per position group and pushed in alongside the rest of the WC
+        feed). Players need `min_minutes` in the tournament to clear small-sample
+        noise; the top-rated per position fill GK / 4 DEF / 3 MID / 3 FWD. National
+        flag (or a name-matched club photo) on each chip; badge shows the rating."""
+        if season is None:
+            row = self.con.execute("SELECT max(season) FROM wc_player_stats").fetchone()
+            season = row[0] if row and row[0] else None
+        if season is None:
+            return {"edition": None, "formation": "4-3-3", "lines": []}
+
+        df = self.con.execute("""
+            SELECT p.player, p.team AS nat, p.position AS pos, p.rating,
+                   p.minutes, p.appearances, w.cc, pe.fpid
+            FROM wc_player_stats p
+            LEFT JOIN (SELECT DISTINCT team, cc FROM wc_standings WHERE season = ?) w
+                   ON lower(w.team) = lower(p.team)
+            LEFT JOIN players pl ON lower(pl.player_name) = lower(p.player)
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = pl.player_id
+            WHERE p.season = ? AND p.minutes >= ?
+        """, [season, season, min_minutes]).df()
+        if df.empty:
+            return {"edition": str(season), "formation": "4-3-3", "lines": []}
+
+        df = df.sort_values(["rating", "minutes"], ascending=False)
+        used = set()
+
+        def pick(pos, n):
+            out = []
+            for r in df.itertuples():
+                if len(out) >= n:
+                    break
+                if r.player not in used and r.pos == pos:
+                    used.add(r.player)
+                    out.append(r)
+            return out
+
+        lines = {"GK": pick("G", 1), "DEF": pick("D", 4),
+                 "MID": pick("M", 3), "FWD": pick("F", 3)}
+
+        def fmt(rows):
+            return [{"player": r.player, "position": self._WC_LINE.get(r.pos, r.pos),
+                     "team": r.nat, "cc": r.cc, "rating": _r(r.rating, 1),
+                     "apps": _i(r.appearances),
+                     "photo": self.player_photo(None if r.fpid != r.fpid else int(r.fpid))}
+                    for r in rows]
+        return {"edition": str(season), "formation": "4-3-3",
                 "lines": [{"label": k, "players": fmt(v)} for k, v in lines.items()]}
 
     def web_archetype(self, name: str, season: str = FOCUS_SEASON) -> dict:

@@ -133,10 +133,16 @@ def main() -> None:
                 events[e["id"]] = e
         rows = []
         for e in events.values():
-            if (e.get("status") or {}).get("code") != 100:        # finished only
+            # finished includes FT (100), after-extra-time (110) and after-penalties
+            # (120) -- knockout ties that go to ET/pens must NOT be dropped.
+            if (e.get("status") or {}).get("type") != "finished":
                 continue
             hs, as_ = (e.get("homeScore") or {}), (e.get("awayScore") or {})
-            if hs.get("current") is None or as_.get("current") is None:
+            # `display` is the regulation/ET goals score WITHOUT the shootout;
+            # `current` folds penalties in (a 1-1 final reads as 5-4). Prefer display.
+            hg = hs.get("display") if hs.get("display") is not None else hs.get("current")
+            ag = as_.get("display") if as_.get("display") is not None else as_.get("current")
+            if hg is None or ag is None:
                 continue
             h, a = e["homeTeam"], e["awayTeam"]
             ri = e.get("roundInfo") or {}
@@ -145,7 +151,7 @@ def main() -> None:
                 e.get("startTimestamp"),
                 resolve(h["name"]), resolve(a["name"]),
                 h["name"], a["name"],
-                int(hs["current"]), int(as_["current"]),
+                int(hg), int(ag),
                 ri.get("name") or (f"Round {ri['round']}" if ri.get("round") else None),
             ))
         for r in rows:

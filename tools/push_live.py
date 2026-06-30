@@ -139,7 +139,9 @@ def _service_wc():
             data = load_wc.fetch_wc_rows(WC_SEASON)
             status, r = _post("/api/ingest/wc", {"data": data})
             print(f"{datetime.now():%H:%M:%S} WC pushed {len(data['leaders'])} leaders / "
-                  f"{len(data['matches'])} matches / {len(data['standings'])} standings -> {status}", flush=True)
+                  f"{len(data['matches'])} matches / {len(data['standings'])} standings / "
+                  f"{len(data.get('players') or [])} players / "
+                  f"{len(data.get('bracket') or [])} bracket -> {status}", flush=True)
         except Exception as e:                            # noqa: BLE001
             print(f"{datetime.now():%H:%M:%S} WC push error: {type(e).__name__}: {str(e)[:120]}", flush=True)
         time.sleep(WC_EVERY)

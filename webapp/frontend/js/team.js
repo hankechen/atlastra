@@ -25,6 +25,13 @@ async function load(name) {
   document.getElementById('crumb').textContent = d.team;
   document.getElementById('tcrest').innerHTML = crestHTML(d.team_logo, 'crest-xl') || '🛡️';
   document.getElementById('tname').textContent = d.team;
+
+  // fan comment thread (mount once per page; keyed by canonical team name)
+  if (window.mountComments && !window._cmtsMounted) {
+    window._cmtsMounted = true;
+    mountComments('team:' + d.team, document.getElementById('comments'),
+      { title: 'Fan Comments', subject: d.team });
+  }
   const tf = document.getElementById('teamFollow');
   const titem = { id: d.team, name: d.team, league: d.league, crest: d.team_logo };
   const syncT = () => { const on = Store.has('teams', d.team); tf.classList.toggle('on', on); tf.textContent = on ? '✓ Following' : '★ Follow'; };

@@ -21,17 +21,69 @@ async function loadLiveWidget() {
 loadLiveWidget();
 setInterval(() => { if (!document.hidden) loadLiveWidget(); }, 30000);
 
-// Team of the Season — real best XI by average match rating (4-3-3)
+// World Cup XI — best XI by average match rating among players at the World Cup (4-3-3)
 (async () => {
-  const tots = await api('/api/team_of_season');
-  document.getElementById('totsNote').textContent = `Best XI by average match rating · ${tots.formation}`;
+  const xi = await api('/api/team_of_week');
+  document.getElementById('totsNote').textContent =
+    `Best XI by average match rating · ${xi.edition || ''} · ${xi.formation}`;
   const surname = (n) => n.split(' ').slice(-1)[0];
-  document.getElementById('tof').innerHTML = tots.lines.map(line =>
+  const dot = (p) => p.photo ? avatarHTML(p.photo, p.player)
+    : (flagISO2(p.cc) ? `<span class="flagdot">${flagISO2(p.cc)}</span>` : avatarHTML(null, p.player));
+  document.getElementById('tof').innerHTML = xi.lines.map(line =>
     `<div class="pline">${line.players.map(p => `
-      <span class="pp" onclick="location.href='${pHref(p.player)}'" title="${p.player} · ${p.team} · ${p.position}">
-        <span class="dot">${avatarHTML(p.photo, p.player)}</span>
-        <span class="pp-rt" style="background:${ratingColor(p.avg_rating)}">${(+p.avg_rating).toFixed(1)}</span>
+      <span class="pp" onclick="location.href='${pHref(p.player)}'" title="${p.player} · ${p.team}${p.club ? ' (' + p.club + ')' : ''} · ${(+p.rating).toFixed(1)} avg rating">
+        <span class="dot">${dot(p)}</span>
+        <span class="pp-rt" style="background:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>
         <span class="pp-n">${surname(p.player)}</span></span>`).join('')}</div>`).join('');
+})();
+
+// Guest-only "Discover" card — a random spotlight/head-to-head/result so the home
+// page feels alive before signing in. Hidden for signed-in users.
+(async () => {
+  if (Auth.user == null) { try { await Auth.me(); } catch { /* guest */ } }
+  if (Auth.user) return;                       // signed in -> skip
+  let c; try { c = await api('/api/discover'); } catch { return; }
+  if (!c || !c.type) return;
+  const box = document.getElementById('discover');
+  if (!box) return;
+  const head = (t, link) => `<div class="card-h"><h3>${t}</h3>${link || ''}</div>`;
+  const chip = (r) => `<span class="ratingchip">${r}</span>`;
+  let body = '';
+  if (c.type === 'player') {
+    body = head('✨ ' + c.kicker, `<a class="see" href="${pHref(c.player)}">View profile</a>`) +
+      `<a class="disc-player" href="${pHref(c.player)}">
+        <span class="pic">${avatarHTML(c.photo, c.player)}</span>
+        <span class="disc-main"><div class="nm">${c.player}</div>
+          <div class="sub">${crestHTML(c.team_logo, 'crest-sm')}${c.team || ''} · ${c.position || ''}</div>
+          ${c.line ? `<div class="disc-line">${c.line}</div>` : ''}</span>
+        <span class="disc-end">${chip(c.rating)}<span class="disc-tag">${c.blurb || ''}</span></span></a>`;
+  } else if (c.type === 'compare') {
+    const side = (p) => `<a class="disc-vs-p" href="${pHref(p.player)}">
+        <span class="pic">${avatarHTML(p.photo, p.player)}</span>
+        <div class="nm">${p.player}</div>${chip(p.rating)}
+        <div class="sub">${p.line || (p.position || '')}</div></a>`;
+    const cmp = `/compare.html?name=${encodeURIComponent(c.a.player)}&name=${encodeURIComponent(c.b.player)}`;
+    body = head('⚔ ' + c.kicker, `<a class="see" href="${cmp}">Compare →</a>`) +
+      `<div class="disc-vs">${side(c.a)}<span class="disc-vs-x">vs</span>${side(c.b)}</div>`;
+  } else if (c.type === 'stat') {
+    body = head('📊 ' + c.kicker, `<a class="see" href="${pHref(c.player)}">View profile</a>`) +
+      `<a class="disc-player" href="${pHref(c.player)}">
+        <span class="pic">${avatarHTML(c.photo, c.player)}</span>
+        <span class="disc-main"><div class="disc-tag">${c.label}</div>
+          <div class="nm">${c.player}</div>
+          <div class="sub">${crestHTML(c.team_logo, 'crest-sm')}${c.team || ''}</div></span>
+        <span class="disc-end"><b class="disc-big">${c.value}</b><span class="disc-unit">${c.unit}</span></span></a>`;
+  } else if (c.type === 'match') {
+    const pens = (c.home_pens != null) ? `<div class="disc-pens">pens ${c.home_pens}-${c.away_pens}</div>` : '';
+    const href = c.event_id != null ? `/match.html?id=${c.event_id}` : '';
+    body = head('⚽ ' + c.kicker, `<a class="see" href="/live.html">More results</a>`) +
+      `<a class="disc-match"${href ? ` href="${href}"` : ''}>
+        <span class="disc-m-t">${crestHTML(c.home_logo, 'crest-md') || '🛡️'}<span class="nm">${c.home}</span></span>
+        <span class="disc-m-s">${c.home_score} - ${c.away_score}${pens}<div class="disc-comp">${c.competition || ''}</div></span>
+        <span class="disc-m-t away">${crestHTML(c.away_logo, 'crest-md') || '🛡️'}<span class="nm">${c.away}</span></span></a>`;
+  }
+  box.innerHTML = body;
+  box.style.display = 'block';
 })();
 
 // ---- real data ----
@@ -42,7 +94,7 @@ setInterval(() => { if (!document.hidden) loadLiveWidget(); }, 30000);
     [(ov.matches / 1000 | 0) + 'K+', 'Matches'], [ov.stats_tracked + '+', 'Stats Tracked'],
   ].map(([b, s]) => `<div class="s"><b>${b}</b><span>${s}</span></div>`).join('');
 
-  const ranks = await api('/api/rankings?limit=5');
+  const ranks = await api('/api/rankings?limit=10');
   document.getElementById('top5').innerHTML = ranks.map(p => playerRow(p, { chip: true })).join('');
 
   // Games rail: quick links into the games hub (mirrors the sidebar Games group).

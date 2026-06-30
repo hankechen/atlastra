@@ -31,14 +31,34 @@ function bktTie(t) {
   const live = t.live ? '<span class="bkt-live-tag">● LIVE</span>' : '';
   return `<div class="bkt-tie-wrap"><div class="bkt-tie${t.live ? ' live' : ''}"${click}>${bktSide(t, 'a')}${bktSide(t, 'b')}${live}</div></div>`;
 }
+function bktCol(label, ties) {
+  return `<div class="bkt-col"><div class="bkt-rh">${label}</div>
+      <div class="bkt-col-body">${ties.map(bktTie).join('')}</div></div>`;
+}
 function renderBracket(d) {
   const b = d.bracket || [];
   if (!b.length) { _content().innerHTML = '<div class="empty">No knockout matches for this edition.</div>'; return; }
-  _content().innerHTML = `<section class="card"><div class="bkt">${b.map(r => `
-    <div class="bkt-col">
-      <div class="bkt-rh">${r.label}</div>
-      <div class="bkt-col-body">${r.ties.map(bktTie).join('')}</div>
-    </div>`).join('')}</div></section>`;
+  // Two-sided bracket converging on the centre: split each round's ties into a
+  // top half (left side, L→R) and bottom half (right side, mirrored so it flows
+  // R→L into the Final in the middle). The right half is scaleX-flipped in CSS —
+  // its tie content is flipped back so text stays readable.
+  const final = b[b.length - 1];
+  const prelim = b.slice(0, -1);
+  if (!prelim.length) {                         // only the Final exists -> render flat
+    _content().innerHTML = `<section class="card"><div class="bkt">${bktCol(final.label, final.ties)}</div></section>`;
+    return;
+  }
+  const half = (ties, side) => {
+    const n = Math.ceil(ties.length / 2);
+    return side === 'l' ? ties.slice(0, n) : ties.slice(n);
+  };
+  const left = prelim.map(r => bktCol(r.label, half(r.ties, 'l'))).join('');
+  const right = prelim.map(r => bktCol(r.label, half(r.ties, 'r'))).join('');
+  _content().innerHTML = `<section class="card"><div class="bkt bkt-split">
+    <div class="bkt-half bkt-left">${left}</div>
+    <div class="bkt-half bkt-mid">${bktCol(final.label, final.ties)}</div>
+    <div class="bkt-half bkt-right">${right}</div>
+  </div></section>`;
 }
 let _wcTimer = null;
 async function loadBracket() {
