@@ -86,6 +86,9 @@ _PREVIEW_TTL = 300
 # (name-matching both squads) is the slow part, precomputed here off the click path.
 PREVIEW_WARM_N = int(os.environ.get("ATLASTRA_PREVIEW_WARM_N", "10"))
 PREVIEW_WARM_EVERY = int(os.environ.get("ATLASTRA_PREVIEW_WARM_EVERY", "120"))
+# How often to warm every national team's SofaScore paths into the persisted cache so
+# /nat.html loads even while the relay (scraper machine) is offline.
+NAT_WARM_EVERY = int(os.environ.get("ATLASTRA_NAT_WARM_EVERY", "300"))
 
 # Optional "Sign in with Google". Set ATLASTRA_GOOGLE_CLIENT_ID to a Google OAuth
 # Web client id to enable it; left unset, the Google button simply never appears
@@ -666,6 +669,28 @@ def _preview_warmer():
         time.sleep(PREVIEW_WARM_EVERY)
 
 
+def _national_warmer():
+    """Keep every national team's SofaScore paths warm in the persisted cache so
+    /nat.html loads even when the relay (the scraper machine) is offline. Like the
+    preview warmer, this just pulls each team through national_team() so its header,
+    squad, results, fixtures (and latest-XI lineups) get queued for the relay and land
+    in the persisted snapshot -- the reactive prewarm_team() on a page hit only covers
+    teams someone has actually visited. Only meaningful in cache mode (the deployed
+    host). Converges over a couple of cycles: prewarm_team() queues the four core paths
+    up front, then national_team() queues the deeper lineup paths once they're cached."""
+    import time
+    while True:
+        try:
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                tids = [t["team_id"] for t in d.web_national_teams() if t.get("team_id")]
+            for tid in tids:
+                live_feed.prewarm_team(tid)
+                live_feed.national_team(tid)       # pull-through -> queues + fills the cache
+        except Exception as e:                     # noqa: BLE001
+            print(f"national warmer: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(NAT_WARM_EVERY)
+
+
 if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
     if LIVE_REFRESH:
@@ -674,4 +699,6 @@ if __name__ == "__main__":
     if live_feed.CACHE_MODE:
         threading.Thread(target=_preview_warmer, daemon=True).start()
         print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")
+        threading.Thread(target=_national_warmer, daemon=True).start()
+        print(f"national warmer: on (all national teams, every {NAT_WARM_EVERY}s)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
