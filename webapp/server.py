@@ -81,6 +81,11 @@ DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN)
 # instant for the window.
 _PREVIEW_CACHE: dict[int, tuple[float, dict]] = {}
 _PREVIEW_TTL = 300
+# Background preview warmer (cache-mode/deployed only): keep _PREVIEW_CACHE hot for the
+# soonest N upcoming fixtures so the Preview tab is instant -- the key-player enrichment
+# (name-matching both squads) is the slow part, precomputed here off the click path.
+PREVIEW_WARM_N = int(os.environ.get("ATLASTRA_PREVIEW_WARM_N", "10"))
+PREVIEW_WARM_EVERY = int(os.environ.get("ATLASTRA_PREVIEW_WARM_EVERY", "120"))
 
 # Optional "Sign in with Google". Set ATLASTRA_GOOGLE_CLIENT_ID to a Google OAuth
 # Web client id to enable it; left unset, the Google button simply never appears
@@ -208,6 +213,33 @@ def match_api(path: str, q: dict) -> dict:
     raise KeyError(path)
 
 
+def _fixture_preview(eid: int, d) -> dict:
+    """Build the enriched fixture preview (SofaScore preview + top key players by our
+    ratings), served from _PREVIEW_CACHE. Shared by the /api/fixture_preview route and
+    the background warmer so their logic can't drift. `d` is an open SoccerDB."""
+    hit = _PREVIEW_CACHE.get(eid)
+    if hit and time.time() - hit[0] < _PREVIEW_TTL:
+        return hit[1]
+    # queue every preview path (header + both teams' form/squad + h2h + odds) in ONE
+    # relay cycle using the team ids we already store, so a cold preview fills in one
+    # pass instead of two (header first, then the rest).
+    hid, aid = d.match_team_ids(eid)
+    live_feed.prewarm_preview(eid, hid, aid)
+    pv = live_feed.fixture_preview(eid)
+    if pv.get("available") and not pv.get("pending"):
+        # Enrich squad -> top-rated key players ONCE the relay has the full squad
+        # (name-matching ~60 names is the slow part). Skip while pending so the client's
+        # poll cycles stay fast, then cache the finished result.
+        for side in ("home", "away"):
+            pv[side]["key"] = d.web_squad_key_players(pv[side].pop("squad", []))
+        _PREVIEW_CACHE[eid] = (time.time(), pv)
+    elif pv.get("available"):
+        for side in ("home", "away"):      # pending: don't run enrichment yet
+            pv[side].pop("squad", None)
+            pv[side]["key"] = []
+    return pv
+
+
 def api(path: str, q: dict) -> dict | list:
     # match-detail routes are exactly /api/match or /api/match/... — must NOT
     # swallow sibling routes like /api/match_search or /api/match_preview.
@@ -329,28 +361,7 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/preview":
             return d.web_match_preview(q.get("home", ["Arsenal"])[0], q.get("away", ["Chelsea"])[0])
         if path == "/api/fixture_preview":         # SofaScore preview + key-player enrichment
-            eid = int(q.get("id", [0])[0])
-            hit = _PREVIEW_CACHE.get(eid)
-            if hit and time.time() - hit[0] < _PREVIEW_TTL:
-                return hit[1]
-            # queue every preview path (header + both teams' form/squad + h2h + odds)
-            # in ONE relay cycle using the team ids we already store, so a cold preview
-            # fills in one pass instead of two (header first, then the rest).
-            hid, aid = d.match_team_ids(eid)
-            live_feed.prewarm_preview(eid, hid, aid)
-            pv = live_feed.fixture_preview(eid)
-            if pv.get("available") and not pv.get("pending"):
-                # Enrich squad -> top-rated key players ONCE the relay has the full
-                # squad (name-matching ~60 names is the slow part). Skip while pending
-                # so the client's poll cycles stay fast, then cache the finished result.
-                for side in ("home", "away"):
-                    pv[side]["key"] = d.web_squad_key_players(pv[side].pop("squad", []))
-                _PREVIEW_CACHE[eid] = (time.time(), pv)
-            elif pv.get("available"):
-                for side in ("home", "away"):      # pending: don't run enrichment yet
-                    pv[side].pop("squad", None)
-                    pv[side]["key"] = []
-            return pv
+            return _fixture_preview(int(q.get("id", [0])[0]), d)
         if path == "/api/big_game_board":
             return d.web_big_game_board()
         if path == "/api/big_game":
@@ -636,9 +647,31 @@ def _live_refresher():
         time.sleep(LIVE_POLL if (LITE or n_live) else IDLE_POLL)
 
 
+def _preview_warmer():
+    """Keep _PREVIEW_CACHE hot for the soonest upcoming fixtures so the Preview tab is
+    instant on the first click. The pusher warms each match's SofaScore preview paths
+    into the cache; this precomputes the expensive key-player enrichment on top of them
+    off the click path. Refresh cadence stays under _PREVIEW_TTL so the cache never
+    lapses for those matches. Only meaningful in cache mode (the deployed host)."""
+    import time
+    while True:
+        try:
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                eids = [m["event_id"] for m in d.web_live(0, PREVIEW_WARM_N).get("upcoming", [])]
+            for eid in eids:
+                with SoccerDB(read_only=DB_READ_ONLY) as d:
+                    _fixture_preview(eid, d)       # populates _PREVIEW_CACHE once data is ready
+        except Exception as e:                     # noqa: BLE001
+            print(f"preview warmer: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(PREVIEW_WARM_EVERY)
+
+
 if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
     if LIVE_REFRESH:
         threading.Thread(target=_live_refresher, daemon=True).start()
         print("live refresher: on (read-write DB; ATLASTRA_NO_LIVE_REFRESH=1 to disable)")
+    if live_feed.CACHE_MODE:
+        threading.Thread(target=_preview_warmer, daemon=True).start()
+        print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

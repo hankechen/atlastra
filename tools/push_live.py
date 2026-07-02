@@ -36,7 +36,16 @@ IDLE_POLL = int(os.environ.get("PUSH_IDLE_POLL", "300"))
 QUEUE_POLL = int(os.environ.get("PUSH_QUEUE_POLL", "3"))   # on-demand match-detail relay interval
 WARM_LIVE = int(os.environ.get("PUSH_WARM_LIVE", "5"))     # pre-warm this many in-play matches' detail
 WARM_EVERY = int(os.environ.get("PUSH_WARM_EVERY", "60"))  # how often to re-warm live matches
+# Also pre-warm the soonest UPCOMING fixtures (preview + lineup paths) and most RECENT
+# results (core detail) so those match pages open from cache -- no relay round-trip on
+# the click path. These change slowly, so a gentler cadence than the live warm.
+WARM_UPCOMING = int(os.environ.get("PUSH_WARM_UPCOMING", "10"))
+WARM_RECENT = int(os.environ.get("PUSH_WARM_RECENT", "6"))
+WARM_FIXT_EVERY = int(os.environ.get("PUSH_WARM_FIXT_EVERY", "240"))
 _WARMED_CLUBS = set()                                      # player ids whose (static) club is cached
+_FIXTURES = {"upcoming": [], "recent": []}                 # soonest/most-recent rows (from the full scrape)
+# bookmaker odds feeds for the preview projection (mirror live_feed._ODDS_PROVIDERS)
+_ODDS_PROVIDERS = (1, 5, 8, 11, 14, 16)
 WC_EVERY = int(os.environ.get("PUSH_WC_EVERY", "900"))     # World Cup leaders/standings refresh
 WC_SEASON = os.environ.get("PUSH_WC_SEASON", "2026")       # current edition to keep fresh
 
@@ -76,37 +85,58 @@ def _fetch_items(paths):
             for p, b in zip(paths, _FETCH_POOL.map(_fetch, paths))]
 
 
-def _warm_matches(eids):
-    """Pre-fetch + push detail for these matches so they open INSTANTLY on the site --
-    the core match detail (header/lineups/timeline/stats/shotmap) AND each starter's
-    club (static, fetched once) + heatmap, so the lineup player modal has no on-click
-    lag. Returns the number of paths warmed."""
-    items = []
-    for eid in eids:
-        lu = None
-        for suf in ("", "/lineups", "/incidents", "/statistics", "/shotmap"):
-            body = _fetch(f"/event/{eid}{suf}")
-            if suf == "/lineups":
-                lu = body
-            items.append({"path": f"/event/{eid}{suf}", "body": body})
-        for side in ("home", "away"):                     # starters' club + heatmap
-            for pl in ((lu or {}).get(side) or {}).get("players", []) or []:
-                if pl.get("substitute"):
-                    continue
-                pid = (pl.get("player") or {}).get("id")
-                if not pid:
-                    continue
-                hp = f"/event/{eid}/player/{pid}/heatmap"
-                items.append({"path": hp, "body": _fetch(hp)})
-                if pid not in _WARMED_CLUBS:              # club is static -> fetch once
-                    items.append({"path": f"/player/{pid}", "body": _fetch(f"/player/{pid}")})
-                    _WARMED_CLUBS.add(pid)
-    for i in range(0, len(items), 30):                    # push in modest chunks
+def _push_items(items):
+    """POST warmed {path, body} rows to the server's cache in modest chunks."""
+    for i in range(0, len(items), 30):
         try:
             _post("/api/ingest/cache", {"items": items[i:i + 30]})
         except Exception:                                 # noqa: BLE001
             pass
     return len(items)
+
+
+def _warm_matches(eids, lite: bool = False):
+    """Pre-fetch + push match detail for these events so they open INSTANTLY on the
+    site -- the core detail (header/lineups/timeline/stats/shotmap), and unless `lite`,
+    each starter's club (static, fetched once) + heatmap so the lineup player modal has
+    no on-click lag. Fetched concurrently. Returns the number of paths warmed."""
+    core = [f"/event/{eid}{suf}" for eid in eids
+            for suf in ("", "/lineups", "/incidents", "/statistics", "/shotmap")]
+    items = _fetch_items(core)
+    lus = {it["path"]: it["body"] for it in items}        # lineups keyed by path
+    if not lite:                                          # starters' heatmap + club
+        extra = []
+        for eid in eids:
+            lu = lus.get(f"/event/{eid}/lineups")
+            for side in ("home", "away"):
+                for pl in ((lu or {}).get(side) or {}).get("players", []) or []:
+                    if pl.get("substitute"):
+                        continue
+                    pid = (pl.get("player") or {}).get("id")
+                    if not pid:
+                        continue
+                    extra.append(f"/event/{eid}/player/{pid}/heatmap")
+                    if pid not in _WARMED_CLUBS:          # club is static -> fetch once
+                        extra.append(f"/player/{pid}")
+                        _WARMED_CLUBS.add(pid)
+        items += _fetch_items(extra)
+    return _push_items(items)
+
+
+def _warm_previews(rows):
+    """Pre-fetch + push each upcoming fixture's PREVIEW paths (both teams' recent form &
+    squad, head-to-head, bookmaker odds) so the Preview tab renders from cache instead
+    of triggering a relay round-trip. Team ids come from the scraped row, so no wait on
+    the event header. Fetched concurrently. Returns the number of paths warmed."""
+    paths = []
+    for r in rows:
+        eid = r["event_id"]
+        paths.append(f"/event/{eid}/h2h")
+        paths += [f"/event/{eid}/odds/{p}/featured" for p in _ODDS_PROVIDERS]
+        for tid in (r.get("home_team_id"), r.get("away_team_id")):
+            if tid:
+                paths += [f"/team/{tid}/events/last/0", f"/team/{tid}/players"]
+    return _push_items(_fetch_items(paths))
 
 
 def _service_warm():
@@ -122,6 +152,32 @@ def _service_warm():
         except Exception as e:                            # noqa: BLE001
             print(f"{datetime.now():%H:%M:%S} warm error: {type(e).__name__}: {str(e)[:120]}", flush=True)
         time.sleep(WARM_EVERY)
+
+
+def _service_warm_fixtures():
+    """Keep the soonest UPCOMING fixtures (core detail + preview) and the most RECENT
+    results (core detail) warm so their match pages -- Preview, Lineups, Stats, ... --
+    open from cache with no relay round-trip. The fixture list comes from the main
+    loop's full scrape (_FIXTURES); these change slowly, hence the gentle cadence."""
+    while True:
+        try:
+            up = _FIXTURES["upcoming"][:WARM_UPCOMING]
+            rc = _FIXTURES["recent"][:WARM_RECENT]
+            n = 0
+            if up:
+                n += _warm_matches([r["event_id"] for r in up], lite=True)
+                n += _warm_previews(up)
+            if rc:
+                n += _warm_matches([r["event_id"] for r in rc], lite=True)
+            if up or rc:
+                print(f"{datetime.now():%H:%M:%S} warmed {len(up)} upcoming + {len(rc)} "
+                      f"recent fixture(s) ({n} paths)", flush=True)
+            else:
+                time.sleep(10)                            # list not populated yet -- retry soon
+                continue
+        except Exception as e:                            # noqa: BLE001
+            print(f"{datetime.now():%H:%M:%S} fixture-warm error: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(WARM_FIXT_EVERY)
 
 
 def _service_queue():
@@ -165,6 +221,7 @@ def main():
         sys.exit("ATLASTRA_INGEST_TOKEN is required (must match the server).")
     threading.Thread(target=_service_queue, daemon=True).start()   # match-detail relay
     threading.Thread(target=_service_warm, daemon=True).start()    # pre-warm live matches + players
+    threading.Thread(target=_service_warm_fixtures, daemon=True).start()  # upcoming previews + recent
     threading.Thread(target=_service_wc, daemon=True).start()      # World Cup hub data
     last_full = 0.0
     n_live = 0
@@ -174,6 +231,13 @@ def main():
             rows = live.fetch_rows() if full else live.fetch_live_only()
             if full:
                 last_full = time.time()
+                # refresh the fixture-warm lists: soonest upcoming, most-recent finished
+                up = sorted((r for r in rows if r.get("status_type") in ("notstarted", "delayed")
+                             and r.get("start_timestamp")), key=lambda r: r["start_timestamp"])
+                rc = sorted((r for r in rows if r.get("status_type") == "finished"
+                             and r.get("start_timestamp")), key=lambda r: -r["start_timestamp"])
+                _FIXTURES["upcoming"] = up[:WARM_UPCOMING]
+                _FIXTURES["recent"] = rc[:WARM_RECENT]
             n_live = sum(1 for r in rows if r.get("status_type") == "inprogress")
             status, resp = _push(rows, prune=full)
             print(f"{datetime.now():%H:%M:%S} {'FULL' if full else 'live'} "

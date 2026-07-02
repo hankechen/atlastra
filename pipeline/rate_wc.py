@@ -56,7 +56,8 @@ AWARDS = {
 MANUAL_OVERRIDES = {
     "2026": {"Lamine Yamal": 81, "Folarin Balogun": 73,
              "Cristian Romero": 65, "Enzo Fernández": 75, "Alexis Mac Allister": 71,
-             "Rodrigo De Paul": 73, "Lautaro Martínez": 70, "Thiago Almada": 63},
+             "Rodrigo De Paul": 73, "Lautaro Martínez": 70, "Thiago Almada": 63,
+             "Nuno Mendes": 76, "Vitinha": 71},
 }
 
 

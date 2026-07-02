@@ -15,13 +15,23 @@ const _isToday = (ts) => {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
 };
 
+// SofaScore files the qualifying rounds under the main competition id, so a
+// qualifier's `round` reads like "Qualification Round 1" while its competition is
+// just "UEFA Champions League". Split those into a "… Qualification" section so it's
+// clear they're not the group/league phase proper. Match only "qualif" (not
+// "play-off") so the main-competition knockout play-off rounds stay put.
+function compLabel(m) {
+  return /qualif/i.test(String(m.round || '')) ? `${m.competition} Qualification` : m.competition;
+}
+
 // group a flat match list by competition, preserving first-seen order
 function byCompetition(list) {
   const groups = [];
   const idx = {};
   for (const m of list) {
-    if (!(m.competition in idx)) { idx[m.competition] = groups.length; groups.push([m.competition, []]); }
-    groups[idx[m.competition]][1].push(m);
+    const c = compLabel(m);
+    if (!(c in idx)) { idx[c] = groups.length; groups.push([c, []]); }
+    groups[idx[c]][1].push(m);
   }
   return groups;
 }

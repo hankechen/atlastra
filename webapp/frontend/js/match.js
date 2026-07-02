@@ -72,14 +72,24 @@ function renderTabs() {
 }
 const body = () => document.getElementById('tabBody');
 const LOADERS = { preview: loadPreview, predict: loadPredict, stats: loadStatsTab, lineups: loadLineups, prediction: loadPrediction, shotmap: loadShotmap, timeline: loadTimeline, moments: loadKeyMoments, players: loadPlayers, heatmaps: loadHeatmaps };
+// A tab loader does async work (fetch + relay-poll) before it writes to the body, so a
+// slow one can finish AFTER the user has switched tabs and clobber the new content
+// (e.g. lineups, still fetching player stats, painting over Key Moments). Each load
+// bumps loadGen; a loader captures it via tabGuard() and its guard goes false the
+// moment a newer load starts, so stale writes/renders become no-ops.
+let loadGen = 0;
+const tabGuard = () => { const g = loadGen; return () => g === loadGen; };
 async function loadActive(refresh) {
+  const gen = ++loadGen;
   if (!refresh) body().innerHTML = '<section class="card"><div class="placeholder-note">Loading…</div></section>';
-  try { await LOADERS[active](); } catch { body().innerHTML = '<section class="card"><div class="placeholder-note">Could not load this section.</div></section>'; }
+  try { await LOADERS[active](); } catch { if (gen === loadGen) body().innerHTML = '<section class="card"><div class="placeholder-note">Could not load this section.</div></section>'; }
 }
 
 // ---- Stats ----
 async function loadStatsTab() {
+  const live = tabGuard();
   const d = await A('/api/match/stats');
+  if (!live()) return;
   if (!d.available) { body().innerHTML = empty('No match statistics yet — check back once the match kicks off.'); return; }
   body().innerHTML = d.groups.map(g => `
     <section class="card stat-group">
@@ -162,7 +172,9 @@ function loadPredict() {
 
 // ---- Prediction (from bookmaker odds) ----
 async function loadPrediction() {
+  const live = tabGuard();
   const d = await A('/api/match/prediction');
+  if (!live()) return;
   if (!d.available) { body().innerHTML = empty('No betting odds available for this match yet.'); return; }
   const c = d.consensus;
   const teams = { home: head?.home || 'Home', draw: 'Draw', away: head?.away || 'Away' };
@@ -356,51 +368,64 @@ async function openPlayerModal(id) {
   } catch { /* heatmap optional */ }
 }
 async function loadLineups(isRefresh) {
+  const live = tabGuard();
   const d = await A('/api/match/lineups');
+  if (!live()) return;
   if (!d.available) { body().innerHTML = empty('Lineups not published yet.'); return; }
   const note = d.confirmed ? '' : '<div class="placeholder-note" style="margin-bottom:10px">⚠ Predicted lineup — not yet confirmed.</div>';
-  // Manual refresh: the lineups tab isn't on the 30s live poll, so this pulls the
-  // latest per-player match stats (ratings, goals/assists) on demand.
-  const bar = `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
-    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    }</span><button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
   // id -> name (incl. subs) so the player-stats modal has a name even with no stats;
   // also keep the Atlastra rating/est so the modal only offers a profile link for a
   // player actually IN our DB (a real, non-estimated rating).
   for (const side of [d.home, d.away])
     for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
       if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; _luTourn[p.id] = p.tourn || null; }
-  // per-player match stats -> goal/assist icons on the chips (+ the modal); fresh
-  // each load so icons reflect the latest score.
-  const ps = await A('/api/match/player-stats');
-  _luStats = {};
-  if (ps.available) for (const pl of ps.players) _luStats[pl.id] = pl;
   const hx = d.home?.starting_xi || [], ax = d.away?.starting_xi || [];
   const hRows = parseFormation(d.home?.formation, hx.length);
   const aRows = parseFormation(d.away?.formation, ax.length);
-  if (hRows && aRows) {
-    const chips = placeSide(hx, hRows, true).map(c => chipHTML(c, true)).join('')
-                + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');
-    body().innerHTML = note + bar + `
-      <section class="card">
-        <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b>${mgrTag(d.away?.manager)}</div>
-        <div class="lineup-pitch">
-          <span class="lp-mid"></span><span class="lp-circle"></span><span class="lp-spot"></span>
-          <span class="lp-box top"></span><span class="lp-box bot"></span>
-          <span class="lp-six top"></span><span class="lp-six bot"></span>
-          ${chips}
-        </div>
-        <div class="lp-head h">${mgrTag(d.home?.manager)}<b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
-      </section>
-      <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
-        ${subsCol(d.home, head?.home || 'Home')}${subsCol(d.away, head?.away || 'Away')}</div>`;
-  } else {
-    body().innerHTML = note + bar + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
-      ${lineupSideList(d.home, head?.home || 'Home')}${lineupSideList(d.away, head?.away || 'Away')}</div>`;
+  // Draw the pitch as soon as the lineup arrives -- do NOT block it on the per-player
+  // match-stats call (goal/assist icons), which can lag a few seconds. For an upcoming
+  // match there are no stats anyway, so this first paint is already the final one; for
+  // a live/finished match the icons fill in a moment later via a second paint().
+  const paint = () => {
+    if (!live()) return;                                          // user switched tabs mid-load
+    const bar = `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
+      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      }</span><button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
+    if (hRows && aRows) {
+      const chips = placeSide(hx, hRows, true).map(c => chipHTML(c, true)).join('')
+                  + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');
+      body().innerHTML = note + bar + `
+        <section class="card">
+          <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b>${mgrTag(d.away?.manager)}</div>
+          <div class="lineup-pitch">
+            <span class="lp-mid"></span><span class="lp-circle"></span><span class="lp-spot"></span>
+            <span class="lp-box top"></span><span class="lp-box bot"></span>
+            <span class="lp-six top"></span><span class="lp-six bot"></span>
+            ${chips}
+          </div>
+          <div class="lp-head h">${mgrTag(d.home?.manager)}<b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
+        </section>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
+          ${subsCol(d.home, head?.home || 'Home')}${subsCol(d.away, head?.away || 'Away')}</div>`;
+    } else {
+      body().innerHTML = note + bar + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+        ${lineupSideList(d.home, head?.home || 'Home')}${lineupSideList(d.away, head?.away || 'Away')}</div>`;
+    }
+    const rb = document.getElementById('lpReload');
+    if (rb) rb.onclick = async () => { rb.disabled = true; rb.textContent = '↻ Refreshing…'; await loadLineups(true); };
+  };
+  paint();                                                        // pitch on screen immediately
+  // per-player match stats -> goal/assist icons on the chips (+ the modal); fresh each
+  // load so icons reflect the latest score. Fetched AFTER the pitch is shown; repaint
+  // only if there's actually something to add. Skipped for a not-yet-started match --
+  // there are no stats, so it would just poll the relay pointlessly.
+  if (head?.status === 'inprogress' || head?.status === 'finished') {
+    const ps = await A('/api/match/player-stats');
+    if (!live()) return;                                          // switched away while fetching stats
+    _luStats = {};
+    if (ps.available) { for (const pl of ps.players) _luStats[pl.id] = pl; paint(); }
   }
-  const rb = document.getElementById('lpReload');
-  if (rb) rb.onclick = async () => { rb.disabled = true; rb.textContent = '↻ Refreshing…'; await loadLineups(true); };
-  if (!isRefresh) {                                                // don't re-pop the modal on a manual refresh
+  if (!isRefresh && live()) {                                     // don't re-pop the modal on a manual refresh / after a tab switch
     const pq = new URLSearchParams(location.search).get('player'); // deep-link to a player's match stats
     if (pq) openPlayerModal(+pq);
   }
@@ -408,7 +433,9 @@ async function loadLineups(isRefresh) {
 
 // ---- Shot map ----
 async function loadShotmap() {
+  const live = tabGuard();
   const d = await A('/api/match/shotmap');
+  if (!live()) return;
   if (!d.available) { body().innerHTML = empty('No shot-map data for this match.'); return; }
   const W = 105, H = 68;
   const dot = (s) => {
@@ -440,7 +467,9 @@ async function loadShotmap() {
 // ---- Timeline ----
 const TL_ICON = { goal: '⚽', card: '🟨', substitution: '🔄', period: '⏱', var: '📺' };
 async function loadTimeline() {
+  const live = tabGuard();
   const d = await A('/api/match/timeline');
+  if (!live()) return;
   if (!d.available || !d.events.length) { body().innerHTML = empty('Timeline not available for this match.'); return; }
   const rows = d.events.map(e => {
     if (e.type === 'period') return `<div class="tl-period">${esc(e.text || '')}</div>`;
@@ -460,7 +489,9 @@ async function loadTimeline() {
 
 // ---- Key Moments (auto-generated commentary from goals + big chances) ----
 async function loadKeyMoments() {
+  const live = tabGuard();
   const d = await A('/api/match/key-moments');
+  if (!live()) return;
   if (!d.available || !d.moments.length) {
     body().innerHTML = empty('No key moments yet — goals and big chances will appear here with commentary.');
     return;
@@ -512,7 +543,9 @@ function renderPlayers() {
   });
 }
 async function loadPlayers() {
+  const live = tabGuard();
   const d = await A('/api/match/player-stats');
+  if (!live()) return;
   if (!d.available) { body().innerHTML = empty('Per-player stats not available yet.'); return; }
   playersCache = d.players;
   renderPlayers();
@@ -554,7 +587,9 @@ function drawPoints(canvas, points) {
   ctx.restore(); drawPitch(ctx, W, H);
 }
 async function loadHeatmaps() {
+  const live = tabGuard();
   const lu = await A('/api/match/lineups');
+  if (!live()) return;
   if (!lu.available) { body().innerHTML = empty('No lineup, so no heatmaps available.'); return; }
   const sides = [['home', head?.home || 'Home', lu.home], ['away', head?.away || 'Away', lu.away]];
   let team = 'home';
@@ -569,12 +604,14 @@ async function loadHeatmaps() {
     const side = sides.find(s => s[0] === k)[2];
     const xi = (side.starting_xi || []);
     const grid = document.getElementById('hmGrid');
+    if (!grid) return;                         // user switched tabs away from heatmaps
     grid.innerHTML = xi.map(p => `<div class="hm-cell"><canvas width="150" height="98" id="hm_${p.id}"></canvas>
       <div class="hm-nm">${p.number ?? ''} ${esc(p.name)}</div></div>`).join('') || '<div class="placeholder-note">No starters.</div>';
     // fetch sequentially-ish (small fan-out) so we stay friendly to the API
     for (const p of xi) {
       let h = heatCache[p.id];
       if (!h) { h = await A('/api/match/heatmap?player_id=' + p.id); heatCache[p.id] = h; }
+      if (!live()) return;                     // switched tabs mid-load
       const cv = document.getElementById('hm_' + p.id);
       if (!cv) continue;                       // user switched team mid-load
       if (h.available) drawPoints(cv, h.points);
@@ -587,7 +624,9 @@ async function loadHeatmaps() {
 
 // ---- Preview (data-driven, works for upcoming national-team fixtures too) ----
 async function loadPreview() {
+  const live = tabGuard();
   let d = await A('/api/fixture_preview');
+  if (!live()) return;
   // The event header, then form / squad / h2h, arrive from separate relay-fetched
   // SofaScore calls a cycle apart. Wait through `pending` whether or not the fixture
   // is available yet (a cold cache reports available:false+pending) instead of
@@ -596,6 +635,7 @@ async function loadPreview() {
     body().innerHTML = '<section class="card"><div class="placeholder-note">Loading preview…</div></section>';
     await new Promise(r => setTimeout(r, RELAY_POLL_MS));
     d = await api('/api/fixture_preview?id=' + encodeURIComponent(EID));
+    if (!live()) return;
   }
   if (!d || !d.available) { body().innerHTML = empty('Preview not available for this match.'); return; }
   const H = d.home, AW = d.away, p = d.prediction, h2h = d.h2h;
