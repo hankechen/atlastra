@@ -14,6 +14,8 @@ Responses are cached in-memory with a short TTL so the dashboard can poll every
 30-60s without hammering SofaScore: live data (header/stats/timeline) gets a short
 TTL, mostly-static data (lineups/shotmap/player stats/heatmap) a longer one.
 """
+import atexit
+import json
 import math
 import os
 import sys
@@ -41,6 +43,54 @@ _LOCK = threading.Lock()
 CACHE_MODE = os.environ.get("ATLASTRA_SOFA_CACHE") == "1"
 _PUSH_CACHE: dict[str, tuple[float, object]] = {}   # path -> (ts, data | None)
 _QUEUE: dict[str, float] = {}                        # path -> first-requested ts
+
+# The pushed cache is PERSISTED to disk so warmed match data (upcoming previews,
+# lineups, form, h2h, odds, ...) survives a server restart AND keeps displaying while
+# the remote scraper is offline (e.g. the pusher machine is asleep/off). For an
+# upcoming fixture that data is essentially static, so a stored snapshot is exactly
+# what we want -- the scraper just refreshes it when it's back online.
+_CACHE_FILE = os.environ.get("ATLASTRA_CACHE_FILE") or str(
+    Path(__file__).resolve().parent.parent / "data" / "sofa_cache.json")
+_CACHE_FLUSH_SEC = 30            # debounce disk writes to at most one per this many s
+_last_flush = 0.0
+
+
+def _load_cache() -> None:
+    """Restore the persisted pull-through cache on startup (cache mode only)."""
+    if not CACHE_MODE:
+        return
+    try:
+        with open(_CACHE_FILE) as fh:
+            raw = json.load(fh)
+        with _LOCK:
+            for path, entry in raw.items():
+                _PUSH_CACHE[path] = (entry[0], entry[1])
+        print(f"live_feed: restored {len(raw)} cached SofaScore paths from disk", flush=True)
+    except FileNotFoundError:
+        pass
+    except Exception as e:                 # noqa: BLE001 -- corrupt/partial file -> start empty
+        print(f"live_feed: cache restore failed: {type(e).__name__}: {e}", flush=True)
+
+
+def _save_cache() -> None:
+    """Atomically snapshot the pull-through cache to disk (temp file + rename)."""
+    if not CACHE_MODE:
+        return
+    try:
+        with _LOCK:
+            snap = {p: [ts, data] for p, (ts, data) in _PUSH_CACHE.items()}
+        Path(_CACHE_FILE).parent.mkdir(parents=True, exist_ok=True)
+        tmp = f"{_CACHE_FILE}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(snap, fh)
+        os.replace(tmp, _CACHE_FILE)
+    except Exception as e:                 # noqa: BLE001 -- never let a disk hiccup break serving
+        print(f"live_feed: cache save failed: {type(e).__name__}: {e}", flush=True)
+
+
+if CACHE_MODE:
+    _load_cache()                          # restore last snapshot on import (server startup)
+    atexit.register(_save_cache)           # capture the final state on graceful shutdown
 
 
 def _fetch_direct(path: str):
@@ -178,7 +228,9 @@ def queue_has(prefix: str) -> bool:
 
 
 def cache_put(items: list[dict]) -> int:
-    """Store pushed {path, body} responses and clear them from the queue."""
+    """Store pushed {path, body} responses and clear them from the queue, then flush the
+    cache to disk (debounced) so the snapshot survives restarts / scraper downtime."""
+    global _last_flush
     now = time.time()
     with _LOCK:
         for it in items or []:
@@ -186,6 +238,9 @@ def cache_put(items: list[dict]) -> int:
             if p:
                 _PUSH_CACHE[p] = (now, it.get("body"))
                 _QUEUE.pop(p, None)
+    if now - _last_flush > _CACHE_FLUSH_SEC:      # persist outside the lock, at most 1/30s
+        _last_flush = now
+        _save_cache()
     return len(items or [])
 
 
