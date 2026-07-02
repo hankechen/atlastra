@@ -212,6 +212,14 @@ async function load(name, careerStat = 'xa', season = null) {
   document.getElementById('rUcl').textContent = ucl?.rating ?? '—';
   document.getElementById('cUcl').textContent = ucl ? ucl.classification : 'no UCL minutes';
   drawGauge('gaugeUcl', ucl?.rating);
+  // World Cup gauge — only for seasons that had a World Cup the player featured in
+  const wc = p.ratings?.worldcup, wcBox = document.getElementById('rgaugeWc');
+  if (wc) {
+    wcBox.style.display = '';
+    document.getElementById('rWc').textContent = wc.rating;
+    document.getElementById('cWc').textContent = `${wc.classification} · ${wc.apps} app${wc.apps === 1 ? '' : 's'}`;
+    drawGauge('gaugeWc', wc.rating);
+  } else { wcBox.style.display = 'none'; }
 
   // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
   statScopes = p.stats_scopes || {};

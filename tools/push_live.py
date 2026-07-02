@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -61,6 +62,18 @@ def _fetch(path: str):
         return live._get(path)
     except Exception:                                     # noqa: BLE001
         return None
+
+
+# SofaScore serves a single home IP fine at a modest fan-out; fetching a batch of
+# queued paths concurrently (instead of one-at-a-time) cuts a relay cycle from
+# several seconds to ~one, so cold match pages / previews open much faster.
+_FETCH_POOL = ThreadPoolExecutor(max_workers=int(os.environ.get("PUSH_FETCH_WORKERS", "8")))
+
+
+def _fetch_items(paths):
+    """Fetch many paths concurrently -> [{path, body}] (order-independent)."""
+    return [{"path": p, "body": b}
+            for p, b in zip(paths, _FETCH_POOL.map(_fetch, paths))]
 
 
 def _warm_matches(eids):
@@ -122,7 +135,7 @@ def _service_queue():
             with urllib.request.urlopen(req, timeout=30) as resp:
                 paths = (json.loads(resp.read() or b"{}")).get("paths") or []
             if paths:
-                items = [{"path": p, "body": _fetch(p)} for p in paths[:40]]
+                items = _fetch_items(paths[:40])
                 status, r = _post("/api/ingest/cache", {"items": items})
                 print(f"{datetime.now():%H:%M:%S} relayed {len(items)} match-detail path(s) -> {status}", flush=True)
         except Exception as e:                            # noqa: BLE001

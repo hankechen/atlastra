@@ -6,7 +6,7 @@
 <title>Atlastra — Player Profile</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=38">
+<link rel="stylesheet" href="/css/styles.css?v=39">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -58,6 +58,10 @@
             <div class="gauge sm"><canvas id="gaugeUcl" width="124" height="78"></canvas>
               <div class="val"><b id="rUcl">—</b></div></div>
             <div class="cls" id="cUcl"></div></div>
+          <div class="rgauge" id="rgaugeWc" style="display:none"><div class="lbl">World Cup</div>
+            <div class="gauge sm"><canvas id="gaugeWc" width="124" height="78"></canvas>
+              <div class="val"><b id="rWc">—</b></div></div>
+            <div class="cls" id="cWc"></div></div>
         </div>
         <div class="placeholder-note" id="ratingNote" style="text-align:center;margin-top:8px">Common-metric rating · combined stats below</div>
       </section>
@@ -117,6 +121,6 @@
 </div>
 <script src="/js/api.js?v=17"></script>
 <script src="/js/comments.js?v=1"></script>
-<script src="/js/player.js?v=17"></script>
+<script src="/js/player.js?v=18"></script>
 </body>
 </html>

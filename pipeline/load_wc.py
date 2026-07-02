@@ -33,6 +33,8 @@ import duckdb  # noqa: E402
 WC = 16                  # SofaScore uniqueTournament id for the FIFA World Cup
 MAX_PAGES = 12           # safety cap per feed per season
 MIN_YEAR = 2010          # earliest World Cup to snapshot
+# raw per-player tournament stats from the last full scrape (for offline re-rating)
+RAW_STATS_CACHE = str(Path(DB_PATH).parent / "wc_raw_player_stats.json")
 
 MATCH_DDL = """
 CREATE TABLE IF NOT EXISTS wc_matches (
@@ -69,13 +71,25 @@ CREATE TABLE IF NOT EXISTS wc_leaders (
 # players per line directly -- enough to build a best XI by World Cup match rating.
 PLAYERS_DDL = """
 CREATE TABLE IF NOT EXISTS wc_player_stats (
-    season      VARCHAR, position VARCHAR,   -- position: G / D / M / F
-    player_id   BIGINT, player VARCHAR, team VARCHAR,
-    rating      DOUBLE, appearances INTEGER, minutes INTEGER
+    season       VARCHAR, position VARCHAR,   -- position: G / D / M / F
+    player_id    BIGINT, player VARCHAR, team VARCHAR,
+    rating       DOUBLE, appearances INTEGER, minutes INTEGER,  -- SofaScore avg rating
+    atlas_rating INTEGER, atlas_class VARCHAR,  -- our stats-based 0-99 WC rating
+    goals        INTEGER, assists INTEGER       -- tournament totals (for the match modal)
 );
 """
+# expected column set of wc_player_stats; a prod table with an older schema is
+# transparently migrated (drop + recreate, then the full push repopulates it).
+_PLAYERS_COLS = ["season", "position", "player_id", "player", "team", "rating",
+                 "appearances", "minutes", "atlas_rating", "atlas_class", "goals", "assists"]
+# SofaScore statistics fields we pull per player to grade the tournament rating.
+PLAYER_FIELDS = ("rating,appearances,minutesPlayed,goals,assists,expectedGoals,"
+                 "totalShots,keyPasses,bigChancesCreated,successfulDribbles,tackles,"
+                 "interceptions,accuratePasses,accuratePassesPercentage,"
+                 "totalDuelsWonPercentage,saves,cleanSheet,goalsConceded,goalsPrevented")
 POSITIONS = ("G", "D", "M", "F")     # SofaScore position-group filter codes
-PLAYER_TOP_N = 30                    # top-rated per position to keep (XI needs only a few)
+PLAYER_PAGE = 100                    # page size for the per-player stats feed
+PLAYER_MAX_PAGES = 5                 # up to 500 players per position -> full coverage
 # Knockout bracket VISUAL order. SofaScore's `cuptrees` gives the true tree (each
 # block's participants carry a `sourceBlockId` -> the feeder block's `blockId`).
 # Walking it from the Final yields the top-to-bottom leaf order with the halving
@@ -176,7 +190,8 @@ def fetch_wc_rows(only_season: str | None = None) -> dict:
             wanted.append((yr, s["id"]))
     wanted.sort()
 
-    match_rows, stand_rows, leader_rows, player_rows, bracket_rows = [], [], [], [], []
+    match_rows, stand_rows, leader_rows, bracket_rows = [], [], [], []
+    player_stats: list[dict] = []            # rich per-player stats -> rated below
     for season, sid in wanted:
         events: dict[int, dict] = {}
         for feed in ("last", "next"):        # finished + upcoming
@@ -230,21 +245,63 @@ def fetch_wc_rows(only_season: str | None = None) -> dict:
                 lrows += 1
 
         prows = 0
-        for pos in POSITIONS:               # top-rated players per position line
-            res = (_get(f"/unique-tournament/{WC}/season/{sid}/statistics"
-                        f"?accumulation=total&group=ALL&order=-rating"
-                        f"&fields=rating,appearances,minutesPlayed"
-                        f"&limit={PLAYER_TOP_N}&offset=0&filters=position.in.{pos}")
-                   or {}).get("results") or []
-            for e in res:
-                pl, tm = e.get("player") or {}, e.get("team") or {}
-                player_rows.append((season, pos, pl.get("id"), pl.get("name"), tm.get("name"),
-                                    e.get("rating"), e.get("appearances"), e.get("minutesPlayed")))
-                prows += 1
+        for pos in POSITIONS:               # ALL players per position (for the WC rating)
+            for page in range(PLAYER_MAX_PAGES):
+                res = (_get(f"/unique-tournament/{WC}/season/{sid}/statistics"
+                            f"?accumulation=total&group=ALL&order=-rating"
+                            f"&fields={PLAYER_FIELDS}"
+                            f"&limit={PLAYER_PAGE}&offset={page * PLAYER_PAGE}"
+                            f"&filters=position.in.{pos}") or {}).get("results") or []
+                if not res:
+                    break
+                for e in res:
+                    if e.get("rating") is None:
+                        continue
+                    pl, tm = e.get("player") or {}, e.get("team") or {}
+                    player_stats.append({           # canonical metric names for rate_wc
+                        "season": season, "position": pos,
+                        "player_id": pl.get("id"), "player": pl.get("name"),
+                        "team": tm.get("name"), "rating": e.get("rating"),
+                        "appearances": e.get("appearances"), "minutes": e.get("minutesPlayed"),
+                        "goals": e.get("goals"), "assists": e.get("assists"),
+                        "xg": e.get("expectedGoals"), "shots": e.get("totalShots"),
+                        "chances_created": e.get("keyPasses"),
+                        "big_chances_created": e.get("bigChancesCreated"),
+                        "dribbles_completed": e.get("successfulDribbles"),
+                        "tackles": e.get("tackles"), "interceptions": e.get("interceptions"),
+                        "passes_completed": e.get("accuratePasses"),
+                        "pass_accuracy_pct": e.get("accuratePassesPercentage"),
+                        "duels_won_pct": e.get("totalDuelsWonPercentage"),
+                        "saves": e.get("saves"), "clean_sheets": e.get("cleanSheet"),
+                        "goals_conceded": e.get("goalsConceded"),
+                        "goals_prevented": e.get("goalsPrevented")})
+                    prows += 1
         brows = _wc_bracket_order(sid, season)
         bracket_rows.extend(brows)
         print(f"  {season}: {len(events)} matches, {srows} standings, "
               f"{lrows} leader rows, {prows} player rows, {len(brows)} bracket rows")
+
+    # Cache the raw per-player stats of a FULL scrape so the rating can be
+    # re-tuned (weight changes) without re-hitting SofaScore -- see
+    # tools/recompute_wc_ratings.py. Skipped on single-season refreshes (the pusher).
+    if only_season is None and player_stats:
+        import json
+        with open(RAW_STATS_CACHE, "w") as fh:
+            json.dump(player_stats, fh)
+        print(f"  cached {len(player_stats)} raw player-stat rows -> {RAW_STATS_CACHE}")
+
+    # Grade the tournament rating from the stats just scraped (position-relative,
+    # per edition) and fold it into the pushed/stored player rows.
+    from pipeline import rate_wc
+    rated = rate_wc.compute(player_stats)
+    player_rows = []
+    for p in player_stats:
+        r = rated.get((p["season"], int(p["player_id"]))) if p.get("player_id") else None
+        player_rows.append((p["season"], p["position"], p["player_id"], p["player"],
+                            p["team"], p["rating"], p["appearances"], p["minutes"],
+                            (r or {}).get("rating"), (r or {}).get("classification"),
+                            p.get("goals"), p.get("assists")))
+    print(f"  rated {len(rated)}/{len(player_stats)} players (>= {rate_wc.MIN_MINUTES} min)")
     return {"matches": match_rows, "standings": stand_rows, "leaders": leader_rows,
             "players": player_rows, "bracket": bracket_rows}
 
@@ -267,6 +324,12 @@ def write_wc_rows(data: dict) -> dict:
         con.execute(LEADERS_DDL)
         con.execute(PLAYERS_DDL)
         con.execute(WC_BRACKET_DDL)
+        # migrate an older wc_player_stats (pre atlas_rating) -> new schema. The full
+        # all-editions push that follows repopulates it, so a drop loses nothing.
+        cols = [r[1] for r in con.execute("PRAGMA table_info('wc_player_stats')").fetchall()]
+        if cols != _PLAYERS_COLS:
+            con.execute("DROP TABLE IF EXISTS wc_player_stats")
+            con.execute(PLAYERS_DDL)
         for s in seasons:
             con.execute("DELETE FROM wc_matches WHERE season = ?", [s])
             con.execute("DELETE FROM wc_standings WHERE season = ?", [s])
@@ -282,7 +345,7 @@ def write_wc_rows(data: dict) -> dict:
         if leaders:
             con.executemany("INSERT INTO wc_leaders VALUES (?,?,?,?,?,?,?,?)", leaders)
         if players:
-            con.executemany("INSERT INTO wc_player_stats VALUES (?,?,?,?,?,?,?,?)", players)
+            con.executemany("INSERT INTO wc_player_stats VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", players)
         if bracket:
             con.executemany("INSERT INTO wc_bracket VALUES (?,?,?,?)", bracket)
     finally:

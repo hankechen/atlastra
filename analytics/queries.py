@@ -350,6 +350,90 @@ class SoccerDB:
                 out[n] = int(round(r[0]))
         return out
 
+    # ----- World Cup rating (0-100) --------------------------------------- #
+    # A WC edition sits in / just after this domestic league-season code, so the
+    # profile's season selector surfaces the right tournament (see wc_rating_for).
+    _WC_EDITIONS = {"0910": "2010", "1314": "2014", "1718": "2018",
+                    "2223": "2022", "2526": "2026"}
+
+    def match_team_ids(self, event_id: int):
+        """(home_team_id, away_team_id) for a match from our live_matches snapshot, or
+        (None, None). Lets the preview prewarm BOTH teams' form/squad paths immediately
+        -- without waiting a relay cycle for the SofaScore event header to reveal the
+        team ids -- so a cold preview fills in one cycle instead of two."""
+        try:
+            row = self.con.execute(
+                "SELECT home_team_id, away_team_id FROM live_matches WHERE event_id = ?",
+                [int(event_id)]).fetchone()
+        except Exception:
+            return (None, None)
+        return (row[0], row[1]) if row else (None, None)
+
+    def wc_edition_for_event(self, event_id: int) -> str | None:
+        """The World Cup edition ('2010'..'2026') a SofaScore match belongs to, from
+        our snapshotted wc_matches, or None if it isn't a World Cup match. This is the
+        robust WC-lineup signal on the cloud host, where the live /event header (which
+        carries the uniqueTournament id) may not be cached."""
+        try:
+            row = self.con.execute(
+                "SELECT season FROM wc_matches WHERE event_id = ?", [int(event_id)]).fetchone()
+        except Exception:
+            return None
+        return str(row[0]) if row and row[0] is not None else None
+
+    def wc_ratings_by_ids(self, edition: str, sofa_ids) -> dict:
+        """SofaScore player_id -> stats-based WC 0-99 rating for an edition (match
+        lineups). Precomputed in pipeline.rate_wc and stored on the row."""
+        ids = [int(i) for i in sofa_ids if i is not None]
+        if not ids or not edition:
+            return {}
+        rows = self.con.execute(
+            f"SELECT player_id, atlas_rating FROM wc_player_stats WHERE season = ? "
+            f"AND player_id IN ({','.join(['?'] * len(ids))})", [str(edition), *ids]).fetchall()
+        return {int(pid): int(r) for pid, r in rows if r is not None}
+
+    def wc_tournament_stats_by_ids(self, edition: str, sofa_ids) -> dict:
+        """SofaScore player_id -> {goals, assists, apps} for a WC edition -- the
+        player's whole-tournament totals, shown in the match player modal."""
+        ids = [int(i) for i in sofa_ids if i is not None]
+        if not ids or not edition:
+            return {}
+        rows = self.con.execute(
+            f"SELECT player_id, goals, assists, appearances FROM wc_player_stats "
+            f"WHERE season = ? AND player_id IN ({','.join(['?'] * len(ids))})",
+            [str(edition), *ids]).fetchall()
+        return {int(pid): {"goals": _i(g) or 0, "assists": _i(a) or 0, "apps": _i(ap) or 0}
+                for pid, g, a, ap in rows}
+
+    def wc_rating_for(self, player_id: int, season: str) -> dict | None:
+        """Stats-based WC rating for one of OUR players in the World Cup that falls in
+        `season`, or None if that season had no WC / the player has no WC minutes.
+        Matched on folded name tokens (exact, or >=2 shared tokens) so name-format
+        differences resolve -- e.g. our 'Kylian Mbappe-Lottin' vs WC 'Kylian Mbappé'."""
+        edition = self._WC_EDITIONS.get(season)
+        if edition is None:
+            return None
+        nm = self.con.execute("SELECT player_name FROM players WHERE player_id=?",
+                              [player_id]).fetchone()
+        if not nm:
+            return None
+        ours = set(_fold(nm[0]).replace("-", " ").split())
+        if not ours:
+            return None
+        rows = self.con.execute(
+            "SELECT player, atlas_rating, atlas_class, appearances, minutes "
+            "FROM wc_player_stats WHERE season = ? AND atlas_rating IS NOT NULL", [edition]).fetchall()
+        best = None
+        for player, rating, cls, apps, mins in rows:
+            wt = set(_fold(player).replace("-", " ").split())
+            if wt == ours or len(wt & ours) >= 2:       # robust to name-format diffs
+                if best is None or (mins or 0) > (best[4] or 0):
+                    best = (player, rating, cls, apps, mins)
+        if not best:
+            return None
+        return {"rating": int(best[1]), "classification": best[2],
+                "apps": _i(best[3]), "minutes": _i(best[4]), "edition": edition}
+
     # ----- use case 1: player statistics ---------------------------------- #
     def player_statistics(self, player: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
         """Understat core stats + FotMob enrichment (dribbles, tackles,
@@ -1779,7 +1863,9 @@ class SoccerDB:
 
         live = [match(r) for r in df[df.status_type == "inprogress"]
                 .sort_values("start_timestamp").itertuples()]
-        upcoming = [match(r) for r in df[df.status_type == "notstarted"]
+        # 'delayed' (kickoff pushed back but still to be played) would otherwise
+        # match no bucket and vanish -- show it with the upcoming fixtures.
+        upcoming = [match(r) for r in df[df.status_type.isin(["notstarted", "delayed"])]
                     .sort_values("start_timestamp").head(limit_upcoming).itertuples()]
         recent = [match(r) for r in df[df.status_type == "finished"]
                   .sort_values("start_timestamp", ascending=False).head(limit_recent).itertuples()]
@@ -2632,6 +2718,12 @@ class SoccerDB:
         ratings = {r.scope: {"rating": _i(r.rating), "classification": r.classification,
                              "percentile": _i(r.percentile), "minutes": _i(r.minutes)}
                    for r in cr.itertuples()}
+        # World Cup rating, when the selected season is a WC year and the player
+        # actually featured (same gauge treatment as League / UCL).
+        wc = self.wc_rating_for(pid, season)
+        if wc:
+            ratings["worldcup"] = {"rating": wc["rating"], "classification": wc["classification"],
+                                   "apps": wc["apps"], "minutes": wc["minutes"]}
         tiles = {}
         if t:
             mins = t[8] or 0

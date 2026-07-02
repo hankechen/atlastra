@@ -700,7 +700,9 @@ function matchRow(m) {
   const score = played ? `${m.home_score} - ${m.away_score}${pens}` : 'vs';
   const clk = m.status === 'inprogress' ? 'min live-min' : 'min';
   const tag = m.status === 'inprogress'
-    ? `<span class="live">● LIVE</span>` : `<span class="tag">${matchDay(m.kickoff_ts)}</span>`;
+    ? `<span class="live">● LIVE</span>`
+    : m.status === 'delayed' ? `<span class="tag">Delayed</span>`
+    : `<span class="tag">${matchDay(m.kickoff_ts)}</span>`;
   const bold = (side) => m.winner === (side === 'home' ? 1 : 2) ? ' won' : '';
   const href = m.event_id != null ? ` onclick="location.href='/match.html?id=${m.event_id}'" style="cursor:pointer"` : '';
   const venue = m.venue ? `<div class="match-venue"${href}>📍 ${m.venue}</div>` : '';

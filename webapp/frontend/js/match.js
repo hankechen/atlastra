@@ -15,11 +15,12 @@ const heatCache = {};                       // player_id -> {points}
 // a remote scraper fills its cache on demand -- so if the data isn't there yet the
 // server returns {available:false, pending:true}; wait for the relay then retry.
 // Genuinely-empty data comes back pending:false, so this doesn't spin on those.
+const RELAY_POLL_MS = 900;   // poll cadence while waiting on the relay-filled cache
 async function A(p) {
   const url = p + (p.includes('?') ? '&' : '?') + 'id=' + encodeURIComponent(EID);
   let r = await api(url);
-  for (let i = 0; i < 12 && r && r.available === false && r.pending; i++) {
-    await new Promise(res => setTimeout(res, 2000));
+  for (let i = 0; i < 28 && r && r.available === false && r.pending; i++) {
+    await new Promise(res => setTimeout(res, RELAY_POLL_MS));
     r = await api(url);
   }
   return r;
@@ -59,7 +60,8 @@ async function loadHeader() {
       <div class="mh-score">${played ? `${head.home_score}<span class="dash">-</span>${head.away_score}` : '<span class="vs">vs</span>'}
         ${pens}<div class="mh-st">${heroStatus()}</div></div>
       <div class="mh-team away"${open('away')}>${rankBadge(head.away_rank)}<span class="mh-name">${esc(head.away)}</span>${badge('away')}</div>
-    </div>`;
+    </div>
+    ${head.referee ? `<div class="mh-ref">🧑‍⚖️ Referee · ${head.referee.country ? flagISO2(head.referee.country) + ' ' : ''}${esc(head.referee.name)}</div>` : ''}`;
 }
 
 // ---- tabs ----
@@ -229,8 +231,9 @@ function chipHTML({ x, y, p }, isHome) {
   const rt = p.rating != null
     ? `<i class="luc-rt" style="background:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</i>` : '';
   // our Atlastra League/UCL combined rating (or ~estimate when not in our DB)
+  const arTitle = p.atlas_wc ? 'World Cup rating' : p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)';
   const ar = p.atlas_rating != null
-    ? `<i class="luc-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</i>` : '';
+    ? `<i class="luc-ar${p.atlas_est ? ' est' : ''}" title="${arTitle}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</i>` : '';
   const cap = p.captain ? '<i class="luc-cap">C</i>' : '';
   // goal / assist icons from the player's match stats (keyed by SofaScore id)
   const st = _luStats && _luStats[p.id];
@@ -272,7 +275,7 @@ function subsCol(s, label) {
 }
 
 // ---- player match-stats modal (opened from a lineup chip / sub) ----
-let _luStats = null, _luNames = {}, _luAtlas = {};  // SofaScore id -> stats / name / {rating,est}
+let _luStats = null, _luNames = {}, _luAtlas = {}, _luTourn = {};  // SofaScore id -> stats / name / {rating,est} / tournament G-A
 async function ensureLineupStats() {
   if (_luStats) return _luStats;
   const d = await A('/api/match/player-stats');
@@ -294,12 +297,22 @@ async function openPlayerModal(id) {
     _pmCell('Assists', p.assists ?? 0), _pmCell('Shots (SoT)', `${p.shots ?? 0} (${p.shots_on_target ?? 0})`),
     _pmCell('xG', f2(p.xg)), _pmCell('xA', f2(p.xa)),
     _pmCell('Passes', `${p.passes ?? 0} · ${passAcc}`), _pmCell('Key passes', p.key_passes ?? 0),
-    _pmCell('Tackles', p.tackles ?? 0), _pmCell('Duels won', p.duels_won ?? 0),
-    _pmCell('Touches', p.touches ?? 0), _pmCell('Fouls', p.fouls ?? 0),
+    _pmCell('Big chances', p.big_chances_created ?? 0),
+    _pmCell('Dribbles', `${p.dribbles ?? 0} (${p.dribble_attempts ?? 0})`),
+    _pmCell('Tackles', p.tackles ?? 0), _pmCell('Recoveries', p.recoveries ?? 0),
+    _pmCell('Duels won', p.duels_won ?? 0), _pmCell('Touches', p.touches ?? 0), _pmCell('Fouls', p.fouls ?? 0),
   ].join('') : '<div class="placeholder-note">No match stats recorded for this player (likely an unused substitute).</div>';
   const chip = p && p.rating != null
     ? `<span class="ratingchip" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : '';
   const sub = p ? `${esc(p.position || '')}${p.number != null ? ' · #' + p.number : ''} · ${esc(p.team || '')}${p.started ? '' : ' · sub'}` : '';
+  // whole-tournament totals (e.g. World Cup goals/assists), when this is a tournament match
+  const tv = _luTourn[id];
+  const tourn = tv ? `<div class="pm-tourn"><div class="pm-tourn-h">${esc(tv.label)} · Tournament stats</div>
+      <div class="pm-tourn-row">
+        <div class="pm-ts"><b>${tv.goals}</b><span>Goals</span></div>
+        <div class="pm-ts"><b>${tv.assists}</b><span>Assists</span></div>
+        <div class="pm-ts"><b>${tv.apps}</b><span>Apps</span></div>
+      </div></div>` : '';
   const wrap = document.createElement('div');
   wrap.className = 'pm-overlay';
   wrap.innerHTML = `<div class="pm-card">
@@ -307,6 +320,8 @@ async function openPlayerModal(id) {
       <div class="pm-head"><div class="pm-headtxt"><div class="pm-nm">${esc(name)} ${cards}</div><div class="pm-sub">${sub}</div>
         <div class="pm-club" id="pmClub"></div></div>
         <div class="pm-headright"><span class="pm-crest" id="pmCrest"></span>${chip}</div></div>
+      ${tourn}
+      ${p ? '<div class="pm-sec-h">This match</div>' : ''}
       <div class="pm-grid">${grid}</div>
       <div class="pm-heat"><div class="pm-heat-h">Match heatmap</div><canvas id="pmHeat" width="300" height="195"></canvas></div>
       ${(_luAtlas[id] && _luAtlas[id].rating != null && !_luAtlas[id].est)
@@ -340,16 +355,21 @@ async function openPlayerModal(id) {
     else if (cv) cv.closest('.pm-heat').innerHTML = '<div class="placeholder-note">No heatmap for this player.</div>';
   } catch { /* heatmap optional */ }
 }
-async function loadLineups() {
+async function loadLineups(isRefresh) {
   const d = await A('/api/match/lineups');
   if (!d.available) { body().innerHTML = empty('Lineups not published yet.'); return; }
   const note = d.confirmed ? '' : '<div class="placeholder-note" style="margin-bottom:10px">⚠ Predicted lineup — not yet confirmed.</div>';
+  // Manual refresh: the lineups tab isn't on the 30s live poll, so this pulls the
+  // latest per-player match stats (ratings, goals/assists) on demand.
+  const bar = `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    }</span><button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
   // id -> name (incl. subs) so the player-stats modal has a name even with no stats;
   // also keep the Atlastra rating/est so the modal only offers a profile link for a
   // player actually IN our DB (a real, non-estimated rating).
   for (const side of [d.home, d.away])
     for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
-      if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; }
+      if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; _luTourn[p.id] = p.tourn || null; }
   // per-player match stats -> goal/assist icons on the chips (+ the modal); fresh
   // each load so icons reflect the latest score.
   const ps = await A('/api/match/player-stats');
@@ -361,7 +381,7 @@ async function loadLineups() {
   if (hRows && aRows) {
     const chips = placeSide(hx, hRows, true).map(c => chipHTML(c, true)).join('')
                 + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');
-    body().innerHTML = note + `
+    body().innerHTML = note + bar + `
       <section class="card">
         <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b>${mgrTag(d.away?.manager)}</div>
         <div class="lineup-pitch">
@@ -375,11 +395,15 @@ async function loadLineups() {
       <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
         ${subsCol(d.home, head?.home || 'Home')}${subsCol(d.away, head?.away || 'Away')}</div>`;
   } else {
-    body().innerHTML = note + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
+    body().innerHTML = note + bar + `<div class="grid" style="grid-template-columns:1fr 1fr;gap:16px">
       ${lineupSideList(d.home, head?.home || 'Home')}${lineupSideList(d.away, head?.away || 'Away')}</div>`;
   }
-  const pq = new URLSearchParams(location.search).get('player');   // deep-link to a player's match stats
-  if (pq) openPlayerModal(+pq);
+  const rb = document.getElementById('lpReload');
+  if (rb) rb.onclick = async () => { rb.disabled = true; rb.textContent = '↻ Refreshing…'; await loadLineups(true); };
+  if (!isRefresh) {                                                // don't re-pop the modal on a manual refresh
+    const pq = new URLSearchParams(location.search).get('player'); // deep-link to a player's match stats
+    if (pq) openPlayerModal(+pq);
+  }
 }
 
 // ---- Shot map ----
@@ -564,14 +588,16 @@ async function loadHeatmaps() {
 // ---- Preview (data-driven, works for upcoming national-team fixtures too) ----
 async function loadPreview() {
   let d = await A('/api/fixture_preview');
-  // form / squad / h2h come from separate SofaScore calls the relay fills on demand;
-  // wait for them (pending) instead of flashing an empty preview.
-  for (let i = 0; i < 10 && d && d.available && d.pending; i++) {
+  // The event header, then form / squad / h2h, arrive from separate relay-fetched
+  // SofaScore calls a cycle apart. Wait through `pending` whether or not the fixture
+  // is available yet (a cold cache reports available:false+pending) instead of
+  // flashing "Preview not available".
+  for (let i = 0; i < 34 && d && d.pending; i++) {
     body().innerHTML = '<section class="card"><div class="placeholder-note">Loading preview…</div></section>';
-    await new Promise(r => setTimeout(r, 2500));
+    await new Promise(r => setTimeout(r, RELAY_POLL_MS));
     d = await api('/api/fixture_preview?id=' + encodeURIComponent(EID));
   }
-  if (!d.available) { body().innerHTML = empty('Preview not available for this match.'); return; }
+  if (!d || !d.available) { body().innerHTML = empty('Preview not available for this match.'); return; }
   const H = d.home, AW = d.away, p = d.prediction, h2h = d.h2h;
   const fp = (f) => `<span class="pv-fp ${f === 'W' ? 'w' : f === 'L' ? 'l' : 'd'}">${f}</span>`;
   const recent = (t) => `<div class="pv-recent"><div class="pv-form-pills">${t.recent.map(r => fp(r.result)).join('') || '<span class="muted" style="font-size:12px">No recent matches</span>'}</div>

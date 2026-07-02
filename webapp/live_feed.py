@@ -101,6 +101,27 @@ def prewarm(eid: int) -> None:
                 _QUEUE.setdefault(p, now)
 
 
+def prewarm_preview(eid: int, home_id=None, away_id=None) -> None:
+    """Queue ALL of an upcoming fixture's preview paths at once. fixture_preview()
+    itself can only queue the team form/squad/h2h/odds paths AFTER the event header is
+    cached (it needs the team ids from it), so a cold preview costs two relay cycles.
+    Given the team ids up front (from our live_matches snapshot) we queue everything in
+    one shot, collapsing it to a single cycle. Idempotent -- already-queued/cached
+    paths are skipped."""
+    if not CACHE_MODE:
+        return
+    now = time.time()
+    paths = [f"/event/{eid}", f"/event/{eid}/h2h"]
+    paths += [f"/event/{eid}/odds/{prov}/featured" for prov in _ODDS_PROVIDERS]
+    for tid in (home_id, away_id):
+        if tid:
+            paths += [f"/team/{tid}/events/last/0", f"/team/{tid}/players"]
+    with _LOCK:
+        for p in paths:
+            if p not in _PUSH_CACHE:
+                _QUEUE.setdefault(p, now)
+
+
 def prewarm_team(tid: int) -> None:
     """Queue a national team's direct paths at once. Without this only /team/{id}
     is queued on the first call (national_team early-returns before the others), so
@@ -200,7 +221,7 @@ def header(eid: int) -> dict:
             elapsed = (t.get("initial") or 0) + max(0, int(time.time()) - t["currentPeriodStartTimestamp"])
             minute = int(elapsed // 60) + 1
     return {
-        "available": True, "event_id": eid,
+        "available": True, "event_id": eid, "ut_id": ut.get("id"),
         "competition": ut.get("name") or (ev.get("tournament") or {}).get("name"),
         "round": ri.get("name") or (f"Round {ri['round']}" if ri.get("round") else None),
         "start_ts": ev.get("startTimestamp"),
@@ -215,6 +236,9 @@ def header(eid: int) -> dict:
         "away_score": _as.get("display") if _as.get("display") is not None else _as.get("current"),
         "home_pens": _hs.get("penalties"), "away_pens": _as.get("penalties"),
         "xg_available": bool(ev.get("hasXg")),
+        "referee": (lambda r: {"name": r.get("name"),
+                               "country": (r.get("country") or {}).get("alpha2")}
+                    if r and r.get("name") else None)(ev.get("referee") or {}),
     }
 
 
@@ -448,7 +472,9 @@ def _player_rows(side: dict, team_name: str, is_home: bool, cards: dict) -> list
             "shots": _num(st, "totalShots"), "shots_on_target": _num(st, "onTargetScoringAttempt"),
             "xg": _num(st, "expectedGoals"), "xa": _num(st, "expectedAssists"),
             "passes": _num(st, "totalPass"), "accurate_passes": _num(st, "accuratePass"),
-            "key_passes": _num(st, "keyPass"),
+            "key_passes": _num(st, "keyPass"), "big_chances_created": _num(st, "bigChanceCreated"),
+            "dribbles": _num(st, "wonContest"), "dribble_attempts": _num(st, "totalContest"),
+            "recoveries": _num(st, "ballRecovery"),
             "tackles": _num(st, "totalTackle"), "duels_won": _num(st, "duelWon"),
             "touches": _num(st, "touches"), "fouls": _num(st, "fouls"),
             "yellow": c.get("yellow", 0), "red": c.get("red", 0),
@@ -706,7 +732,7 @@ def national_team(team_id: int) -> dict:
 
 def _form_for(team_id: int):
     """A national/club team's last results from its own perspective (most recent first)."""
-    last = (_get(f"/team/{team_id}/events/last/0", ttl=180) or {}).get("events", [])
+    last = (_get(f"/team/{team_id}/events/last/0", ttl=1800) or {}).get("events", [])
     rows = []
     for e in reversed(last):                       # API returns oldest-first
         ht, at = e.get("homeTeam") or {}, e.get("awayTeam") or {}
@@ -724,7 +750,7 @@ def _form_for(team_id: int):
 
 
 def _squad_names(team_id: int):
-    ps = (_get(f"/team/{team_id}/players", ttl=600) or {}).get("players", [])
+    ps = (_get(f"/team/{team_id}/players", ttl=3600) or {}).get("players", [])
     return [(p.get("player") or {}).get("name") for p in ps if (p.get("player") or {}).get("name")]
 
 
@@ -734,10 +760,16 @@ def fixture_preview(eid: int) -> dict:
     server to enrich into key players from our ratings."""
     h = header(eid)
     if not h.get("available") or not h.get("home_id"):
+        # In relay mode the event detail lands a cycle after header() queues it above;
+        # report that as pending (not "not found") so the client waits + retries
+        # instead of flashing "Preview not available" on a cold/just-restarted cache.
+        if CACHE_MODE and queue_has(f"/event/{eid}"):
+            return {"available": False, "pending": True, "event_id": eid}
         return {"available": False, "error": "Fixture not found."}
     hid, aid = h["home_id"], h["away_id"]
     pred = prediction(eid)
-    td = (_get(f"/event/{eid}/h2h", ttl=600) or {}).get("teamDuel")
+    # upcoming-fixture h2h is static -> cache long so rechecks stay warm (no re-queue)
+    td = (_get(f"/event/{eid}/h2h", ttl=3600) or {}).get("teamDuel")
     # In cache mode each of those calls queues a miss for the relay rather than
     # fetching directly; until the relay fills them the preview would render empty.
     # Flag that as pending so the client waits + retries instead of showing blanks.

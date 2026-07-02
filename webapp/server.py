@@ -12,8 +12,10 @@ Run:  python -m webapp.server     ->  http://localhost:8000
 import json
 import math
 import os
+from datetime import datetime
 import threading
 import sys
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -72,6 +74,13 @@ LIVE_REFRESH = os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1"
 # must be read-write to accept those writes even with the local refresher off.
 INGEST_TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN") or None
 DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN)
+
+# Fully-enriched fixture previews are expensive (name-matching ~60 squad players to
+# our ratings) and near-static for an upcoming match, so cache the finished result
+# per event id. First viewer pays the cost; everyone else (and every recheck) is
+# instant for the window.
+_PREVIEW_CACHE: dict[int, tuple[float, dict]] = {}
+_PREVIEW_TTL = 300
 
 # Optional "Sign in with Google". Set ATLASTRA_GOOGLE_CLIENT_ID to a Google OAuth
 # Web client id to enable it; left unset, the Google button simply never appears
@@ -145,14 +154,34 @@ def match_api(path: str, q: dict) -> dict:
         live_feed.prewarm_players(eid, [p.get("id") for p in starters])
         if players:
             with SoccerDB(read_only=DB_READ_ONLY) as db:
-                rmap = db.ratings_by_name([p.get("name") for p in players])
-            # Only show our real combined League/UCL rating; players not in our DB
-            # get no rating (the SofaScore season-form estimate was too coarse --
-            # e.g. a 97 keeper next to a 13 -- so it's disabled for now).
-            for p in players:
-                r = rmap.get(p.get("name"))
-                if r is not None:
-                    p["atlas_rating"], p["atlas_est"] = r, False
+                # Prefer our snapshotted wc_matches (robust on the WAF-blocked cloud
+                # host); fall back to the live /event header's uniqueTournament id.
+                wc_edition = db.wc_edition_for_event(eid)
+                if not wc_edition:
+                    hdr = live_feed.header(eid)
+                    if hdr.get("ut_id") == 16 and hdr.get("start_ts"):    # FIFA World Cup
+                        wc_edition = str(datetime.utcfromtimestamp(hdr["start_ts"]).year)
+                if wc_edition:
+                    # WC match -> show each player's World Cup rating (0-100) rather
+                    # than their top-5-league rating, keyed by SofaScore player id.
+                    ids = [p.get("id") for p in players]
+                    wcr = db.wc_ratings_by_ids(wc_edition, ids)
+                    wct = db.wc_tournament_stats_by_ids(wc_edition, ids)  # G/A/apps for the modal
+                    for p in players:
+                        r = wcr.get(p.get("id"))
+                        if r is not None:
+                            p["atlas_rating"], p["atlas_est"], p["atlas_wc"] = r, False, True
+                        t = wct.get(p.get("id"))
+                        if t is not None:
+                            p["tourn"] = {"label": f"World Cup {wc_edition}", **t}
+                else:
+                    # otherwise our real combined League/UCL rating (name-matched);
+                    # players not in our DB simply get no rating badge.
+                    rmap = db.ratings_by_name([p.get("name") for p in players])
+                    for p in players:
+                        r = rmap.get(p.get("name"))
+                        if r is not None:
+                            p["atlas_rating"], p["atlas_est"] = r, False
         return d
     if path == "/api/match/shotmap":
         return live_feed.shotmap(eid)
@@ -254,6 +283,10 @@ def api(path: str, q: dict) -> dict | list:
             # upcoming matches: warm the soonest few so their venue fills via the relay
             for i, m in enumerate(res.get("upcoming", [])):
                 m["venue"] = live_feed.venue(m["event_id"], warm=(i < 15))
+            # finished matches keep their venue too -- the event detail is static, so
+            # warm it once and it stays cached (was previously dropped after full-time).
+            for m in res.get("recent", []):
+                m["venue"] = live_feed.venue(m["event_id"], warm=True)
             return res
         if path == "/api/standings":
             return d.web_standings(q.get("league", ["ENG-Premier League"])[0])
@@ -296,10 +329,27 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/preview":
             return d.web_match_preview(q.get("home", ["Arsenal"])[0], q.get("away", ["Chelsea"])[0])
         if path == "/api/fixture_preview":         # SofaScore preview + key-player enrichment
-            pv = live_feed.fixture_preview(int(q.get("id", [0])[0]))
-            if pv.get("available"):
+            eid = int(q.get("id", [0])[0])
+            hit = _PREVIEW_CACHE.get(eid)
+            if hit and time.time() - hit[0] < _PREVIEW_TTL:
+                return hit[1]
+            # queue every preview path (header + both teams' form/squad + h2h + odds)
+            # in ONE relay cycle using the team ids we already store, so a cold preview
+            # fills in one pass instead of two (header first, then the rest).
+            hid, aid = d.match_team_ids(eid)
+            live_feed.prewarm_preview(eid, hid, aid)
+            pv = live_feed.fixture_preview(eid)
+            if pv.get("available") and not pv.get("pending"):
+                # Enrich squad -> top-rated key players ONCE the relay has the full
+                # squad (name-matching ~60 names is the slow part). Skip while pending
+                # so the client's poll cycles stay fast, then cache the finished result.
                 for side in ("home", "away"):
                     pv[side]["key"] = d.web_squad_key_players(pv[side].pop("squad", []))
+                _PREVIEW_CACHE[eid] = (time.time(), pv)
+            elif pv.get("available"):
+                for side in ("home", "away"):      # pending: don't run enrichment yet
+                    pv[side].pop("squad", None)
+                    pv[side]["key"] = []
             return pv
         if path == "/api/big_game_board":
             return d.web_big_game_board()
