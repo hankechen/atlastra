@@ -718,13 +718,13 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
   background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:5px;padding:0 5px}
 .lu-ar.est{background:none;border:1px solid var(--accent2);color:var(--accent2)}
 .luc-cap{position:absolute;left:-8px;top:-6px;font-size:10px;font-weight:700;color:#06140a;background:#ffd24a;border-radius:50%;width:16px;height:16px;line-height:16px;font-style:normal}
-/* substitution indicators: dim a subbed-off starter on the pitch + a ▼min tag
-   placed UNDER the player's name (never over the dot's rating badges) */
-.luc.subbed{opacity:.5}
+/* substitution indicators: dim a subbed-off starter on the pitch + a ▼min badge
+   in the dot's TOP-RIGHT corner (the only corner free of rating/captain badges) */
+.luc.subbed{opacity:.55}
 .luc.subbed:hover{opacity:1}
-.luc-suboff{display:inline-block;margin-top:2px;font-size:10px;font-weight:800;line-height:1.35;
-  color:#fff;background:var(--red);border-radius:4px;padding:0 5px;font-style:normal;
-  white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.5)}
+.luc-suboff{position:absolute;right:-10px;top:-7px;font-size:9.5px;font-weight:800;font-style:normal;
+  color:#fff;background:var(--red);border-radius:5px;padding:0 4px;line-height:15px;
+  white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.5)}
 /* ▲ came on (green) / ▼ went off (red) badge with the minute, used in lists + pitch name */
 .sub-ind{display:inline-block;margin-left:5px;font-size:10.5px;font-weight:800;line-height:1.4;
   padding:0 4px;border-radius:4px;vertical-align:middle;font-style:normal}
@@ -1696,6 +1696,7 @@ html.light .cmt-sort.active{color:var(--accent)}
   .luc-ar{left:-8px}
   .luc-ar.est{padding:0 3px;border-width:1px}
   .luc-cap{width:14px;height:14px;line-height:14px;font-size:9px;left:-6px;top:-5px}
+  .luc-suboff{font-size:8.5px;padding:0 3px;right:-7px;top:-6px;line-height:14px}
 }
 
 @media (max-width: 820px) {

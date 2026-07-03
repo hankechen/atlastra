@@ -261,14 +261,14 @@ function chipHTML({ x, y, p }, isHome) {
   if (g) ev.push(`<span class="ev g" title="${g} goal${g > 1 ? 's' : ''}">⚽${g > 1 ? '<b>' + g + '</b>' : ''}</span>`);
   if (a) ev.push(`<span class="ev a" title="${a} assist${a > 1 ? 's' : ''}">👟${a > 1 ? '<b>' + a + '</b>' : ''}</span>`);
   const evHTML = ev.length ? `<span class="luc-ev">${ev.join('')}</span>` : '';
-  // a starter who's been subbed off: dim the chip + show a ▼min tag UNDER the name
-  // (kept off the dot so it never overlaps the rating badges in the dot's corners)
+  // a starter who's been subbed off: dim the chip + a ▼min badge in the dot's
+  // TOP-RIGHT corner — the only corner free of rating/captain badges.
   const off = p.subbed_out != null;
-  const offNm = off ? `<span class="luc-suboff" title="Subbed off at ${p.subbed_out}'">▼ ${p.subbed_out}'</span>` : '';
+  const offBadge = off ? `<i class="luc-suboff" title="Subbed off at ${p.subbed_out}'">▼${p.subbed_out}'</i>` : '';
   return `<div class="luc ${isHome ? 'h' : 'a'}${off ? ' subbed' : ''}" style="left:${(x * 100).toFixed(1)}%;top:${(y * 100).toFixed(1)}%"
       onclick="openPlayerModal(${p.id})" title="${esc(p.name)}${off ? ` — subbed off ${p.subbed_out}'` : ''} — view match stats">
-      <span class="luc-dot">${p.number ?? ''}${rt}${ar}${cap}</span>
-      <span class="luc-nm">${esc(_surname(p.name))}${evHTML}</span>${offNm}</div>`;
+      <span class="luc-dot">${p.number ?? ''}${rt}${ar}${cap}${offBadge}</span>
+      <span class="luc-nm">${esc(_surname(p.name))}${evHTML}</span></div>`;
 }
 // fallback list (used when a formation can't be parsed, e.g. predicted lineups)
 function lineupSideList(s, label) {
