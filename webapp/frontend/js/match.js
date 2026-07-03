@@ -212,6 +212,13 @@ async function loadPrediction() {
 // ---- Lineups (formation pitch) ----
 const mgrTag = (name) => name ? `<span class="lp-mgr" title="Manager">👔 ${esc(name)}</span>` : '';
 const _surname = (n) => { const p = String(n || '').trim().split(' '); return p.length > 1 ? p[p.length - 1] : n; };
+// substitution indicators from the incidents feed: ▲ came on / ▼ went off (+ minute).
+function subBadges(p) {
+  let h = '';
+  if (p.subbed_in != null) h += `<span class="sub-ind in" title="Came on at ${p.subbed_in}'">▲${p.subbed_in}'</span>`;
+  if (p.subbed_out != null) h += `<span class="sub-ind out" title="Subbed off at ${p.subbed_out}'">▼${p.subbed_out}'</span>`;
+  return h;
+}
 
 // formation "4-2-3-1" + XI length -> row sizes [GK, ...lines] (back -> front), or
 // null if it doesn't add up (predicted / exotic -> caller falls back to a list).
@@ -254,16 +261,20 @@ function chipHTML({ x, y, p }, isHome) {
   if (g) ev.push(`<span class="ev g" title="${g} goal${g > 1 ? 's' : ''}">⚽${g > 1 ? '<b>' + g + '</b>' : ''}</span>`);
   if (a) ev.push(`<span class="ev a" title="${a} assist${a > 1 ? 's' : ''}">👟${a > 1 ? '<b>' + a + '</b>' : ''}</span>`);
   const evHTML = ev.length ? `<span class="luc-ev">${ev.join('')}</span>` : '';
-  return `<div class="luc ${isHome ? 'h' : 'a'}" style="left:${(x * 100).toFixed(1)}%;top:${(y * 100).toFixed(1)}%"
-      onclick="openPlayerModal(${p.id})" title="${esc(p.name)} — view match stats">
-      <span class="luc-dot">${p.number ?? ''}${rt}${ar}${cap}</span>
-      <span class="luc-nm">${esc(_surname(p.name))}${evHTML}</span></div>`;
+  // a starter who's been subbed off: dim the chip + show a ▼min badge on the dot
+  const off = p.subbed_out != null;
+  const offDot = off ? `<i class="luc-off" title="Subbed off at ${p.subbed_out}'">▼</i>` : '';
+  const offNm = off ? `<span class="sub-ind out">${p.subbed_out}'</span>` : '';
+  return `<div class="luc ${isHome ? 'h' : 'a'}${off ? ' subbed' : ''}" style="left:${(x * 100).toFixed(1)}%;top:${(y * 100).toFixed(1)}%"
+      onclick="openPlayerModal(${p.id})" title="${esc(p.name)}${off ? ` — subbed off ${p.subbed_out}'` : ''} — view match stats">
+      <span class="luc-dot">${p.number ?? ''}${rt}${ar}${cap}${offDot}</span>
+      <span class="luc-nm">${esc(_surname(p.name))}${offNm}${evHTML}</span></div>`;
 }
 // fallback list (used when a formation can't be parsed, e.g. predicted lineups)
 function lineupSideList(s, label) {
   if (!s) return '';
-  const row = (p) => `<div class="lu-row"><span class="lu-no">${p.number ?? ''}</span>
-    <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}</span><span class="lu-pos">${esc(p.position || '')}</span>
+  const row = (p) => `<div class="lu-row${p.subbed_out != null ? ' subbed' : ''}"><span class="lu-no">${p.number ?? ''}</span>
+    <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}${subBadges(p)}</span><span class="lu-pos">${esc(p.position || '')}</span>
     ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   return `<section class="card lu-col">
     <div class="card-h"><h3>${esc(label)}</h3><span class="see">${[mgrTag(s.manager), esc(s.formation || '')].filter(Boolean).join(' · ')}</span></div>
@@ -277,9 +288,9 @@ function subsCol(s, label) {
     const st = _luStats && _luStats[p.id];
     const g = st ? (st.goals || 0) : 0, a = st ? (st.assists || 0) : 0;
     const ev = (g ? ` ⚽${g > 1 ? g : ''}` : '') + (a ? ` 👟${a > 1 ? a : ''}` : '');
-    return `<div class="lu-row" onclick="openPlayerModal(${p.id})" style="cursor:pointer">
+    return `<div class="lu-row${p.subbed_out != null ? ' subbed' : ''}${p.subbed_in != null ? ' came-on' : ''}" onclick="openPlayerModal(${p.id})" style="cursor:pointer">
       <span class="lu-no">${p.number ?? ''}</span>
-      <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}<span class="lu-ev">${ev}</span></span>
+      <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}${subBadges(p)}<span class="lu-ev">${ev}</span></span>
       <span class="lu-pos">${esc(p.position || '')}</span>
       ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   };
@@ -287,7 +298,7 @@ function subsCol(s, label) {
 }
 
 // ---- player match-stats modal (opened from a lineup chip / sub) ----
-let _luStats = null, _luNames = {}, _luAtlas = {}, _luTourn = {};  // SofaScore id -> stats / name / {rating,est} / tournament G-A
+let _luStats = null, _luNames = {}, _luAtlas = {}, _luTourn = {}, _luSub = {};  // SofaScore id -> stats / name / {rating,est} / tournament G-A / {in,out} sub minutes
 async function ensureLineupStats() {
   if (_luStats) return _luStats;
   const d = await A('/api/match/player-stats');
@@ -316,7 +327,10 @@ async function openPlayerModal(id) {
   ].join('') : '<div class="placeholder-note">No match stats recorded for this player (likely an unused substitute).</div>';
   const chip = p && p.rating != null
     ? `<span class="ratingchip" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : '';
-  const sub = p ? `${esc(p.position || '')}${p.number != null ? ' · #' + p.number : ''} · ${esc(p.team || '')}${p.started ? '' : ' · sub'}` : '';
+  const sm = _luSub[id] || {};
+  const subTxt = (sm.in != null ? ` · ▲ on ${sm.in}'` : '') + (sm.out != null ? ` · ▼ off ${sm.out}'` : '');
+  const base = p ? `${esc(p.position || '')}${p.number != null ? ' · #' + p.number : ''} · ${esc(p.team || '')}${p.started ? '' : ' · sub'}` : '';
+  const sub = (base + subTxt).replace(/^ · /, '');
   // whole-tournament totals (e.g. World Cup goals/assists), when this is a tournament match
   const tv = _luTourn[id];
   const tourn = tv ? `<div class="pm-tourn"><div class="pm-tourn-h">${esc(tv.label)} · Tournament stats</div>
@@ -378,7 +392,7 @@ async function loadLineups(isRefresh) {
   // player actually IN our DB (a real, non-estimated rating).
   for (const side of [d.home, d.away])
     for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
-      if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; _luTourn[p.id] = p.tourn || null; }
+      if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; _luTourn[p.id] = p.tourn || null; _luSub[p.id] = { in: p.subbed_in, out: p.subbed_out }; }
   const hx = d.home?.starting_xi || [], ax = d.away?.starting_xi || [];
   const hRows = parseFormation(d.home?.formation, hx.length);
   const aRows = parseFormation(d.away?.formation, ax.length);

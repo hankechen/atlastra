@@ -316,14 +316,36 @@ def statistics(eid: int) -> dict:
 
 
 # ---- lineups ----------------------------------------------------------------
-def _lineup_side(side: dict) -> dict:
+def _sub_map(eid: int) -> dict:
+    """player_id -> {'in': minute, 'out': minute} from the match's substitution
+    incidents, so the lineup can flag who came on / went off (and when). SofaScore
+    only carries this in the incidents feed, not in the lineups payload itself."""
+    incs = (_get(f"/event/{eid}/incidents", ttl=30) or {}).get("incidents") or []
+    m: dict = {}
+    for i in incs:
+        if i.get("incidentType") != "substitution":
+            continue
+        minute = i.get("time")
+        pin = (i.get("playerIn") or {}).get("id")
+        pout = (i.get("playerOut") or {}).get("id")
+        if pin:
+            m.setdefault(pin, {})["in"] = minute
+        if pout:
+            m.setdefault(pout, {})["out"] = minute
+    return m
+
+
+def _lineup_side(side: dict, submap: dict | None = None) -> dict:
+    submap = submap or {}
     starters, subs = [], []
     for p in side.get("players", []):
         pl = p.get("player") or {}
+        sm = submap.get(pl.get("id")) or {}
         row = {"id": pl.get("id"), "name": pl.get("name"),
                "number": p.get("jerseyNumber") or p.get("shirtNumber"),
                "position": p.get("position"), "captain": bool(p.get("captain")),
-               "rating": (p.get("statistics") or {}).get("rating")}
+               "rating": (p.get("statistics") or {}).get("rating"),
+               "subbed_in": sm.get("in"), "subbed_out": sm.get("out")}
         (subs if p.get("substitute") else starters).append(row)
     return {"formation": side.get("formation"), "starting_xi": starters, "substitutes": subs}
 
@@ -372,7 +394,8 @@ def lineups(eid: int) -> dict:
     if not d or "home" not in d:
         return {"available": False, "confirmed": False, "home": None, "away": None}
     mg = _get(f"/event/{eid}/managers", ttl=600) or {}
-    home, away = _lineup_side(d["home"]), _lineup_side(d["away"])
+    submap = _sub_map(eid)
+    home, away = _lineup_side(d["home"], submap), _lineup_side(d["away"], submap)
     home["manager"] = (mg.get("homeManager") or {}).get("name")
     away["manager"] = (mg.get("awayManager") or {}).get("name")
     return {"available": True, "confirmed": bool(d.get("confirmed")),
@@ -792,8 +815,8 @@ def _form_for(team_id: int):
     for e in reversed(last):                       # API returns oldest-first
         ht, at = e.get("homeTeam") or {}, e.get("awayTeam") or {}
         is_home = ht.get("id") == team_id
-        gf = (e.get("homeScore") if is_home else e.get("awayScore") or {}).get("current")
-        ga = (e.get("awayScore") if is_home else e.get("homeScore") or {}).get("current")
+        gf = ((e.get("homeScore") if is_home else e.get("awayScore")) or {}).get("current")
+        ga = ((e.get("awayScore") if is_home else e.get("homeScore")) or {}).get("current")
         if gf is None or ga is None:
             continue
         rows.append({"opponent": (at if is_home else ht).get("name"), "gf": gf, "ga": ga,
