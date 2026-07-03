@@ -1463,7 +1463,8 @@ class SoccerDB:
                 {"position": _i(r.position), "team": r.team, "cc": r.cc,
                  "rank": self.fifa_rank(r.team),
                  "played": _i(r.played), "w": _i(r.w), "d": _i(r.d), "l": _i(r.l),
-                 "gf": _i(r.gf), "ga": _i(r.ga), "gd": _i(r.gf) - _i(r.ga), "pts": _i(r.pts)}
+                 "gf": _i(r.gf), "ga": _i(r.ga), "gd": (_i(r.gf) or 0) - (_i(r.ga) or 0),
+                 "pts": _i(r.pts)}
                 for r in sub.itertuples()]})
 
         # champion via winner_code (handles a Final settled on penalties, where the
@@ -2771,7 +2772,9 @@ class SoccerDB:
         # past-season view shows the right crest, e.g. Bellingham at Dortmund), not
         # just the latest team.
         prog = self.player_progression(name, stats=[career_stat])
-        career_stat = career_stat if career_stat in prog.columns else "ga_per90"
+        if career_stat not in prog.columns:        # unknown stat -> refetch with a safe default
+            career_stat = "ga_per90"
+            prog = self.player_progression(name, stats=[career_stat])
         career = [{"season": _fmt_season(r.season), "value": _r(getattr(r, career_stat))}
                   for r in prog.itertuples() if pd.notna(getattr(r, career_stat))]
         team = None
@@ -3539,7 +3542,7 @@ class SoccerDB:
 
         def rate(s, k):
             p = s.get("played") or 0
-            return (s.get(k, 0) / p) if p else 1.2
+            return ((s.get(k) or 0) / p) if p else 1.2
         hxgf, hxga = rate(hs, "xg_for"), rate(hs, "xg_against")
         axgf, axga = rate(ats, "xg_for"), rate(ats, "xg_against")
         HOME = 1.10
@@ -3573,14 +3576,16 @@ class SoccerDB:
                 hg, ag = x["home_goals"], x["away_goals"]
             else:
                 hg, ag = x["away_goals"], x["home_goals"]
-            gh += hg or 0; ga += ag or 0
+            if hg is None or ag is None:   # unplayed fixture (e.g. future UCL tie)
+                continue
+            gh += hg; ga += ag
             if hg > ag:
                 hw += 1
             elif hg == ag:
                 dw += 1
             else:
                 aw += 1
-        return {"played": len(matches), "home_wins": hw, "draws": dw, "away_wins": aw,
+        return {"played": hw + dw + aw, "home_wins": hw, "draws": dw, "away_wins": aw,
                 "goals_home": gh, "goals_away": ga, "recent": matches[:6]}
 
     def web_match_preview(self, home: str, away: str) -> dict:
@@ -3610,7 +3615,7 @@ class SoccerDB:
             }
         return {"available": True, "home": pack(ht), "away": pack(at),
                 "prediction": self._poisson_pred(ht.get("stats") or {}, at.get("stats") or {}),
-                "h2h": self._h2h_summary(home, away)}
+                "h2h": self._h2h_summary(ht["team"], at["team"])}
 
     # ---------------------------------------------------------------- use case 2
     #  Big Game Index — split a player's output vs top-half ("big games") and
