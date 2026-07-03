@@ -1627,19 +1627,41 @@ class SoccerDB:
     # frontend position group -> SofaScore position-group code (wc_player_stats.position)
     _WC_GROUP = {"FWD": "F", "MID": "M", "DEF": "D", "GK": "G"}
     _WC_POS_LABEL = {"G": "GK", "D": "DEF", "M": "MID", "F": "FWD"}
+    # artificial World Cup rating overrides (player name lower-cased -> rating).
+    # Applied at read time so they reorder the grid and survive WC data refreshes.
+    _WC_RATING_OVERRIDE = {"ousmane dembélé": 88}
+
+    def _wc_photo(self, name):
+        """FotMob photo for a WC player whose name doesn't join the players table
+        directly — resolve via the fuzzy find_player_id (the same resolver the card's
+        profile link uses), so e.g. 'Kylian Mbappé' -> 'Kylian Mbappe-Lottin'."""
+        pid = self.find_player_id(name)
+        if pid is None:
+            return None
+        row = self.con.execute(
+            "SELECT max(fotmob_player_id) FROM player_enrichment WHERE player_id = ?",
+            [pid]).fetchone()
+        return self.player_photo(row[0] if row and row[0] is not None else None)
 
     def _web_players_wc(self, group, search, limit) -> list[dict]:
         """World Cup directory: the top-rated players of the most recent World Cup by
         their stats-based Atlas WC rating (0-99, wc_player_stats.atlas_rating —
         [[wc-rating-engine]]), shown with their tournament goals & assists. National
         teams carry a flag (country code from wc_standings) instead of a club crest.
-        Photos are name-matched to a FotMob club photo where available."""
+        Photos are name-matched to a FotMob club photo (fuzzy fallback for names the
+        players table stores differently). `_WC_RATING_OVERRIDE` artificially boosts
+        selected players' ratings."""
         row = self.con.execute("SELECT max(season) FROM wc_player_stats").fetchone()
         season = row[0] if row and row[0] else None
         if season is None:
             return []
+        # rating override as a SQL CASE so ORDER BY / LIMIT see the boosted value
+        ov = self._WC_RATING_OVERRIDE
+        ov_case = "".join(" WHEN lower(p.player) = ? THEN ?" for _ in ov)
+        rating_sql = f"CASE{ov_case} ELSE p.atlas_rating END" if ov else "p.atlas_rating"
+        ov_params = [v for name, r in ov.items() for v in (name, r)]
         where = ["p.season = ?", "p.atlas_rating IS NOT NULL"]
-        params = [season, season]                      # w.season (JOIN), then p.season
+        params = ov_params + [season, season]          # CASE, then w.season (JOIN), p.season
         if group and group != "all" and group in self._WC_GROUP:
             where.append("p.position = ?")
             params.append(self._WC_GROUP[group])
@@ -1648,7 +1670,7 @@ class SoccerDB:
             params.append(search)
         params.append(limit)
         df = self.con.execute(f"""
-            SELECT p.player, p.team, p.position, p.atlas_rating AS rating,
+            SELECT p.player, p.team, p.position, {rating_sql} AS rating,
                    p.atlas_class AS classification, p.goals, p.assists, w.cc, pe.fpid
             FROM wc_player_stats p
             LEFT JOIN (SELECT DISTINCT team, cc FROM wc_standings WHERE season = ?) w
@@ -1658,16 +1680,21 @@ class SoccerDB:
                        WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
                    ON pe.player_id = pl.player_id
             WHERE {' AND '.join(where)}
-            ORDER BY p.atlas_rating DESC, p.rating DESC NULLS LAST
+            ORDER BY rating DESC, p.rating DESC NULLS LAST
             LIMIT ?
         """, params).df()
-        return [{"player": r.player, "team": r.team,
-                 "position": self._WC_POS_LABEL.get(r.position, r.position),
-                 "rating": _i(r.rating), "classification": r.classification,
-                 "cc": None if pd.isna(r.cc) else r.cc, "market_value_eur": None,
-                 "goals": _i(r.goals), "assists": _i(r.assists),
-                 "photo": self.player_photo(None if pd.isna(r.fpid) else int(r.fpid))}
-                for r in df.itertuples()]
+        out = []
+        for r in df.itertuples():
+            fpid = None if pd.isna(r.fpid) else int(r.fpid)
+            photo = self.player_photo(fpid) if fpid else self._wc_photo(r.player)
+            boosted = r.player.lower() in self._WC_RATING_OVERRIDE
+            out.append({"player": r.player, "team": r.team,
+                        "position": self._WC_POS_LABEL.get(r.position, r.position),
+                        "rating": _i(r.rating),
+                        "classification": self._tier(_i(r.rating)) if boosted else r.classification,
+                        "cc": None if pd.isna(r.cc) else r.cc, "market_value_eur": None,
+                        "goals": _i(r.goals), "assists": _i(r.assists), "photo": photo})
+        return out
 
     @staticmethod
     def _tier(rating) -> str:
