@@ -1,7 +1,7 @@
 renderSidebar('Players');
 
 const GROUPS = [['all', 'All'], ['FWD', 'Forwards'], ['MID', 'Midfield'], ['DEF', 'Defenders'], ['GK', 'Goalkeepers']];
-const SCOPES = [['league', 'Top 5 Leagues'], ['ucl', 'Champions League'], ['former', 'Former Players']];
+const SCOPES = [['league', 'Top 5 Leagues'], ['ucl', 'Champions League'], ['wc', 'World Cup'], ['former', 'Former Players']];
 let group = 'all', search = '', scope = 'league';
 const _sp = new URLSearchParams(location.search).get('scope');   // ?scope=former deep-link
 if (SCOPES.some(([s]) => s === _sp)) scope = _sp;
@@ -74,9 +74,28 @@ const formerCard = (p) => `
     </div>
   </div>`;
 
+// World Cup: national-team players ranked by their stats-based Atlas WC rating,
+// with the country flag (home nations by name) in place of a club crest.
+const wcFlagFor = (name, cc) => (HOME_NATION[name] ? flagEmoji(HOME_NATION[name]) : flagISO2(cc)) || '';
+const wcCard = (p) => `
+  <div class="pcard${tierClass(p)}" onclick="location.href='/player.html?name=${encodeURIComponent(p.player)}'">
+    <div class="top">
+      <div class="photo">${avatarHTML(p.photo, p.player)}</div>
+      <div class="rt">${p.rating ?? '—'}</div>
+    </div>
+    <div class="nm">${p.player}</div>
+    <div class="sub"><span style="margin-right:5px">${wcFlagFor(p.team, p.cc)}</span>${p.team} · ${p.position}</div>
+    <span class="cls">${p.classification ?? ''}</span>
+    <div class="row">
+      <div class="x"><span>Goals</span><b>${p.goals ?? '—'}</b></div>
+      <div class="x"><span>Assists</span><b>${p.assists ?? '—'}</b></div>
+    </div>
+  </div>`;
+
 let timer;
 const NOTES = {
   ucl: 'Champions League players ranked by their UCL rating, with their UCL goals & assists. Click any card for the full profile.',
+  wc: 'The top-rated players of the latest World Cup, ranked by their stats-based Atlas WC rating (0–99), shown with their tournament goals & assists. Click any card for the full profile.',
   former: 'Notable players who have left the big five leagues (transferred abroad or retired), ranked by their best season here — the headline number is the combined League + UCL rating (minutes-weighted), shown with that season and its advanced stats. Players who did not feature in the Champions League that season have a league-only rating and are listed after the UCL players. Click a card to open that season on their profile.',
   league: "Top-rated players across Europe's big five leagues. Click any card for the full profile.",
 };
@@ -84,7 +103,7 @@ async function render() {
   document.getElementById('dirNote').textContent = NOTES[scope] || NOTES.league;
   const qs = `group=${group}&scope=${scope}&limit=30` + (search ? `&search=${encodeURIComponent(search)}` : '');
   const players = await api('/api/players?' + qs);
-  const draw = scope === 'former' ? formerCard : card;
+  const draw = scope === 'former' ? formerCard : scope === 'wc' ? wcCard : card;
   document.getElementById('grid').innerHTML =
     players.length ? players.map(draw).join('') : `<div class="empty">No players found.</div>`;
 }

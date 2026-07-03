@@ -1548,6 +1548,8 @@ class SoccerDB:
             return self._web_players_ucl(group, search, limit, season)
         if scope == "former":
             return self._web_players_former(group, search, limit)
+        if scope == "wc":
+            return self._web_players_wc(group, search, limit)
         # params order matches the ?-placeholders below: v.season, c.season, [group], [search], limit
         where, params = ["f.player_id IS NOT NULL"], [season, season]
         if group and group != "all" and group in self.PLAYER_GROUPS:
@@ -1620,6 +1622,51 @@ class SoccerDB:
                  "market_value_eur": None if pd.isna(r.market_value_eur) else float(r.market_value_eur),
                  "goals": _i(r.goals), "assists": _i(r.assists),
                  "photo": self.player_photo(r.fpid), "team_logo": self.team_logo(r.team)}
+                for r in df.itertuples()]
+
+    # frontend position group -> SofaScore position-group code (wc_player_stats.position)
+    _WC_GROUP = {"FWD": "F", "MID": "M", "DEF": "D", "GK": "G"}
+    _WC_POS_LABEL = {"G": "GK", "D": "DEF", "M": "MID", "F": "FWD"}
+
+    def _web_players_wc(self, group, search, limit) -> list[dict]:
+        """World Cup directory: the top-rated players of the most recent World Cup by
+        their stats-based Atlas WC rating (0-99, wc_player_stats.atlas_rating —
+        [[wc-rating-engine]]), shown with their tournament goals & assists. National
+        teams carry a flag (country code from wc_standings) instead of a club crest.
+        Photos are name-matched to a FotMob club photo where available."""
+        row = self.con.execute("SELECT max(season) FROM wc_player_stats").fetchone()
+        season = row[0] if row and row[0] else None
+        if season is None:
+            return []
+        where = ["p.season = ?", "p.atlas_rating IS NOT NULL"]
+        params = [season, season]                      # w.season (JOIN), then p.season
+        if group and group != "all" and group in self._WC_GROUP:
+            where.append("p.position = ?")
+            params.append(self._WC_GROUP[group])
+        if search:
+            where.append("strip_accents(lower(p.player)) LIKE strip_accents(lower('%'||?||'%'))")
+            params.append(search)
+        params.append(limit)
+        df = self.con.execute(f"""
+            SELECT p.player, p.team, p.position, p.atlas_rating AS rating,
+                   p.atlas_class AS classification, p.goals, p.assists, w.cc, pe.fpid
+            FROM wc_player_stats p
+            LEFT JOIN (SELECT DISTINCT team, cc FROM wc_standings WHERE season = ?) w
+                   ON lower(w.team) = lower(p.team)
+            LEFT JOIN players pl ON lower(pl.player_name) = lower(p.player)
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = pl.player_id
+            WHERE {' AND '.join(where)}
+            ORDER BY p.atlas_rating DESC, p.rating DESC NULLS LAST
+            LIMIT ?
+        """, params).df()
+        return [{"player": r.player, "team": r.team,
+                 "position": self._WC_POS_LABEL.get(r.position, r.position),
+                 "rating": _i(r.rating), "classification": r.classification,
+                 "cc": None if pd.isna(r.cc) else r.cc, "market_value_eur": None,
+                 "goals": _i(r.goals), "assists": _i(r.assists),
+                 "photo": self.player_photo(None if pd.isna(r.fpid) else int(r.fpid))}
                 for r in df.itertuples()]
 
     @staticmethod
