@@ -56,8 +56,18 @@ def _con() -> sqlite3.Connection:
         c.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if "google_sub" not in cols:
         c.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
+    # Admin flag: gates the /admin dashboard. Defaults to 0 for everyone; promote a
+    # user with tools/make_admin.py (or set_admin()).
+    if "is_admin" not in cols:
+        c.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
     c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google "
               "ON users(google_sub) WHERE google_sub IS NOT NULL")
+    # Lightweight usage log for the admin dashboard: one row per page/api request.
+    # `vid` is an anonymous per-browser visitor id (cookie) so we can count uniques
+    # without touching PII. Written in batches by admin.record_hit's flush thread.
+    c.execute("CREATE TABLE IF NOT EXISTS analytics_hits("
+              "ts REAL, path TEXT, kind TEXT, vid TEXT)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_hits_ts ON analytics_hits(ts)")
     return c
 
 
@@ -99,13 +109,16 @@ def login(username: str, password: str):
     with _LOCK:
         c = _con()
         try:
-            row = c.execute("SELECT id, pw, salt, username FROM users WHERE username = ?",
-                            [(username or "").strip()]).fetchone()
-            if not row or not secrets.compare_digest(_hash(password, row[2]), row[1]):
+            row = c.execute(
+                "SELECT id, pw, salt, username, COALESCE(is_admin,0) FROM users WHERE username = ?",
+                [(username or "").strip()]).fetchone()
+            # Google-created accounts have NULL pw/salt -> no password login (don't hash None).
+            if (not row or row[1] is None or row[2] is None
+                    or not secrets.compare_digest(_hash(password, row[2]), row[1])):
                 return None, "Wrong username or password."
             tok = _new_session(c, row[0])
             c.commit()
-            return {"id": row[0], "username": row[3]}, tok
+            return {"id": row[0], "username": row[3], "is_admin": bool(row[4])}, tok
         finally:
             c.close()
 
@@ -167,11 +180,48 @@ def user_for_token(token: str):
     c = _con()
     try:
         row = c.execute(
-            "SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id "
+            "SELECT u.id, u.username, COALESCE(u.is_admin, 0) FROM sessions s "
+            "JOIN users u ON u.id = s.user_id "
             "WHERE s.token = ? AND s.expires > ?", [token, time.time()]).fetchone()
-        return {"id": row[0], "username": row[1]} if row else None
+        return {"id": row[0], "username": row[1], "is_admin": bool(row[2])} if row else None
     finally:
         c.close()
+
+
+def set_admin(username: str, is_admin: bool = True) -> bool:
+    """Promote/demote a user by username. Returns False if no such user."""
+    with _LOCK:
+        c = _con()
+        try:
+            cur = c.execute("UPDATE users SET is_admin = ? WHERE username = ?",
+                            [1 if is_admin else 0, (username or "").strip()])
+            c.commit()
+            return cur.rowcount > 0
+        finally:
+            c.close()
+
+
+def ensure_admin(username: str, password: str) -> dict:
+    """Bootstrap an admin: create the account if missing (or reset its password),
+    then flag it admin. Used by tools/make_admin.py. Returns the user dict."""
+    username = (username or "").strip()
+    with _LOCK:
+        c = _con()
+        try:
+            salt = secrets.token_hex(16)
+            row = c.execute("SELECT id FROM users WHERE username = ?", [username]).fetchone()
+            if row:
+                c.execute("UPDATE users SET pw = ?, salt = ?, is_admin = 1 WHERE id = ?",
+                          [_hash(password, salt), salt, row[0]])
+                uid = row[0]
+            else:
+                uid = c.execute(
+                    "INSERT INTO users(username, pw, salt, created, is_admin) VALUES(?,?,?,?,1)",
+                    [username, _hash(password, salt), salt, time.time()]).lastrowid
+            c.commit()
+            return {"id": uid, "username": username, "is_admin": True}
+        finally:
+            c.close()
 
 
 def get_data(uid: int):

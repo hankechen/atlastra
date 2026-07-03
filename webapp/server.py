@@ -12,6 +12,7 @@ Run:  python -m webapp.server     ->  http://localhost:8000
 import json
 import math
 import os
+import secrets
 from datetime import datetime
 import threading
 import sys
@@ -55,8 +56,17 @@ from webapp import auth  # noqa: E402
 def _season(q):
     """Season code from the query string, defaulting to the current season."""
     return (q.get("season", [FOCUS_SEASON])[0] or FOCUS_SEASON)
+
+
+def _int(v, default=0):
+    """Parse a query-string int, falling back on missing/garbage instead of crashing."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
 from webapp import live_feed  # noqa: E402
 from webapp import scout_ai  # noqa: E402
+from webapp import admin  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent / "frontend"
 PORT = 8000
@@ -413,10 +423,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         # dev server: never let the browser serve a stale JS/CSS/HTML asset
         self.send_header("Cache-Control", "no-store, must-revalidate")
+        # stamp a first-time visitor with an anonymous id (usage analytics only)
+        nv = getattr(self, "_new_vid", None)
+        if nv:
+            self.send_header("Set-Cookie",
+                             f"atla_vid={nv}; Path=/; Max-Age=31536000; SameSite=Lax")
+            self._new_vid = None
         for k, v in (extra_headers or []):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+
+    def _visitor(self):
+        """Anonymous per-browser visitor id (for unique-visitor counts). Minted on
+        first visit and set via _send's Set-Cookie; no PII, no login required."""
+        vid = self._cookie("atla_vid")
+        if not vid:
+            vid = secrets.token_urlsafe(9)
+            self._new_vid = vid
+        return vid
 
     def _json(self, obj, code=200, extra_headers=None):
         self._send(code, jdumps(obj).encode(), "application/json", extra_headers)
@@ -432,14 +457,18 @@ class Handler(BaseHTTPRequestHandler):
     def _body_json(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
         try:
-            return json.loads(self.rfile.read(n) or b"{}") if n else {}
+            d = json.loads(self.rfile.read(n) or b"{}") if n else {}
         except Exception:  # noqa: BLE001
             return {}
+        # handlers call b.get(...); a non-object body (list/str/number) would AttributeError
+        return d if isinstance(d, dict) else {}
 
     # ---- optional accounts (auth + per-user data sync) ----
     def do_POST(self):
         u = urlparse(self.path)
         b = self._body_json()
+        if u.path.startswith("/api/") and not u.path.startswith("/api/ingest/"):
+            admin.record_hit(u.path, "api", self._visitor())
         if u.path in ("/api/auth/signup", "/api/auth/login"):
             fn = auth.signup if u.path.endswith("signup") else auth.login
             user, tok = fn(b.get("username"), b.get("password"))
@@ -535,7 +564,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self._json({"error": "Not signed in."}, 401)
                 return
-            ok = auth.delete_comment(int(b.get("id", 0) or 0), user["id"])
+            ok = auth.delete_comment(_int(b.get("id")), user["id"])
             self._json({"ok": ok} if ok else {"error": "Can't delete that comment."},
                        200 if ok else 403)
             return
@@ -544,13 +573,23 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 self._json({"error": "Sign in to like comments."}, 401)
                 return
-            res, err = auth.toggle_like(int(b.get("id", 0) or 0), user["id"])
+            res, err = auth.toggle_like(_int(b.get("id")), user["id"])
             self._json(res if res else {"error": err}, 200 if res else 400)
             return
         self._json({"error": "Not found"}, 404)
 
     def do_GET(self):
         u = urlparse(self.path)
+        vid = self._visitor()
+        if u.path.startswith("/api/") and not u.path.startswith("/api/ingest/"):
+            admin.record_hit(u.path, "api", vid)       # usage log (ingest is machine traffic)
+        if u.path == "/api/admin/overview":            # admin dashboard data (admins only)
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user or not user.get("is_admin"):
+                self._json({"error": "Admins only."}, 403)
+                return
+            self._json(admin.overview())
+            return
         if u.path == "/api/ingest/queue":              # SofaScore paths the pusher should fetch
             if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
                 self._json({"error": "unauthorized"}, 401)
@@ -574,7 +613,7 @@ class Handler(BaseHTTPRequestHandler):
             qq = parse_qs(u.query)
             self._json(auth.leaderboard(qq.get("game", [""])[0],
                                         qq.get("period", ["alltime"])[0],
-                                        int(qq.get("limit", ["25"])[0])))
+                                        _int(qq.get("limit", ["25"])[0], 25)))
             return
         if u.path == "/api/comments":                  # public: read a thread's comments
             qq = parse_qs(u.query)
@@ -614,6 +653,8 @@ class Handler(BaseHTTPRequestHandler):
         if not str(f).startswith(str(FRONTEND)) or not f.is_file():
             self._send(404, b"Not found", "text/plain")
             return
+        if f.suffix == ".html":                        # count real page views (not JS/CSS/img)
+            admin.record_hit("/" + rel, "page", vid)
         self._send(200, f.read_bytes(), CT.get(f.suffix, "application/octet-stream"))
 
 
@@ -693,6 +734,8 @@ def _national_warmer():
 
 if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
+    admin.start_writer()
+    print("admin usage log: on (buffered writer -> /admin dashboard)")
     if LIVE_REFRESH:
         threading.Thread(target=_live_refresher, daemon=True).start()
         print("live refresher: on (read-write DB; ATLASTRA_NO_LIVE_REFRESH=1 to disable)")

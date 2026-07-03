@@ -631,6 +631,10 @@ function renderSidebar(active) {
   };
   const section = (label, items, extra = '') =>
     `<div class="nav-label">${label}${extra}</div><nav class="nav">${items.map(item).join('')}</nav>`;
+  // Admin-only section (shown once Auth.me() confirms an admin session).
+  const adminSec = (Auth.user && Auth.user.is_admin)
+    ? `<div class="sb-div"></div>${section('Admin', [['Dashboard', 'rankings', '/admin.html']])}`
+    : '';
   const leagues = LEAGUES.map(([n, id, c]) =>
     `<a href="/teams.html?league=${encodeURIComponent(n)}" class="navi league"><span class="lglogo"><img src="https://images.fotmob.com/image_resources/logo/leaguelogo/${id}.png" alt="" loading="lazy" onerror="this.parentElement.style.background='${c}';this.remove()"></span><span class="t">${n}</span></a>`).join('');
   document.getElementById('sidebar').innerHTML = `
@@ -646,6 +650,7 @@ function renderSidebar(active) {
       ${section('Analytics', NAV_ANALYTICS)}
       <div class="sb-div"></div>
       ${section('My Stuff', NAV_MINE)}
+      ${adminSec}
       <div class="sb-div"></div>
       <div class="nav-label">Leagues<span class="chev">${svg('chevD')}</span></div>
       <nav class="nav">${leagues}</nav>
