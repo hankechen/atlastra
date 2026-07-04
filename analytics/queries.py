@@ -1629,7 +1629,9 @@ class SoccerDB:
     _WC_POS_LABEL = {"G": "GK", "D": "DEF", "M": "MID", "F": "FWD"}
     # artificial World Cup rating overrides (player name lower-cased -> rating).
     # Applied at read time so they reorder the grid and survive WC data refreshes.
-    _WC_RATING_OVERRIDE = {"ousmane dembélé": 88}
+    _WC_RATING_OVERRIDE = {"ousmane dembélé": 88, "bradley barcola": 78,
+                           "dayot upamecano": 76, "william saliba": 74,
+                           "jules koundé": 70, "lucas digne": 56}
 
     def _wc_photo(self, name):
         """FotMob photo for a WC player whose name doesn't join the players table
