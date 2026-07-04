@@ -43,6 +43,12 @@ import duckdb
 
 RATE_LIMIT_SEC = 1.2
 
+# How long after kickoff a match can still be in play -- 90' + halftime + stoppage,
+# plus room for extra time and a penalty shootout, plus a safety buffer. A match
+# whose kickoff is within this window but that isn't `finished` yet should be live
+# right now, so we direct-poll its /event/{id} (see _should_be_live / fetch_events).
+LIVE_MATCH_MAX_MIN = int(os.environ.get("LIVE_MATCH_MAX_MIN", "210"))   # 3.5h
+
 # SofaScore uniqueTournament id -> (our key, display name, group)
 ID_TO_TOURNEY = {tid: (key, name, grp)
                  for key, (tid, name, grp) in SOFASCORE_LIVE_TOURNAMENTS.items()}
@@ -80,22 +86,61 @@ def _setup(con) -> None:
 # to e.g. http://user:pass@host:port.
 _PROXY = os.environ.get("SOFASCORE_PROXY") or None
 
+# A machine resuming from sleep (or a brief Wi-Fi drop) can't resolve
+# api.sofascore.com for several seconds -- the fetch fails with a DNS/connection
+# error, NOT an HTTP status. That's a transient blip, not a block, so ride it out
+# with a bounded backoff instead of failing the whole cycle and leaving the site
+# with stale / "match not found" data until the next poll. Set to 0 to disable.
+NET_RETRY_MAX_SEC = float(os.environ.get("SOFA_NET_RETRY_SEC", "45"))
+
+# Substrings that only appear in connectivity/DNS failures (no HTTP response) -- an
+# HTTP status error (403/404/5xx) reads like "404 Client Error: Not Found ..." and
+# matches none of these, so it is never mistaken for a network blip.
+_NET_ERR_MARKERS = ("dial tcp", "failed to do request", "no such host",
+                    "temporary failure in name resolution", "connection refused",
+                    "connection reset", "network is unreachable", "timed out",
+                    "timeout")
+
+
+def _is_network_error(e: Exception) -> bool:
+    """True for a transient connectivity/DNS failure worth waiting out, as opposed
+    to an HTTP status error (403/404/5xx) that won't clear on retry."""
+    s = str(e).lower()
+    return any(m in s for m in _NET_ERR_MARKERS)
+
 
 def _get(path: str, retries: int = 1) -> dict:
     """Bare GET -- NO extra headers (CORS headers trip SofaScore's bot challenge;
     the default browser-TLS fingerprint alone is accepted). One light retry for a
     transient blip, but NEVER retry a 403 -- a hard block won't clear and just
-    burns through the (single, rate-limited) proxy IP."""
+    burns through the (single, rate-limited) proxy IP. A DNS/connection failure
+    (e.g. just resumed from sleep) is retried with backoff up to NET_RETRY_MAX_SEC,
+    so a few seconds of no network doesn't fail the cycle."""
     last = None
-    for i in range(retries + 1):
+    i = 0
+    backoff = 0.8
+    net_deadline = None                               # set on the first network blip
+    while True:
         try:
             r = tls_requests.get(f"{SOFASCORE_BASE}{path}", timeout=30, proxy=_PROXY)
             r.raise_for_status()
             return r.json()
         except Exception as e:                        # noqa: BLE001
             last = e
-            if "403" in str(e) or i >= retries:
+            if "403" in str(e):
                 break
+            if _is_network_error(e) and NET_RETRY_MAX_SEC > 0:
+                now = time.monotonic()
+                if net_deadline is None:
+                    net_deadline = now + NET_RETRY_MAX_SEC
+                if now < net_deadline:
+                    time.sleep(min(backoff, 5.0))
+                    backoff *= 1.7
+                    continue
+                break
+            if i >= retries:
+                break
+            i += 1
             time.sleep(0.8)
     raise last
 
@@ -157,6 +202,45 @@ def _row(ev: dict, now: int, updated_at: datetime) -> dict | None:
         "home_pens": hs.get("penalties"), "away_pens": as_.get("penalties"),
         "winner_code": ev.get("winnerCode"), "updated_at": updated_at,
     }
+
+
+def _should_be_live(row: dict, now: int) -> bool:
+    """True for a row that ought to be in play right now: its kickoff has passed but
+    it isn't `finished`. Such a match sits in a blind spot -- it has left the `next`
+    (upcoming) scrape list, hasn't reached `last` (finished), and SofaScore's global
+    live feed intermittently omits it -- so its own /event/{id} is the reliable
+    source. Bounded by LIVE_MATCH_MAX_MIN so we don't poll long-over games forever."""
+    ts = row.get("start_timestamp")
+    if not ts or row.get("status_type") == "finished":
+        return False
+    return ts <= now <= ts + LIVE_MATCH_MAX_MIN * 60
+
+
+# Event ids that should be in play now, learned from the last full scrape. The
+# global live feed is flaky, so between full scrapes the fast in-play path ALSO
+# direct-polls these. Populated by fetch_rows(); an id drops once it reads finished.
+_LIVE_CANDIDATES: set[int] = set()
+
+
+def fetch_events(event_ids, now: int | None = None,
+                 updated_at: datetime | None = None) -> list[dict]:
+    """Direct-poll /event/{id} for each id -> fresh rows (covered tournaments only).
+    Unlike the global live feed, an event's own endpoint always carries its current
+    status/score/clock, so this reliably refreshes a match the feed dropped. Rows for
+    tournaments we don't cover (or failed fetches) are simply skipped."""
+    now = now if now is not None else int(time.time())
+    updated_at = updated_at if updated_at is not None else datetime.now()
+    rows = []
+    for eid in event_ids:
+        try:
+            ev = (_get(f"/event/{eid}") or {}).get("event")
+        except Exception as e:                            # noqa: BLE001
+            print(f"  ! event {eid}: {e}")
+            continue
+        r = _row(ev, now, updated_at) if ev else None
+        if r:
+            rows.append(r)
+    return rows
 
 
 # current-season id per uniqueTournament. Changes once a season, so cache it for
@@ -234,6 +318,23 @@ def fetch_rows() -> list[dict]:
     except Exception as e:                            # noqa: BLE001
         print(f"  ! live feed: {e}")
 
+    # A match that has kicked off but isn't finished is in neither scrape list, and
+    # the live feed may have missed it -- direct-poll every such dead-zone match so
+    # its score/clock is fresh. Also remember the live set so the fast in-play path
+    # (fetch_live_only) can keep polling them between these full scrapes.
+    global _LIVE_CANDIDATES
+    now = int(time.time())
+    # rebind (not clear()+update()) so a concurrent reader in another thread -- the
+    # pusher polls this from both its main loop and its warm thread -- always sees a
+    # complete set, never one mid-rebuild.
+    _LIVE_CANDIDATES = {r["event_id"] for r in rows.values() if _should_be_live(r, now)}
+    missed = [eid for eid in _LIVE_CANDIDATES
+              if rows[eid].get("status_type") != "inprogress"]
+    if missed:
+        for r in fetch_events(missed, now, updated_at):
+            rows[r["event_id"]] = r
+        print(f"  direct-polled {len(missed)} dead-zone match(es)")
+
     return list(rows.values())
 
 
@@ -277,17 +378,33 @@ def load_live() -> int:
     return n_live
 
 
-def fetch_live_only() -> list[dict]:
-    """Just the global live feed -- one fast call (covered tournaments only),
-    skipping the slow day-by-day window scrape. For frequent in-play refreshes."""
+def fetch_live_only(extra_ids=None) -> list[dict]:
+    """Fast in-play refresh, skipping the slow day-by-day window scrape. Combines the
+    global live feed with a direct poll of the known live candidates (from the last
+    full scrape's _LIVE_CANDIDATES, plus any `extra_ids`), so a match the flaky feed
+    omits still gets a fresh score/clock. A candidate that now reads finished is
+    returned (catching the full-time transition) and dropped from the candidate set."""
     now = int(time.time())
     updated_at = datetime.now()
     rows: dict[int, dict] = {}
-    live = _get("/sport/football/events/live")
-    for ev in live.get("events", []):
-        r = _row(ev, now, updated_at)
-        if r:
-            rows[r["event_id"]] = r
+    try:
+        live = _get("/sport/football/events/live")
+        for ev in live.get("events", []):
+            r = _row(ev, now, updated_at)
+            if r:
+                rows[r["event_id"]] = r
+                if r.get("status_type") == "inprogress":
+                    _LIVE_CANDIDATES.add(r["event_id"])   # lock on -- keep polling even if the feed later drops it
+    except Exception as e:                                # noqa: BLE001
+        print(f"  ! live feed: {e}")
+
+    ids = set(_LIVE_CANDIDATES)
+    if extra_ids:
+        ids.update(extra_ids)
+    for r in fetch_events(ids, now, updated_at):          # direct poll -- freshest per match
+        rows[r["event_id"]] = r
+        if r.get("status_type") == "finished":
+            _LIVE_CANDIDATES.discard(r["event_id"])
     return list(rows.values())
 
 
