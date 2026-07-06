@@ -50,6 +50,35 @@ _ODDS_PROVIDERS = (1, 5, 8, 11, 14, 16)
 WC_EVERY = int(os.environ.get("PUSH_WC_EVERY", "900"))     # World Cup leaders/standings refresh
 WC_SEASON = os.environ.get("PUSH_WC_SEASON", "2026")       # current edition to keep fresh
 
+# tls_requests leaks ONE socket per request -- its Go tls-client binding never frees
+# the connection (confirmed: neither response.close, client.close, nor a with-block
+# reclaims it), and every socket holds an ephemeral local port. macOS has only ~16k
+# ephemeral ports (49152-65535), so after enough requests this process can't open ANY
+# new socket -- not even the UDP socket the DNS resolver needs -- and every scrape
+# fails with "listen udp :0: bind: resource temporarily unavailable", leaving the live
+# feed empty. There is no in-process fix, so recycle BEFORE we get close: a guard
+# thread exits when our open-fd count crosses a threshold, and launchd's KeepAlive
+# relaunches a fresh process (which re-warms the feed in ~1 min).
+FD_RECYCLE = int(os.environ.get("PUSH_FD_RECYCLE", "10000"))   # ~6k ports of headroom
+FD_CHECK_EVERY = int(os.environ.get("PUSH_FD_CHECK_EVERY", "120"))
+
+
+def _fd_count() -> int:
+    try:
+        return len(os.listdir("/dev/fd"))
+    except OSError:
+        return 0
+
+
+def _service_fdguard():
+    while True:
+        time.sleep(FD_CHECK_EVERY)
+        n = _fd_count()
+        if n >= FD_RECYCLE:
+            print(f"{datetime.now():%H:%M:%S} fd guard: {n} fds open (>= {FD_RECYCLE}) "
+                  f"-- recycling process; launchd KeepAlive will relaunch", flush=True)
+            os._exit(0)   # from a daemon thread: os._exit kills the WHOLE process
+
 
 def _post(endpoint: str, payload: dict):
     """POST JSON to OUR server (plain HTTP -- no bot bypass needed)."""
@@ -224,6 +253,7 @@ def main():
     threading.Thread(target=_service_warm, daemon=True).start()    # pre-warm live matches + players
     threading.Thread(target=_service_warm_fixtures, daemon=True).start()  # upcoming previews + recent
     threading.Thread(target=_service_wc, daemon=True).start()      # World Cup hub data
+    threading.Thread(target=_service_fdguard, daemon=True).start() # recycle before port exhaustion
     last_full = 0.0
     n_live = 0
     while True:
