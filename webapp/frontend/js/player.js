@@ -247,6 +247,29 @@ async function load(name, careerStat = 'xa', season = null) {
   drawRadar(p.radar);
   drawCareer(p.career, careerStat);
   drawHeatmap(p.heatmap);
+  renderWorldCups(p.worldcups, p.country_code);
+}
+
+// World Cup record card: one row per edition the player featured in (newest first).
+// Hidden entirely when the player has no World Cup appearances.
+function renderWorldCups(wcs, cc) {
+  const card = document.getElementById('worldCupCard');
+  if (!wcs || !wcs.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const flag = flagEmoji(cc) || '';   // country_code is a FIFA 3-letter code (ESP/NOR/…)
+  const cell = (v, l) => `<div class="wc-s"><b>${v == null ? '—' : v}</b><span>${l}</span></div>`;
+  document.getElementById('worldCups').innerHTML = wcs.map(w => `
+    <div class="wc-row">
+      <div class="wc-ed"><span class="wc-yr">${w.edition}</span><span class="wc-lbl">World Cup</span></div>
+      <div class="wc-team">${flag} <span>${w.team || ''}</span><small>${w.position || ''}</small></div>
+      <div class="wc-stats">
+        ${cell(w.apps, 'Apps')}${cell(w.minutes != null ? w.minutes + "'" : null, 'Minutes')}
+        ${cell(w.goals, 'Goals')}${cell(w.assists, 'Assists')}
+        ${cell(w.sofa_rating != null ? w.sofa_rating.toFixed(2) : null, 'Avg Rating')}
+      </div>
+      <div class="wc-atlas" style="--wc-c:${pctColor(w.atlas_rating || 0)}">
+        <b>${w.atlas_rating == null ? '—' : w.atlas_rating}</b><span>${w.atlas_class || ''}</span></div>
+    </div>`).join('');
 }
 
 // SofaScore season heatmap: blurred density over a pitch (attacks left -> right).

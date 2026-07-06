@@ -434,6 +434,40 @@ class SoccerDB:
         return {"rating": int(best[1]), "classification": best[2],
                 "apps": _i(best[3]), "minutes": _i(best[4]), "edition": edition}
 
+    _WC_POS = {"G": "Goalkeeper", "D": "Defender", "M": "Midfielder", "F": "Forward"}
+
+    def _player_worldcups(self, player_id: int) -> list[dict]:
+        """Every World Cup edition this player appeared in, newest first, for the
+        profile's World Cup card. wc_player_stats uses SofaScore ids (a different
+        namespace from ours), so match on folded name tokens like wc_rating_for
+        (exact or >=2 shared tokens); keep the most-minutes row per edition."""
+        nm = self.con.execute("SELECT player_name FROM players WHERE player_id=?",
+                              [player_id]).fetchone()
+        if not nm:
+            return []
+        ours = set(_fold(nm[0]).replace("-", " ").split())
+        if not ours:
+            return []
+        rows = self.con.execute(
+            "SELECT season, player, team, position, appearances, minutes, goals, "
+            "assists, rating, atlas_rating, atlas_class FROM wc_player_stats").fetchall()
+        best: dict[str, dict] = {}
+        for (edn, player, team, pos, apps, mins, goals, ast, rating, ar, ac) in rows:
+            wt = set(_fold(player).replace("-", " ").split())
+            if not (wt == ours or len(wt & ours) >= 2):
+                continue
+            cur = best.get(edn)
+            if cur is None or (mins or 0) > (cur["minutes"] or 0):
+                best[edn] = {
+                    "edition": edn, "team": team,
+                    "position": self._WC_POS.get(pos, pos),
+                    "apps": _i(apps), "minutes": _i(mins),
+                    "goals": _i(goals), "assists": _i(ast),
+                    "sofa_rating": round(float(rating), 2) if rating is not None else None,
+                    "atlas_rating": _i(ar), "atlas_class": ac,
+                }
+        return [best[e] for e in sorted(best, reverse=True)]
+
     # ----- use case 1: player statistics ---------------------------------- #
     def player_statistics(self, player: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
         """Understat core stats + FotMob enrichment (dribbles, tackles,
@@ -2930,6 +2964,7 @@ class SoccerDB:
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9
             "heatmap": self._player_heatmap(pid, season),  # season-aware (past seasons scraped from SofaScore)
+            "worldcups": self._player_worldcups(pid),  # WC record across editions (card)
             "career_stat": career_stat, "career": career,
             # season selector: which season the stats/gauges above reflect, the
             # available list, and whether the pinned analysis matches it

@@ -6,7 +6,7 @@
 <title>Atlastra — Player Profile</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=39">
+<link rel="stylesheet" href="/css/styles.css?v=40">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -75,6 +75,15 @@
     <!-- pinned-analysis banner: shown only when viewing a past season -->
     <div id="pinnedBanner" class="pinned-banner" hidden></div>
 
+    <!-- World Cup record — shown only when the player has WC appearances -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card wc-card" id="worldCupCard" style="display:none">
+        <div class="card-h"><h3>🏆 World Cup Record</h3><a class="see" href="/worldcup.html">World Cup hub →</a></div>
+        <div id="worldCups" class="wc-list"></div>
+        <div class="muted" style="font-size:11.5px;margin-top:10px">Atlas rating is a stats-based 0–99 tournament grade; Avg Rating is the SofaScore match average.</div>
+      </section>
+    </div>
+
     <!-- row: radar + career + strengths -->
     <div class="grid" style="grid-template-columns:1fr 1fr 1fr; margin-top:18px">
       <section class="card"><div class="card-h"><h3>Percentile Radar ⓘ</h3></div>
@@ -121,6 +130,6 @@
 </div>
 <script src="/js/api.js?v=17"></script>
 <script src="/js/comments.js?v=1"></script>
-<script src="/js/player.js?v=18"></script>
+<script src="/js/player.js?v=19"></script>
 </body>
 </html>

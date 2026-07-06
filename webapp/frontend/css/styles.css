@@ -370,6 +370,26 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .cmp-season{background:var(--card2);border:1px solid var(--border2);color:var(--text);
   border-radius:8px;padding:3px 6px;font-family:inherit;font-size:11.5px;font-weight:600;
   max-width:120px;cursor:pointer}
+
+/* World Cup record card (player profile) */
+.wc-card .see{color:var(--muted);font-size:12px}
+.wc-list{margin-top:4px;overflow-x:auto}
+.wc-row{display:grid;grid-template-columns:66px 1.3fr 2.6fr auto;align-items:center;gap:18px;
+  padding:14px 4px;border-bottom:1px solid var(--border);min-width:560px}
+.wc-row:last-child{border-bottom:none}
+.wc-ed{display:flex;flex-direction:column;line-height:1.05}
+.wc-yr{font-size:22px;font-weight:800;color:var(--text)}
+.wc-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.wc-team{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px}
+.wc-team small{color:var(--muted);font-weight:500;font-size:12px;margin-left:2px}
+.wc-stats{display:flex;gap:20px;flex-wrap:wrap}
+.wc-s{display:flex;flex-direction:column;align-items:center;min-width:44px}
+.wc-s b{font-size:16px;font-weight:700}
+.wc-s span{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);margin-top:2px}
+.wc-atlas{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-width:96px;padding:8px 12px;border-radius:12px;border:1px solid var(--border2);background:var(--card2)}
+.wc-atlas b{font-size:26px;font-weight:800;color:var(--wc-c,var(--text));line-height:1}
+.wc-atlas span{font-size:10px;color:var(--muted);margin-top:3px;text-align:center;font-weight:600}
 .cmp-legend{display:flex;justify-content:center;flex-wrap:wrap;gap:16px;margin-top:12px}
 .cmp-legend .lg{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);font-weight:600}
 .cmp-legend .dot{width:10px;height:10px;border-radius:50%}
