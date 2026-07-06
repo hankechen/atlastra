@@ -3014,15 +3014,26 @@ class SoccerDB:
         statcols = base + defaults + added
 
         def radar_for(pid, season):
+            """(radar values, season the radar actually came from). Percentiles are
+            only computed for the current radar season (the Wyscout source is a
+            current-season snapshot), so an earlier pick falls back to the latest
+            radar season -- we report which one so the UI can label it honestly
+            instead of implying the shape is from the selected season."""
             pm = self.con.execute(
                 "SELECT metric_label, percentile FROM player_radar_metrics "
                 "WHERE player_id=? AND season=?", [pid, season]).df()
+            rsea = season
             if pm.empty:                                  # no radar for that season -> latest
-                pm = self.con.execute(
-                    "SELECT metric_label, percentile FROM player_radar_metrics "
-                    "WHERE player_id=? ORDER BY season DESC", [pid]).df()
+                row = self.con.execute(
+                    "SELECT max(season) FROM player_radar_metrics WHERE player_id=?",
+                    [pid]).fetchone()
+                rsea = row[0] if row and row[0] else None
+                if rsea:
+                    pm = self.con.execute(
+                        "SELECT metric_label, percentile FROM player_radar_metrics "
+                        "WHERE player_id=? AND season=?", [pid, rsea]).df()
             pcts = dict(zip(pm.metric_label, pm.percentile))
-            return [v for _, v in self._radar_values(pcts)]
+            return [v for _, v in self._radar_values(pcts)], rsea
 
         players, statvals = [], {}
         for k, rp in enumerate(resolved):
@@ -3057,6 +3068,7 @@ class SoccerDB:
                 "AND team IS NOT NULL ORDER BY minutes DESC LIMIT 1",
                 [pid, season]).fetchone()
             team = (trow[0] if trow else None) or (h[1] if h else None)
+            radar_vals, radar_season = radar_for(pid, season)
             players.append({
                 "name": h[0] if h else rp["query"], "query": rp["query"], "team": team,
                 "position": h[2] if h else groups.get(pid),
@@ -3066,7 +3078,12 @@ class SoccerDB:
                 "country_code": bio[0] if bio else None,
                 "photo": self.player_photo(fpid[0] if fpid else None),
                 "team_logo": self.team_logo(team),
-                "radar": radar_for(pid, season),
+                "radar": radar_vals,
+                # the season the radar shape actually reflects (may differ from the
+                # stat season -- percentiles only exist for the latest radar season)
+                "radar_season": radar_season,
+                "radar_season_label": _fmt_season(radar_season) if radar_season else None,
+                "radar_is_current": radar_season != season,
                 "season": season,
                 "season_label": _fmt_season(season),
                 "seasons": [{"value": s, "label": _fmt_season(s)} for s in rp["avail"]],

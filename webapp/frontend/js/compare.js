@@ -169,8 +169,10 @@ function statRow(label, cells, bestIndex, removeKey) {
 }
 
 function drawRadar(d) {
+  // radar percentiles only exist for the latest season, so label the shape by the
+  // season it ACTUALLY came from (radar_season), not the player's stat season
   const datasets = d.players.map((p, i) => ({
-    label: p.season_label ? `${p.name} (${p.season_label})` : p.name,
+    label: p.radar_season_label ? `${p.name} (${p.radar_season_label})` : p.name,
     data: p.radar.map(v => v ?? 50),       // axis not measured for this position -> neutral
     fill: true,
     backgroundColor: rgba(COLORS[i % 3], .18),
@@ -194,7 +196,13 @@ function drawRadar(d) {
   });
   document.getElementById('legend').innerHTML = d.players.map((p, i) =>
     `<span class="lg"><span class="dot" style="background:${rgba(COLORS[i % 3], 1)}"></span>${p.name}` +
-    `${p.season_label ? ` <span class="muted">· ${p.season_label}</span>` : ''}</span>`).join('');
+    `${p.radar_season_label ? ` <span class="muted">· ${p.radar_season_label}</span>` : ''}</span>`).join('');
+
+  // if any player's radar isn't from the season they were picked in, say so plainly
+  const sub = document.getElementById('radarSub');
+  if (sub) sub.textContent = d.players.some(p => p.radar_is_current)
+    ? 'Percentile vs same position · latest-form only (earlier seasons unavailable)'
+    : 'Percentile vs same position';
 }
 
 document.getElementById('searchBox').addEventListener('keydown', (e) => {
