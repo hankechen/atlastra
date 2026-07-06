@@ -2944,28 +2944,56 @@ class SoccerDB:
     }
 
     def web_compare(self, names: list[str], stats: list[str] | None = None,
-                    season: str = FOCUS_SEASON) -> dict:
+                    season_tags: list[str] | None = None) -> dict:
         """Use case 5: side-by-side comparison of 2-3 players on user-chosen
         stats (or the position-based defaults from use case 4), plus an
         overlaid percentile radar. Reuses v_player_season_stats so domestic +
-        FotMob enrichment are already merged."""
-        # de-dupe (case-insensitive), preserve order, cap at 3 for the UI
-        names = [n.strip() for n in (names or []) if n and n.strip()]
-        seen, uniq = set(), []
-        for n in names:
-            if n.lower() not in seen:
-                seen.add(n.lower()); uniq.append(n)
-        ids = [(n, pid) for n in uniq[:3]
-               if (pid := self.find_player_id(n, season)) is not None]
-        if len(ids) < 2:
-            return {"players": [], "stats": [], "radar_axes": [],
-                    "season": _fmt_season(season)}
+        FotMob enrichment are already merged.
+
+        Each player can be pinned to a DIFFERENT season -- e.g. peak-Pedri 24/25
+        vs a young Bellingham 20/21. Requested seasons arrive as index-tagged
+        params ("<i>:<code>", where i is the position in `names`) so a blank /
+        omitted one just falls back to the player's latest season, without the
+        array-alignment fragility of parallel lists (parse_qs drops blanks)."""
+        # index -> requested season code, from the "<i>:<code>" tags
+        req = {}
+        for t in (season_tags or []):
+            k, sep, v = str(t).partition(":")
+            if sep and k.isdigit() and v:
+                req[int(k)] = v
+
+        # de-dupe (case-insensitive), preserve order + original index, cap at 3
+        seen, pairs = set(), []
+        for i, n in enumerate(names or []):
+            n = (n or "").strip()
+            if not n or n.lower() in seen:
+                continue
+            seen.add(n.lower())
+            pairs.append((n, req.get(i)))
+
+        # resolve each to a player id + the season to actually use for it
+        resolved = []
+        for name, want in pairs[:3]:
+            pid = self.find_player_id(name)               # resolution is season-independent
+            if pid is None:
+                continue
+            avail = [r[0] for r in self.con.execute(
+                "SELECT DISTINCT season FROM v_player_season_stats "
+                "WHERE player_id=? ORDER BY season DESC", [pid]).fetchall()]
+            if not avail:
+                continue
+            sel = want if want in avail else (
+                FOCUS_SEASON if FOCUS_SEASON in avail else avail[0])
+            resolved.append({"query": name, "pid": pid, "season": sel, "avail": avail})
+
+        if len(resolved) < 2:
+            return {"players": [], "stats": [], "radar_axes": [], "season": None}
 
         groups = {}
-        for _, pid in ids:
+        for r in resolved:
             g = self.con.execute(
-                "SELECT position_group FROM players WHERE player_id=?", [pid]).fetchone()
-            groups[pid] = g[0] if g else None
+                "SELECT position_group FROM players WHERE player_id=?", [r["pid"]]).fetchone()
+            groups[r["pid"]] = g[0] if g else None
         allowed = {r[1] for r in self.con.execute(
             "PRAGMA table_info('v_player_season_stats')").fetchall()}
         distinct_groups = {g for g in groups.values() if g}
@@ -2985,16 +3013,22 @@ class SoccerDB:
         added_set = set(added)
         statcols = base + defaults + added
 
-        def radar_for(pid):
+        def radar_for(pid, season):
             pm = self.con.execute(
-                "SELECT metric_label, percentile FROM player_radar_metrics WHERE player_id=?",
-                [pid]).df()
+                "SELECT metric_label, percentile FROM player_radar_metrics "
+                "WHERE player_id=? AND season=?", [pid, season]).df()
+            if pm.empty:                                  # no radar for that season -> latest
+                pm = self.con.execute(
+                    "SELECT metric_label, percentile FROM player_radar_metrics "
+                    "WHERE player_id=? ORDER BY season DESC", [pid]).df()
             pcts = dict(zip(pm.metric_label, pm.percentile))
             return [v for _, v in self._radar_values(pcts)]
 
         players, statvals = [], {}
-        for name, pid in ids:
-            # rating = combined-League (datamb fallback), same as directory/profile
+        for k, rp in enumerate(resolved):
+            pid, season = rp["pid"], rp["season"]
+            # rating = combined-League (datamb fallback), same as directory/profile,
+            # for THIS player's chosen season
             h = self.con.execute("""
                 SELECT pl.player_name, f.team,
                        COALESCE(f.detailed_position, f.main_position) AS position,
@@ -3015,10 +3049,16 @@ class SoccerDB:
                 f"SELECT {', '.join(statcols)} FROM v_player_season_stats "
                 "WHERE player_id=? AND season=? ORDER BY minutes DESC LIMIT 1",
                 [pid, season]).fetchone()
-            statvals[pid] = dict(zip(statcols, r)) if r else {}
-            team = h[1] if h else None
+            statvals[k] = dict(zip(statcols, r)) if r else {}
+            # team is season-specific (transfers), so prefer the chosen season's team
+            # (most minutes) over the profile's current club
+            trow = self.con.execute(
+                "SELECT team FROM v_player_season_stats WHERE player_id=? AND season=? "
+                "AND team IS NOT NULL ORDER BY minutes DESC LIMIT 1",
+                [pid, season]).fetchone()
+            team = (trow[0] if trow else None) or (h[1] if h else None)
             players.append({
-                "name": h[0] if h else name, "team": team,
+                "name": h[0] if h else rp["query"], "query": rp["query"], "team": team,
                 "position": h[2] if h else groups.get(pid),
                 "rating": _i(h[3]) if h else None,
                 "classification": h[4] if h else None,
@@ -3026,12 +3066,15 @@ class SoccerDB:
                 "country_code": bio[0] if bio else None,
                 "photo": self.player_photo(fpid[0] if fpid else None),
                 "team_logo": self.team_logo(team),
-                "radar": radar_for(pid),
+                "radar": radar_for(pid, season),
+                "season": season,
+                "season_label": _fmt_season(season),
+                "seasons": [{"value": s, "label": _fmt_season(s)} for s in rp["avail"]],
             })
 
         stat_rows = []
         for c in statcols:
-            raw = [statvals[pid].get(c) for _, pid in ids]
+            raw = [statvals[k].get(c) for k in range(len(resolved))]
             vals = [None if (v is None or pd.isna(v)) else round(float(v), 2) for v in raw]
             numeric = [v for v in vals if v is not None]
             best = max(numeric) if numeric else None
@@ -3043,9 +3086,11 @@ class SoccerDB:
                 "values": vals, "best_index": best_index,
                 "added": c in added_set})
 
+        # a single top-level season label only when every player shares one season
+        seasons_used = {rp["season"] for rp in resolved}
         return {"players": players, "stats": stat_rows,
                 "radar_axes": list(self.RADAR_AXES.keys()),
-                "season": _fmt_season(season)}
+                "season": _fmt_season(next(iter(seasons_used))) if len(seasons_used) == 1 else None}
 
     # ---------------------------------------------------------------- use case 8
     #  "Find the Next X" -- match a legend's style template against current players

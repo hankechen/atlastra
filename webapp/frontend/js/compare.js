@@ -22,6 +22,13 @@ const params = new URLSearchParams(location.search);
 let names = params.getAll('name');
 if (!names.length) names = ['Pedri', 'Jude Bellingham'];   // sensible demo default
 let addedStats = params.getAll('stat');                     // user-chosen, ADDED on top of defaults
+// per-player season, aligned to `names` by index ('' = let the server pick latest).
+// arrives as index-tagged "<i>:<code>" params so a blank one can be omitted safely.
+let seasons = names.map(() => '');
+params.getAll('season').forEach(t => {
+  const [i, code] = t.split(':');
+  if (code && +i < seasons.length) seasons[+i] = code;
+});
 let radarChart;
 const STAT_LABEL = Object.fromEntries(STAT_OPTS);
 
@@ -39,9 +46,15 @@ picker.onchange = () => {
 };
 function removeStat(k) { addedStats = addedStats.filter(s => s !== k); syncUrl(); render(); }
 
-function syncUrl() {
-  const qs = names.map(n => 'name=' + encodeURIComponent(n))
+// shared query string: names, added stats, and index-tagged per-player seasons
+function buildQS() {
+  return names.map(n => 'name=' + encodeURIComponent(n))
+    .concat(seasons.map((s, i) => s ? 'season=' + encodeURIComponent(i + ':' + s) : null).filter(Boolean))
     .concat(addedStats.map(s => 'stat=' + encodeURIComponent(s))).join('&');
+}
+
+function syncUrl() {
+  const qs = buildQS();
   history.replaceState(null, '', '/compare.html' + (qs ? '?' + qs : ''));
 }
 
@@ -52,7 +65,8 @@ function renderChips() {
        <button data-i="${i}" title="Remove">✕</button></span>`).join('') +
     (names.length < 3 ? '<span class="cmp-hint">+ add up to 3 (search above)</span>' : '');
   document.querySelectorAll('.cmp-chip button').forEach(b => b.onclick = () => {
-    names.splice(+b.dataset.i, 1); syncUrl(); render();
+    const i = +b.dataset.i;
+    names.splice(i, 1); seasons.splice(i, 1); syncUrl(); render();
   });
 }
 
@@ -60,7 +74,13 @@ function addPlayer(name) {
   name = name.trim();
   if (!name || names.length >= 3) return;
   if (names.some(n => n.toLowerCase() === name.toLowerCase())) return;
-  names.push(name); syncUrl(); render();
+  names.push(name); seasons.push(''); syncUrl(); render();
+}
+
+// user picked a season for one player (matched back to `names` by query text)
+function setSeason(query, code) {
+  const i = names.findIndex(n => n.toLowerCase() === query.toLowerCase());
+  if (i >= 0) { seasons[i] = code; syncUrl(); render(); }
 }
 
 async function render() {
@@ -74,27 +94,43 @@ async function render() {
     return;
   }
   syncSaveBtn();
-  const qs = names.map(n => 'name=' + encodeURIComponent(n))
-    .concat(addedStats.map(s => 'stat=' + encodeURIComponent(s))).join('&');
-  const d = await api('/api/compare?' + qs);
-  document.getElementById('seasonNote').textContent = d.season ? `Season ${d.season}.` : '';
+  const d = await api('/api/compare?' + buildQS());
+  document.getElementById('seasonNote').textContent = d.season
+    ? `Season ${d.season}.`
+    : (d.players && d.players.length ? 'Comparing across different seasons.' : '');
 
   if (!d.players || d.players.length < 2) {
     board.style.display = 'none'; empty.style.display = '';
     empty.textContent = 'Couldn’t resolve at least two of those players. Check the spelling.';
     return;
   }
+  // reflect the seasons the server actually used back into the URL (so a blank
+  // default becomes concrete and bookmarks stay stable) — no re-render needed
+  let changed = false;
+  d.players.forEach(p => {
+    const i = names.findIndex(n => n.toLowerCase() === (p.query || '').toLowerCase());
+    if (i >= 0 && seasons[i] !== p.season) { seasons[i] = p.season; changed = true; }
+  });
+  if (changed) syncUrl();
+
   empty.style.display = 'none'; board.style.display = '';
   drawTable(d);
   drawRadar(d);
 }
 
 function drawTable(d) {
+  const seasonSel = (p) => {
+    const opts = (p.seasons || []).map(s =>
+      `<option value="${s.value}"${s.value === p.season ? ' selected' : ''}>${s.label}</option>`).join('');
+    return `<select class="cmp-season" data-q="${encodeURIComponent(p.query || p.name)}"
+              title="Choose a season for ${p.name}">${opts}</select>`;
+  };
   const head = `<div class="cmp-row cmp-head"><div class="cmp-stat"></div>` +
     d.players.map((p, i) => `<div class="cmp-cell">
         <span class="cmp-photo pic" style="box-shadow:0 0 0 2px ${rgba(COLORS[i % 3], 1)}">${avatarHTML(p.photo, p.name)}</span>
         <div class="cmp-pname"><span class="dot" style="background:${rgba(COLORS[i % 3], 1)}"></span>${p.name}</div>
         <div class="cmp-sub">${(p.country_code ? flagEmoji(p.country_code) + ' ' : '')}${crestHTML(p.team_logo, 'crest-sm')}${p.team || ''} · ${p.position || ''}</div>
+        <div class="cmp-seasonwrap">${seasonSel(p)}</div>
       </div>`).join('') + `</div>`;
 
   // a "header" stat block: rating, classification, market value
@@ -120,6 +156,8 @@ function drawTable(d) {
     `<div class="cmp-group">${meta}</div><div class="cmp-group">${defaults}</div>${extraHtml}`;
 
   document.querySelectorAll('.cmp-stat .rm').forEach(b => b.onclick = () => removeStat(b.dataset.k));
+  document.querySelectorAll('.cmp-season').forEach(sel => sel.onchange = () =>
+    setSeason(decodeURIComponent(sel.dataset.q), sel.value));
 }
 
 function statRow(label, cells, bestIndex, removeKey) {
@@ -132,7 +170,7 @@ function statRow(label, cells, bestIndex, removeKey) {
 
 function drawRadar(d) {
   const datasets = d.players.map((p, i) => ({
-    label: p.name,
+    label: p.season_label ? `${p.name} (${p.season_label})` : p.name,
     data: p.radar.map(v => v ?? 50),       // axis not measured for this position -> neutral
     fill: true,
     backgroundColor: rgba(COLORS[i % 3], .18),
@@ -155,7 +193,8 @@ function drawRadar(d) {
     },
   });
   document.getElementById('legend').innerHTML = d.players.map((p, i) =>
-    `<span class="lg"><span class="dot" style="background:${rgba(COLORS[i % 3], 1)}"></span>${p.name}</span>`).join('');
+    `<span class="lg"><span class="dot" style="background:${rgba(COLORS[i % 3], 1)}"></span>${p.name}` +
+    `${p.season_label ? ` <span class="muted">· ${p.season_label}</span>` : ''}</span>`).join('');
 }
 
 document.getElementById('searchBox').addEventListener('keydown', (e) => {
@@ -172,7 +211,7 @@ function syncSaveBtn() {
 }
 document.getElementById('saveCmp').onclick = () => {
   if (names.length < 2) return;
-  Store.toggle('comparisons', { id: cmpId(), names: names.slice(), stats: addedStats.slice(), label: names.join('  vs  ') });
+  Store.toggle('comparisons', { id: cmpId(), names: names.slice(), seasons: seasons.slice(), stats: addedStats.slice(), label: names.join('  vs  ') });
   syncSaveBtn();
 };
 

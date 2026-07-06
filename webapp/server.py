@@ -67,6 +67,7 @@ def _int(v, default=0):
 from webapp import live_feed  # noqa: E402
 from webapp import scout_ai  # noqa: E402
 from webapp import admin  # noqa: E402
+from webapp import seo  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent / "frontend"
 PORT = 8000
@@ -84,6 +85,7 @@ LIVE_REFRESH = os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1"
 # must be read-write to accept those writes even with the local refresher off.
 INGEST_TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN") or None
 DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN)
+seo.configure(DB_READ_ONLY)                    # align the sitemap/meta DB reads with the server's mode
 
 # Fully-enriched fixture previews are expensive (name-matching ~60 squad players to
 # our ratings) and near-static for an upcoming match, so cache the finished result
@@ -342,7 +344,8 @@ def api(path: str, q: dict) -> dict | list:
         if path == "/api/compare":
             names = q.get("name", [])
             stats = q.get("stat") or None
-            return d.web_compare(names, stats)
+            seasons = q.get("season") or None   # index-tagged "<i>:<code>" per player
+            return d.web_compare(names, stats, seasons)
         if path == "/api/leagues":
             return d.web_leagues()
         if path == "/api/seasons":
@@ -647,6 +650,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404 if isinstance(e, KeyError) else 500,
                            json.dumps({"error": str(e)}).encode(), "application/json")
             return
+        # SEO: crawl guidance + a sitemap of every player/team page (which are
+        # otherwise undiscoverable -- they live behind a JS search box).
+        if u.path == "/robots.txt":
+            self._send(200, seo.robots_txt(), "text/plain")
+            return
+        if u.path == "/sitemap.xml":
+            self._send(200, seo.sitemap_xml(), "application/xml")
+            return
         # static
         rel = u.path.lstrip("/") or "index.html"
         f = (FRONTEND / rel).resolve()
@@ -655,6 +666,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if f.suffix == ".html":                        # count real page views (not JS/CSS/img)
             admin.record_hit("/" + rel, "page", vid)
+            # rewrite the JS-rendered shell's <head> with a real title, description,
+            # canonical + OG tags so crawlers see meaningful, page-specific content.
+            body = seo.inject_head(f.read_bytes(), rel, parse_qs(u.query), u.path)
+            self._send(200, body, "text/html")
+            return
         self._send(200, f.read_bytes(), CT.get(f.suffix, "application/octet-stream"))
 
 

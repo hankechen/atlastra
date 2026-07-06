@@ -366,6 +366,10 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .cmp-pname{display:flex;align-items:center;justify-content:center;gap:7px;font-size:13.5px}
 .cmp-pname .dot{width:9px;height:9px;border-radius:50%}
 .cmp-sub{color:var(--muted);font-size:11px;font-weight:500;margin-top:3px}
+.cmp-seasonwrap{margin-top:7px}
+.cmp-season{background:var(--card2);border:1px solid var(--border2);color:var(--text);
+  border-radius:8px;padding:3px 6px;font-family:inherit;font-size:11.5px;font-weight:600;
+  max-width:120px;cursor:pointer}
 .cmp-legend{display:flex;justify-content:center;flex-wrap:wrap;gap:16px;margin-top:12px}
 .cmp-legend .lg{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted);font-weight:600}
 .cmp-legend .dot{width:10px;height:10px;border-radius:50%}
