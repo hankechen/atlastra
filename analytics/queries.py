@@ -2751,16 +2751,28 @@ class SoccerDB:
             return {}
         mins = df["minutes"].clip(lower=1)
         me_mask = df["player_id"] == pid
+        me_i = df.index[me_mask][0]
         per90 = ["goals", "assists", "xg", "xa", "chances_created", "big_chances_created",
                  "dribbles_completed", "duels_won", "tackles", "interceptions"]
         rate = ["duels_won_pct", "pass_accuracy_pct"]
         out = {}
-        for k in per90:
-            col = df[k].fillna(0) / mins * 90
-            out[k] = int(round((col <= col[me_mask].iloc[0]).mean() * 100))
-        for k in rate:
-            col = df[k].fillna(0)
-            out[k] = int(round((col <= col[me_mask].iloc[0]).mean() * 100))
+        for k in per90 + rate:
+            raw = pd.to_numeric(df[k], errors="coerce")
+            my = raw.loc[me_i]
+            have = raw.notna()
+            # A stat that isn't tracked for this season (e.g. duels before 2025/26 are
+            # NULL for everyone) must NOT be ranked: the old code fillna(0)'d it, so
+            # every player tied at 0 and scored a bogus 100th percentile. Only rank
+            # when the player AND enough peers actually have the stat; otherwise omit
+            # it so the tile simply drops its percentile bar (pctBar handles null).
+            if pd.isna(my) or have.sum() < 5:
+                continue
+            if k in rate:
+                vals, myv = raw[have], my
+            else:                                          # per-90
+                vals = raw[have] / mins[have] * 90
+                myv = my / mins.loc[me_i] * 90
+            out[k] = int(round((vals <= myv).mean() * 100))
         return out
 
     def web_player(self, name: str, career_stat: str = "xa",
