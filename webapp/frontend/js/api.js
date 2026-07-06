@@ -443,49 +443,83 @@ function crestHTML(url, cls = 'crest') {
 
 // Live global search dropdown on a topbar search input: players + teams as you
 // type, click a result to navigate, Enter for the full /search.html page.
-function attachSearchDropdown(input) {
+//
+// Opts (all optional -- default is the global behaviour above, unchanged):
+//   playersOnly  omit the Teams / National Teams sections (just players)
+//   onPick(p)    called with the picked player row instead of navigating; a
+//                click or Enter selects and clears the box (used by Compare to
+//                ADD a player rather than open their profile).
+function attachSearchDropdown(input, opts = {}) {
   if (!input) return;
+  const playersOnly = !!opts.playersOnly;
+  const onPick = typeof opts.onPick === 'function' ? opts.onPick : null;
   const wrap = input.closest('.search');
   wrap.classList.add('has-dd');
   const dd = document.createElement('div');
   dd.className = 'search-dd';
   wrap.appendChild(dd);
   let timer;
+  let lastPlayers = [];                          // most recent results, for Enter/click pick
   const hide = () => dd.classList.remove('open');
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   input.addEventListener('input', () => {
     const q = input.value.trim();
     clearTimeout(timer);
-    if (!q) { hide(); return; }
+    if (!q) { hide(); lastPlayers = []; return; }
     timer = setTimeout(async () => {
       let d;
       try { d = await api('/api/search?q=' + encodeURIComponent(q)); } catch { return; }
       const players = d.players.slice(0, 6), teams = d.teams.slice(0, 4);
-      const row = (href, pic, nm, sub) =>
-        `<a class="dd-row" href="${href}"><span class="pic">${pic}</span>
+      lastPlayers = players;
+      const row = (href, pic, nm, sub, attrs = '') =>
+        `<a class="dd-row" href="${href}"${attrs}><span class="pic">${pic}</span>
           <span class="ddx"><div class="nm">${esc(nm)}</div><div class="sub">${sub}</div></span></a>`;
       let html = '';
-      if (players.length) html += '<div class="dd-h">Players</div>' + players.map(p =>
+      if (players.length) html += '<div class="dd-h">Players</div>' + players.map((p, i) =>
         row(`/player.html?name=${encodeURIComponent(p.player)}`, avatarHTML(p.photo, p.player),
-            p.player, `${crestHTML(p.team_logo, 'crest-sm')}${esc(p.team || '')} · ${esc(p.position || '')}`)).join('');
-      if (teams.length) html += '<div class="dd-h">Teams</div>' + teams.map(t =>
-        row(`/team.html?name=${encodeURIComponent(t.team)}`,
-            `<span class="crest-pic">${crestHTML(t.team_logo, 'crest-md') || '🛡️'}</span>`,
-            t.team, esc(t.league))).join('');
-      const national = (d.national || []).slice(0, 4);
-      if (national.length) html += '<div class="dd-h">National Teams</div>' + national.map(t =>
-        row(`/nat.html?id=${t.team_id}`,
-            `<span class="crest-pic">${flagISO2(t.cc) || '🏳️'}</span>`,
-            t.team, 'National team')).join('');
-      html = html ? html + `<a class="dd-all" href="/search.html?q=${encodeURIComponent(q)}">See all results for “${esc(q)}” →</a>`
-        : '<div class="dd-empty">No results</div>';
+            p.player, `${crestHTML(p.team_logo, 'crest-sm')}${esc(p.team || '')} · ${esc(p.position || '')}`,
+            ` data-pi="${i}"`)).join('');
+      if (!playersOnly) {
+        if (teams.length) html += '<div class="dd-h">Teams</div>' + teams.map(t =>
+          row(`/team.html?name=${encodeURIComponent(t.team)}`,
+              `<span class="crest-pic">${crestHTML(t.team_logo, 'crest-md') || '🛡️'}</span>`,
+              t.team, esc(t.league))).join('');
+        const national = (d.national || []).slice(0, 4);
+        if (national.length) html += '<div class="dd-h">National Teams</div>' + national.map(t =>
+          row(`/nat.html?id=${t.team_id}`,
+              `<span class="crest-pic">${flagISO2(t.cc) || '🏳️'}</span>`,
+              t.team, 'National team')).join('');
+      }
+      if (onPick) {                              // add-a-player mode: no "see all" nav footer
+        html = html || '<div class="dd-empty">No players found</div>';
+      } else {
+        html = html ? html + `<a class="dd-all" href="/search.html?q=${encodeURIComponent(q)}">See all results for “${esc(q)}” →</a>`
+          : '<div class="dd-empty">No results</div>';
+      }
       dd.innerHTML = html;
       dd.classList.add('open');
     }, 170);
   });
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && input.value.trim()) location.href = '/search.html?q=' + encodeURIComponent(input.value.trim());
-    if (e.key === 'Escape') hide();
+  if (onPick) {                                  // click a player row -> add, don't navigate
+    dd.addEventListener('click', (e) => {
+      const r = e.target.closest('.dd-row');
+      if (!r || r.dataset.pi === undefined) return;
+      e.preventDefault();
+      const p = lastPlayers[+r.dataset.pi];
+      if (p) { onPick(p); input.value = ''; }
+      hide();
+    });
+  }
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') { hide(); return; }
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    if (!onPick) { location.href = '/search.html?q=' + encodeURIComponent(input.value.trim()); return; }
+    // Enter picks the top player -- fetch first if the debounce hasn't landed yet
+    let p = lastPlayers[0];
+    if (!p) {
+      try { const d = await api('/api/search?q=' + encodeURIComponent(input.value.trim())); p = (d.players || [])[0]; } catch {}
+    }
+    if (p) { onPick(p); input.value = ''; hide(); }
   });
   document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) hide(); });
 }
@@ -688,10 +722,20 @@ function rankBadge(r) {
     ? `<span class="fifa-rank" title="FIFA World Ranking"><span class="fr-cap">FIFA </span>#${r}</span>`
     : '';
 }
-// Left "minute" cell: running clock for live, 'HT' on the break, 'FT' for results,
-// local kickoff time for upcoming.
+// A live match on a break has no running clock (minute is null). Map the status
+// description to a compact tag so we never mislabel penalties / extra time as 'HT'.
+function liveBreakTag(m) {
+  const d = (m.status_desc || '').toLowerCase();
+  if (d.includes('halftime') || d.includes('half-time')) return 'HT';
+  if (d.includes('penalt')) return 'PEN';
+  if (d.includes('extra') || d.includes('await')) return 'ET';
+  if (d.includes('break')) return 'BRK';
+  return 'LIVE';
+}
+// Left "minute" cell: running clock for live, break tag on a stoppage, 'FT' for
+// results, local kickoff time for upcoming.
 function matchClock(m) {
-  if (m.status === 'inprogress') return m.minute ? `${m.minute}'` : 'HT';
+  if (m.status === 'inprogress') return m.minute ? `${m.minute}'` : liveBreakTag(m);
   if (m.status === 'finished') return 'FT';
   return new Date(m.kickoff_ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }

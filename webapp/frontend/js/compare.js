@@ -205,8 +205,11 @@ function drawRadar(d) {
     : 'Percentile vs same position';
 }
 
-document.getElementById('searchBox').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && e.target.value.trim()) { addPlayer(e.target.value); e.target.value = ''; }
+// same live typeahead as the global search, but players-only and picking one
+// ADDS it to the comparison instead of opening their profile
+attachSearchDropdown(document.getElementById('searchBox'), {
+  playersOnly: true,
+  onPick: (p) => addPlayer(p.player),
 });
 
 // save / unsave the current comparison (localStorage via Store)
