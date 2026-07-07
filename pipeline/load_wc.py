@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS wc_player_stats (
     xg           DOUBLE, shots INTEGER, chances_created INTEGER,
     big_chances_created INTEGER, dribbles_completed INTEGER,
     tackles      INTEGER, interceptions INTEGER, passes_completed INTEGER,
-    pass_accuracy_pct DOUBLE, duels_won_pct DOUBLE
+    pass_accuracy_pct DOUBLE, duels_won_pct DOUBLE, duels_won INTEGER
 );
 """
 # expected column set of wc_player_stats; a prod table with an older schema is
@@ -90,12 +90,13 @@ _PLAYERS_COLS = ["season", "position", "player_id", "player", "team", "rating",
                  "appearances", "minutes", "atlas_rating", "atlas_class", "goals", "assists",
                  "xg", "shots", "chances_created", "big_chances_created",
                  "dribbles_completed", "tackles", "interceptions", "passes_completed",
-                 "pass_accuracy_pct", "duels_won_pct"]
+                 "pass_accuracy_pct", "duels_won_pct", "duels_won"]
 # SofaScore statistics fields we pull per player to grade the tournament rating.
 PLAYER_FIELDS = ("rating,appearances,minutesPlayed,goals,assists,expectedGoals,"
                  "totalShots,keyPasses,bigChancesCreated,successfulDribbles,tackles,"
                  "interceptions,accuratePasses,accuratePassesPercentage,"
-                 "totalDuelsWonPercentage,saves,cleanSheet,goalsConceded,goalsPrevented")
+                 "totalDuelsWon,totalDuelsWonPercentage,saves,cleanSheet,"
+                 "goalsConceded,goalsPrevented")
 POSITIONS = ("G", "D", "M", "F")     # SofaScore position-group filter codes
 PLAYER_PAGE = 100                    # page size for the per-player stats feed
 PLAYER_MAX_PAGES = 5                 # up to 500 players per position -> full coverage
@@ -281,6 +282,7 @@ def fetch_wc_rows(only_season: str | None = None) -> dict:
                         "passes_completed": e.get("accuratePasses"),
                         "pass_accuracy_pct": e.get("accuratePassesPercentage"),
                         "duels_won_pct": e.get("totalDuelsWonPercentage"),
+                        "duels_won": e.get("totalDuelsWon"),
                         "saves": e.get("saves"), "clean_sheets": e.get("cleanSheet"),
                         "goals_conceded": e.get("goalsConceded"),
                         "goals_prevented": e.get("goalsPrevented")})
@@ -313,7 +315,7 @@ def fetch_wc_rows(only_season: str | None = None) -> dict:
                             p.get("xg"), p.get("shots"), p.get("chances_created"),
                             p.get("big_chances_created"), p.get("dribbles_completed"),
                             p.get("tackles"), p.get("interceptions"), p.get("passes_completed"),
-                            p.get("pass_accuracy_pct"), p.get("duels_won_pct")))
+                            p.get("pass_accuracy_pct"), p.get("duels_won_pct"), p.get("duels_won")))
     print(f"  rated {len(rated)}/{len(player_stats)} players (>= {rate_wc.MIN_MINUTES} min)")
     return {"matches": match_rows, "standings": stand_rows, "leaders": leader_rows,
             "players": player_rows, "bracket": bracket_rows}

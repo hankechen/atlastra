@@ -2735,8 +2735,8 @@ class SoccerDB:
         """World Cup tournament totals as a stat scope for the profile tiles, for the
         edition that falls in `season` (2526->2026, 2223->2022, 1718->2018). Matched by
         folded name tokens like wc_rating_for (SofaScore-id namespace != ours). Returns
-        a scope dict shaped like the league/ucl ones; xa + duels_won (count) aren't in
-        the WC feed so they stay None -> the tile shows '—'."""
+        a scope dict shaped like the league/ucl ones; only xa isn't in the WC feed so it
+        stays None -> that tile shows '—'."""
         edition = self._WC_EDITIONS.get(season)
         if edition is None:
             return None
@@ -2750,7 +2750,7 @@ class SoccerDB:
         rows = self.con.execute(
             "SELECT player, appearances, minutes, goals, assists, xg, shots, "
             "chances_created, big_chances_created, dribbles_completed, tackles, "
-            "interceptions, passes_completed, pass_accuracy_pct, duels_won_pct "
+            "interceptions, passes_completed, pass_accuracy_pct, duels_won_pct, duels_won "
             "FROM wc_player_stats WHERE season = ?", [edition]).fetchall()
         best = None
         for row in rows:
@@ -2760,13 +2760,13 @@ class SoccerDB:
         if not best or not best[2]:                   # no WC minutes -> omit the scope
             return None
         (_p, apps, mins, goals, ast, xg, shots, cc, bcc, drb,
-         tk, intc, pc, pa, dw) = best
+         tk, intc, pc, pa, dwp, dw) = best
         return {"games": _i(apps), "minutes": _i(mins), "goals": _i(goals),
                 "assists": _i(ast), "xg": _r(xg, 2), "xa": None, "shots": _i(shots),
                 "chances_created": _i(cc), "big_chances_created": _i(bcc),
-                "dribbles_completed": _i(drb), "duels_won": None,
+                "dribbles_completed": _i(drb), "duels_won": _i(dw),
                 "tackles": _i(tk), "interceptions": _i(intc), "passes_completed": _i(pc),
-                "pass_accuracy_pct": _i(pa), "duels_won_pct": _i(dw)}
+                "pass_accuracy_pct": _i(pa), "duels_won_pct": _i(dwp)}
 
     # per-stat percentile vs same-position peers (per-90 basis; rates as-is), so the
     # tiles can show where a player sits — peak of the stat = 100th percentile.
@@ -3094,7 +3094,7 @@ class SoccerDB:
         # stat vocabulary = the per-competition scope keys (+ derived ga_per90); this
         # replaces the old v_player_season_stats columns so Compare matches the profile
         # tiles. xa/duels_won-count aren't in the WC feed -> "—" under the WC scope.
-        allowed = set(self._SCOPE_COUNTS) | set(self._SCOPE_RATES) | {"ga_per90"}
+        allowed = set(self._SCOPE_COUNTS) | set(self._SCOPE_RATES) | {"ga_per90"}  # xa "—" under WC
         distinct_groups = {g for g in groups.values() if g}
         if len(distinct_groups) == 1:
             default_cols = self.DEFAULT_PROGRESSION_STATS.get(next(iter(distinct_groups)), [])
