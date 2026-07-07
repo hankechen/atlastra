@@ -35,7 +35,7 @@ const PER90_DEFS = [
   [['↗', 'progressive_passes', 'Prog. Passes / 90', 'dec'],
    ['🏃', 'progressive_carries', 'Prog. Carries / 90', 'dec']],
 ];
-const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined']];
+const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined'], ['worldcup', 'World Cup']];
 let statScopes = {}, scopeTotals = 'combined', scopePer90 = 'combined';
 let tilePct = {};                                   // per-stat percentile vs position peers
 
@@ -58,16 +58,18 @@ function pctBar(key) {
     <div class="tpct"><i style="width:${p}%;background:${pctColor(p)}"></i></div>
     <span class="tpctn" style="color:${pctColor(p)}">${ordinal(p)}</span></div>`;
 }
-const oneTile = (def, s) =>
-  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${pctBar(def[1])}`;
+// World Cup percentiles are vs top-5-league peers (tilePct), which don't apply to a
+// tournament scope, so the WC scope shows raw values without the percentile bar.
+const oneTile = (def, s, scope) =>
+  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${scope === 'worldcup' ? '' : pctBar(def[1])}`;
 
 function renderTiles(elId, defs, scope) {
   const s = statScopes[scope];
   document.getElementById(elId).innerHTML = defs.map(d => {
     if (Array.isArray(d[0])) {                      // grouped (double-wide) tile
-      return `<div class="tile pair">${d.map(sub => `<div class="tsub">${oneTile(sub, s)}</div>`).join('')}</div>`;
+      return `<div class="tile pair">${d.map(sub => `<div class="tsub">${oneTile(sub, s, scope)}</div>`).join('')}</div>`;
     }
-    return `<div class="tile">${oneTile(d, s)}</div>`;
+    return `<div class="tile">${oneTile(d, s, scope)}</div>`;
   }).join('');
 }
 // Build a League/UCL/Combined toggle once; a delegated listener on the container

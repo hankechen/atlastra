@@ -2726,7 +2726,47 @@ class SoccerDB:
             scopes["combined"] = comb
         elif lg or ucl:
             scopes["combined"] = dict(lg or ucl)
+        wc = self._wc_scope_row(pid, season)          # World Cup edition in this season
+        if wc:
+            scopes["worldcup"] = wc
         return scopes
+
+    def _wc_scope_row(self, pid: int, season: str) -> dict | None:
+        """World Cup tournament totals as a stat scope for the profile tiles, for the
+        edition that falls in `season` (2526->2026, 2223->2022, 1718->2018). Matched by
+        folded name tokens like wc_rating_for (SofaScore-id namespace != ours). Returns
+        a scope dict shaped like the league/ucl ones; xa + duels_won (count) aren't in
+        the WC feed so they stay None -> the tile shows '—'."""
+        edition = self._WC_EDITIONS.get(season)
+        if edition is None:
+            return None
+        nm = self.con.execute("SELECT player_name FROM players WHERE player_id=?",
+                              [pid]).fetchone()
+        if not nm:
+            return None
+        ours = set(_fold(nm[0]).replace("-", " ").split())
+        if not ours:
+            return None
+        rows = self.con.execute(
+            "SELECT player, appearances, minutes, goals, assists, xg, shots, "
+            "chances_created, big_chances_created, dribbles_completed, tackles, "
+            "interceptions, passes_completed, pass_accuracy_pct, duels_won_pct "
+            "FROM wc_player_stats WHERE season = ?", [edition]).fetchall()
+        best = None
+        for row in rows:
+            wt = set(_fold(row[0]).replace("-", " ").split())
+            if (wt == ours or len(wt & ours) >= 2) and (best is None or (row[2] or 0) > (best[2] or 0)):
+                best = row
+        if not best or not best[2]:                   # no WC minutes -> omit the scope
+            return None
+        (_p, apps, mins, goals, ast, xg, shots, cc, bcc, drb,
+         tk, intc, pc, pa, dw) = best
+        return {"games": _i(apps), "minutes": _i(mins), "goals": _i(goals),
+                "assists": _i(ast), "xg": _r(xg, 2), "xa": None, "shots": _i(shots),
+                "chances_created": _i(cc), "big_chances_created": _i(bcc),
+                "dribbles_completed": _i(drb), "duels_won": None,
+                "tackles": _i(tk), "interceptions": _i(intc), "passes_completed": _i(pc),
+                "pass_accuracy_pct": _i(pa), "duels_won_pct": _i(dw)}
 
     # per-stat percentile vs same-position peers (per-90 basis; rates as-is), so the
     # tiles can show where a player sits — peak of the stat = 100th percentile.
@@ -2929,13 +2969,16 @@ class SoccerDB:
         # Progressive passing/carrying (datamb/Wyscout per-90 vs position). Only the
         # current season has the datamb dataset, and it isn't split by competition, so
         # inject the same per-90 value into every stat scope + the tile percentiles so
-        # the Per-90 grid can render it like any other rate stat.
+        # the Per-90 grid can render it like any other rate stat. The World Cup scope
+        # is EXCLUDED -- datamb is domestic-league data, not tournament data.
         scopes = self._player_stat_scopes(pid, season)
         tile_pct = self._tile_percentiles(pid, season)
         if season == FOCUS_SEASON and scopes:
             for key, info in self._progressive_stats(pid, season).items():
                 per90 = info["per90"]
-                for sc in scopes.values():        # one datamb dataset -> same rate in all scopes
+                for sck, sc in scopes.items():    # one datamb dataset -> same rate in all scopes
+                    if sck == "worldcup":         # domestic data doesn't apply to the WC
+                        continue
                     sc[key] = per90               # per-90 value (Per-90 grid)
                     if sc.get("minutes"):         # season total (Total grid) = rate x minutes/90
                         sc[key + "_total"] = round(per90 * sc["minutes"] / 90)

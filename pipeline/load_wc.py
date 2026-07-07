@@ -75,13 +75,22 @@ CREATE TABLE IF NOT EXISTS wc_player_stats (
     player_id    BIGINT, player VARCHAR, team VARCHAR,
     rating       DOUBLE, appearances INTEGER, minutes INTEGER,  -- SofaScore avg rating
     atlas_rating INTEGER, atlas_class VARCHAR,  -- our stats-based 0-99 WC rating
-    goals        INTEGER, assists INTEGER       -- tournament totals (for the match modal)
+    goals        INTEGER, assists INTEGER,      -- tournament totals (for the match modal)
+    -- per-tournament totals for the profile's "World Cup" stat scope (Total + Per-90
+    -- tiles). xg/shots absent pre-2018 (SofaScore didn't track them then) -> NULL.
+    xg           DOUBLE, shots INTEGER, chances_created INTEGER,
+    big_chances_created INTEGER, dribbles_completed INTEGER,
+    tackles      INTEGER, interceptions INTEGER, passes_completed INTEGER,
+    pass_accuracy_pct DOUBLE, duels_won_pct DOUBLE
 );
 """
 # expected column set of wc_player_stats; a prod table with an older schema is
 # transparently migrated (drop + recreate, then the full push repopulates it).
 _PLAYERS_COLS = ["season", "position", "player_id", "player", "team", "rating",
-                 "appearances", "minutes", "atlas_rating", "atlas_class", "goals", "assists"]
+                 "appearances", "minutes", "atlas_rating", "atlas_class", "goals", "assists",
+                 "xg", "shots", "chances_created", "big_chances_created",
+                 "dribbles_completed", "tackles", "interceptions", "passes_completed",
+                 "pass_accuracy_pct", "duels_won_pct"]
 # SofaScore statistics fields we pull per player to grade the tournament rating.
 PLAYER_FIELDS = ("rating,appearances,minutesPlayed,goals,assists,expectedGoals,"
                  "totalShots,keyPasses,bigChancesCreated,successfulDribbles,tackles,"
@@ -300,7 +309,11 @@ def fetch_wc_rows(only_season: str | None = None) -> dict:
         player_rows.append((p["season"], p["position"], p["player_id"], p["player"],
                             p["team"], p["rating"], p["appearances"], p["minutes"],
                             (r or {}).get("rating"), (r or {}).get("classification"),
-                            p.get("goals"), p.get("assists")))
+                            p.get("goals"), p.get("assists"),
+                            p.get("xg"), p.get("shots"), p.get("chances_created"),
+                            p.get("big_chances_created"), p.get("dribbles_completed"),
+                            p.get("tackles"), p.get("interceptions"), p.get("passes_completed"),
+                            p.get("pass_accuracy_pct"), p.get("duels_won_pct")))
     print(f"  rated {len(rated)}/{len(player_stats)} players (>= {rate_wc.MIN_MINUTES} min)")
     return {"matches": match_rows, "standings": stand_rows, "leaders": leader_rows,
             "players": player_rows, "bracket": bracket_rows}
@@ -345,7 +358,9 @@ def write_wc_rows(data: dict) -> dict:
         if leaders:
             con.executemany("INSERT INTO wc_leaders VALUES (?,?,?,?,?,?,?,?)", leaders)
         if players:
-            con.executemany("INSERT INTO wc_player_stats VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", players)
+            con.executemany(
+                f"INSERT INTO wc_player_stats VALUES ({','.join(['?'] * len(_PLAYERS_COLS))})",
+                players)
         if bracket:
             con.executemany("INSERT INTO wc_bracket VALUES (?,?,?,?)", bracket)
     finally:
