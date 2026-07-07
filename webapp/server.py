@@ -345,7 +345,8 @@ def api(path: str, q: dict) -> dict | list:
             names = q.get("name", [])
             stats = q.get("stat") or None
             seasons = q.get("season") or None   # index-tagged "<i>:<code>" per player
-            return d.web_compare(names, stats, seasons)
+            scope = q.get("scope", ["combined"])[0]   # league/ucl/combined/worldcup
+            return d.web_compare(names, stats, seasons, scope)
         if path == "/api/leagues":
             return d.web_leagues()
         if path == "/api/seasons":

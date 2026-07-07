@@ -7,16 +7,19 @@ Chart.defaults.font.family = 'Inter';
 const COLORS = [[85, 112, 240], [125, 92, 245], [46, 200, 150]];
 const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 
-// stats the user can pick instead of the position defaults
+// stats the user can pick instead of the position defaults (keys the per-competition
+// scope engine provides — see _SCOPE_COUNTS/_SCOPE_RATES + derived ga_per90)
 const STAT_OPTS = [
   ['goals', 'Goals'], ['assists', 'Assists'], ['ga_per90', 'G+A per 90'],
-  ['xg', 'xG'], ['xa', 'xA'], ['chances_created', 'Chances Created'],
+  ['xg', 'xG'], ['xa', 'xA'], ['shots', 'Shots'], ['chances_created', 'Chances Created'],
   ['big_chances_created', 'Big Chances Created'], ['dribbles_completed', 'Dribbles'],
-  ['dribble_success_pct', 'Dribble %'], ['passes_completed', 'Passes Completed'],
+  ['passes_completed', 'Passes Completed'],
   ['pass_accuracy_pct', 'Pass Accuracy %'], ['duels_won', 'Duels Won'],
   ['duels_won_pct', 'Duels Won %'], ['tackles', 'Tackles'],
-  ['interceptions', 'Interceptions'], ['recoveries', 'Recoveries'],
+  ['interceptions', 'Interceptions'],
 ];
+// competition scope selector (mirrors the profile tiles)
+const SCOPES = [['combined', 'All'], ['league', 'League'], ['ucl', 'UCL'], ['worldcup', 'World Cup']];
 
 const params = new URLSearchParams(location.search);
 let names = params.getAll('name');
@@ -29,6 +32,8 @@ params.getAll('season').forEach(t => {
   const [i, code] = t.split(':');
   if (code && +i < seasons.length) seasons[+i] = code;
 });
+let scope = params.get('scope') || 'combined';
+if (!SCOPES.some(([k]) => k === scope)) scope = 'combined';
 let radarChart;
 const STAT_LABEL = Object.fromEntries(STAT_OPTS);
 
@@ -46,11 +51,23 @@ picker.onchange = () => {
 };
 function removeStat(k) { addedStats = addedStats.filter(s => s !== k); syncUrl(); render(); }
 
-// shared query string: names, added stats, and index-tagged per-player seasons
+// shared query string: names, added stats, index-tagged per-player seasons, scope
 function buildQS() {
   return names.map(n => 'name=' + encodeURIComponent(n))
     .concat(seasons.map((s, i) => s ? 'season=' + encodeURIComponent(i + ':' + s) : null).filter(Boolean))
-    .concat(addedStats.map(s => 'stat=' + encodeURIComponent(s))).join('&');
+    .concat(addedStats.map(s => 'stat=' + encodeURIComponent(s)))
+    .concat(scope && scope !== 'combined' ? ['scope=' + scope] : []).join('&');
+}
+
+// competition scope toggle (All / League / UCL / World Cup)
+function renderScopeTog() {
+  const tog = document.getElementById('scopeTog');
+  tog.innerHTML = SCOPES.map(([k, lab]) =>
+    `<button class="sct${k === scope ? ' active' : ''}" data-k="${k}">${lab}</button>`).join('');
+  tog.onclick = (e) => {
+    const b = e.target.closest('button');
+    if (b && b.dataset.k !== scope) { scope = b.dataset.k; syncUrl(); render(); }
+  };
 }
 
 function syncUrl() {
@@ -86,6 +103,7 @@ function setSeason(query, code) {
 async function render() {
   renderChips();
   refreshPicker();
+  renderScopeTog();
   const board = document.getElementById('board'), empty = document.getElementById('empty');
   document.getElementById('saveCmp').style.display = names.length >= 2 ? '' : 'none';
   if (names.length < 2) {
@@ -95,9 +113,12 @@ async function render() {
   }
   syncSaveBtn();
   const d = await api('/api/compare?' + buildQS());
-  document.getElementById('seasonNote').textContent = d.season
-    ? `Season ${d.season}.`
+  const scopeWord = { combined: 'all competitions', league: 'domestic league',
+    ucl: 'Champions League', worldcup: 'World Cup' }[d.scope || scope] || '';
+  const seasonBit = d.season ? `Season ${d.season}.`
     : (d.players && d.players.length ? 'Comparing across different seasons.' : '');
+  document.getElementById('seasonNote').textContent =
+    scopeWord ? `${seasonBit} Stats: ${scopeWord}.` : seasonBit;
 
   if (!d.players || d.players.length < 2) {
     board.style.display = 'none'; empty.style.display = '';
@@ -222,7 +243,7 @@ function syncSaveBtn() {
 }
 document.getElementById('saveCmp').onclick = () => {
   if (names.length < 2) return;
-  Store.toggle('comparisons', { id: cmpId(), names: names.slice(), seasons: seasons.slice(), stats: addedStats.slice(), label: names.join('  vs  ') });
+  Store.toggle('comparisons', { id: cmpId(), names: names.slice(), seasons: seasons.slice(), stats: addedStats.slice(), scope, label: names.join('  vs  ') });
   syncSaveBtn();
 };
 

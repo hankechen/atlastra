@@ -3034,11 +3034,17 @@ class SoccerDB:
     }
 
     def web_compare(self, names: list[str], stats: list[str] | None = None,
-                    season_tags: list[str] | None = None) -> dict:
+                    season_tags: list[str] | None = None,
+                    scope: str = "combined") -> dict:
         """Use case 5: side-by-side comparison of 2-3 players on user-chosen
         stats (or the position-based defaults from use case 4), plus an
-        overlaid percentile radar. Reuses v_player_season_stats so domestic +
-        FotMob enrichment are already merged.
+        overlaid percentile radar.
+
+        `scope` picks the competition the stats are drawn from -- 'league', 'ucl',
+        'combined' (all categories, the default), or 'worldcup' -- using the SAME
+        per-competition scope engine as the profile tiles (_player_stat_scopes), so
+        Compare and the profile agree. A player with no data for the chosen scope in
+        their season shows "—" across the board.
 
         Each player can be pinned to a DIFFERENT season -- e.g. peak-Pedri 24/25
         vs a young Bellingham 20/21. Requested seasons arrive as index-tagged
@@ -3084,8 +3090,11 @@ class SoccerDB:
             g = self.con.execute(
                 "SELECT position_group FROM players WHERE player_id=?", [r["pid"]]).fetchone()
             groups[r["pid"]] = g[0] if g else None
-        allowed = {r[1] for r in self.con.execute(
-            "PRAGMA table_info('v_player_season_stats')").fetchall()}
+        scope = scope if scope in ("league", "ucl", "combined", "worldcup") else "combined"
+        # stat vocabulary = the per-competition scope keys (+ derived ga_per90); this
+        # replaces the old v_player_season_stats columns so Compare matches the profile
+        # tiles. xa/duels_won-count aren't in the WC feed -> "—" under the WC scope.
+        allowed = set(self._SCOPE_COUNTS) | set(self._SCOPE_RATES) | {"ga_per90"}
         distinct_groups = {g for g in groups.values() if g}
         if len(distinct_groups) == 1:
             default_cols = self.DEFAULT_PROGRESSION_STATS.get(next(iter(distinct_groups)), [])
@@ -3146,11 +3155,11 @@ class SoccerDB:
             fpid = self.con.execute(
                 "SELECT max(fotmob_player_id) FROM player_enrichment "
                 "WHERE player_id=? AND fotmob_player_id IS NOT NULL", [pid]).fetchone()
-            r = self.con.execute(
-                f"SELECT {', '.join(statcols)} FROM v_player_season_stats "
-                "WHERE player_id=? AND season=? ORDER BY minutes DESC LIMIT 1",
-                [pid, season]).fetchone()
-            statvals[k] = dict(zip(statcols, r)) if r else {}
+            sv = dict(self._player_stat_scopes(pid, season).get(scope) or {})
+            if sv.get("minutes"):                         # derive G+A per 90 for this scope
+                m = sv["minutes"]
+                sv["ga_per90"] = round(((sv.get("goals") or 0) + (sv.get("assists") or 0)) / m * 90, 2)
+            statvals[k] = sv
             # team is season-specific (transfers), so prefer the chosen season's team
             # (most minutes) over the profile's current club
             trow = self.con.execute(
@@ -3195,7 +3204,7 @@ class SoccerDB:
 
         # a single top-level season label only when every player shares one season
         seasons_used = {rp["season"] for rp in resolved}
-        return {"players": players, "stats": stat_rows,
+        return {"players": players, "stats": stat_rows, "scope": scope,
                 "radar_axes": list(self.RADAR_AXES.keys()),
                 "season": _fmt_season(next(iter(seasons_used))) if len(seasons_used) == 1 else None}
 
