@@ -7,6 +7,7 @@ One signed /api/data/matchDetails call per match feeds every tab (header, stats,
 lineups, shot map, timeline, players), cached briefly so opening a match is one
 fetch. FotMob answers 200 from a datacenter IP, so this runs on the server 24/7.
 """
+import re
 import time
 from datetime import datetime, timezone
 
@@ -236,3 +237,132 @@ def timeline(eid: int) -> dict:
                         player_out=(swap[1].get("name") if len(swap) > 1 else None))
         events.append(base)
     return {"available": True, "events": events}   # FotMob already oldest-first
+
+
+# ---- per-player match stats -------------------------------------------------
+def _flat_stats(pl: dict) -> dict:
+    """FotMob nests player stats by display name; flatten to {statKey: statObj}."""
+    out = {}
+    for g in pl.get("stats") or []:
+        for _, obj in (g.get("stats") or {}).items():
+            k = obj.get("key")
+            if k:
+                out[k] = obj.get("stat") or {}
+    return out
+
+
+def player_stats(eid: int) -> dict:
+    d = _md(eid)
+    content = (d or {}).get("content") or {}
+    ps = content.get("playerStats") or {}
+    if not ps:
+        return {"available": False, "players": []}
+    lu = content.get("lineup") or {}
+    home_id = (lu.get("homeTeam") or {}).get("id")
+    ratings, starter_ids = {}, set()
+    for t in ("homeTeam", "awayTeam"):
+        team = lu.get(t) or {}
+        for p in team.get("starters") or []:
+            ratings[p.get("id")] = (p.get("performance") or {}).get("rating")
+            starter_ids.add(p.get("id"))
+        for p in team.get("subs") or []:
+            ratings[p.get("id")] = (p.get("performance") or {}).get("rating")
+    # cards per player from the timeline
+    cards: dict = {}
+    for e in ((content.get("matchFacts") or {}).get("events") or {}).get("events") or []:
+        if e.get("type") == "Card":
+            pid = (e.get("player") or {}).get("id")
+            if pid is None:
+                continue
+            kind = "red" if "red" in str(e.get("card") or "").lower() else "yellow"
+            cards.setdefault(pid, {}).setdefault(kind, 0)
+            cards[pid][kind] += 1
+
+    def v(f, k):
+        return (f.get(k) or {}).get("value")
+
+    players = []
+    for p in ps.values():
+        f = _flat_stats(p)
+        pid = p.get("id")
+        ap = f.get("accurate_passes") or {}
+        c = cards.get(pid, {})
+        players.append({
+            "id": pid, "name": p.get("name"), "team": p.get("teamName"),
+            "is_home": p.get("teamId") == home_id,
+            "number": p.get("shirtNumber"), "position": p.get("usualPosition"),
+            "started": pid in starter_ids, "rating": ratings.get(pid),
+            "minutes": v(f, "minutes_played"),
+            "goals": v(f, "goals"), "assists": v(f, "assists"),
+            "shots": v(f, "total_shots"), "shots_on_target": v(f, "ShotsOnTarget"),
+            "xg": v(f, "expected_goals"), "xa": None,
+            "passes": ap.get("total"), "accurate_passes": ap.get("value"),
+            "key_passes": v(f, "chances_created"), "big_chances_created": None,
+            "dribbles": v(f, "dribbles_succeeded"), "dribble_attempts": None,
+            "recoveries": v(f, "recoveries"),
+            "tackles": v(f, "matchstats.headers.tackles"), "duels_won": v(f, "duel_won"),
+            "touches": v(f, "touches"), "fouls": v(f, "fouls"),
+            "yellow": c.get("yellow", 0), "red": c.get("red", 0),
+        })
+    return {"available": bool(players), "players": players}
+
+
+# ---- per-player heatmap -----------------------------------------------------
+# FotMob serves heatmaps as an SVG of <circle cx cy r> points on a 105x68 pitch;
+# parse them out and normalise to the 0-100 grid match.js's renderer expects.
+_CIRCLE_RE = re.compile(r'cx="([-\d.]+)"\s+cy="([-\d.]+)"')
+_HM_CACHE: dict = {}
+
+
+def _heatmaps(eid: int) -> dict:
+    now = time.time()
+    hit = _HM_CACHE.get(eid)
+    if hit and hit[0] > now:
+        return hit[1]
+    e = int(eid)
+    url = (f"/api/data/heatmap/match/{e}/heatmaps?heatmapUrl="
+           f"https%3A%2F%2Fpub.fotmob.com%2Fprod%2Fdb%2Fapi%2Fheatmap%2Fmatch%2F{e}")
+    try:
+        d = _auth.get(url)
+    except Exception:                                # noqa: BLE001
+        return (hit[1] if hit else {})
+    parsed = {}
+    for k, svg in ((d or {}).get("players") or {}).items():
+        try:
+            pid = int(k[1:] if str(k).startswith("p") else k)
+        except (ValueError, TypeError):
+            continue
+        parsed[pid] = [{"x": round(float(x) / 105 * 100, 1),
+                        "y": round(float(y) / 68 * 100, 1)}
+                       for x, y in _CIRCLE_RE.findall(svg)]
+    _HM_CACHE[eid] = (now + 300, parsed)
+    if len(_HM_CACHE) > 200:
+        for kk in list(_HM_CACHE)[:100]:
+            _HM_CACHE.pop(kk, None)
+    return parsed
+
+
+def player_heatmap(eid: int, pid: int) -> dict:
+    # the heatmap SVG is keyed by Opta id; lineups pass the FotMob id, so bridge via
+    # playerStats (which carries both).
+    ps = ((_md(eid) or {}).get("content") or {}).get("playerStats") or {}
+    opta = next((p.get("optaId") for p in ps.values() if p.get("id") == int(pid)), None)
+    pts = _heatmaps(eid).get(int(opta)) if opta else None
+    if not pts:
+        return {"available": False, "points": []}
+    return {"available": True, "points": pts}
+
+
+# ---- prediction / key moments (not available from FotMob) -------------------
+# FotMob's match "poll" is a textual insight, not a 1X2 odds market, so there's no
+# clean bookmaker consensus to surface — the Prediction tab reports unavailable.
+def prediction(eid: int) -> dict:
+    return {"available": False, "consensus": None, "books": []}
+
+
+def score_prediction(eid: int, consensus=None):
+    return None
+
+
+def key_moments(eid: int) -> dict:
+    return {"available": False, "moments": []}
