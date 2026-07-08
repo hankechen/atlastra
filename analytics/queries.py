@@ -2428,16 +2428,15 @@ class SoccerDB:
         if season is None:
             return {"edition": None, "formation": "4-3-3", "lines": []}
 
+        # photo keys off wc_player_stats.player_id, which IS a FotMob id (WC data is
+        # FotMob-sourced) -> player_photo resolves the CDN image directly, no fragile
+        # name-join (which missed "Mbappé" vs our "Mbappe-Lottin", accents, etc.).
         df = self.con.execute("""
             SELECT p.player, p.team AS nat, p.position AS pos, p.rating,
-                   p.minutes, p.appearances, w.cc, pe.fpid
+                   p.minutes, p.appearances, p.player_id, w.cc
             FROM wc_player_stats p
             LEFT JOIN (SELECT DISTINCT team, cc FROM wc_standings WHERE season = ?) w
                    ON lower(w.team) = lower(p.team)
-            LEFT JOIN players pl ON lower(pl.player_name) = lower(p.player)
-            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
-                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
-                   ON pe.player_id = pl.player_id
             WHERE p.season = ? AND p.minutes >= ?
         """, [season, season, min_minutes]).df()
         if df.empty:
@@ -2463,7 +2462,7 @@ class SoccerDB:
             return [{"player": r.player, "position": self._WC_LINE.get(r.pos, r.pos),
                      "team": r.nat, "cc": r.cc, "rating": _r(r.rating, 1),
                      "apps": _i(r.appearances),
-                     "photo": self.player_photo(None if r.fpid != r.fpid else int(r.fpid))}
+                     "photo": self.player_photo(int(r.player_id) if pd.notna(r.player_id) else None)}
                     for r in rows]
         return {"edition": str(season), "formation": "4-3-3",
                 "lines": [{"label": k, "players": fmt(v)} for k, v in lines.items()]}
