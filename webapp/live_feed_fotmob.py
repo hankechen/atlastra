@@ -71,6 +71,20 @@ def _national(general: dict) -> bool:
     return pid in {77, 50, 44}                        # WC / EURO / Copa
 
 
+# FotMob's knockout round notation ("1/8") -> readable name
+_ROUND = {"1/16": "Round of 32", "1/8": "Round of 16", "1/4": "Quarter-final",
+          "1/2": "Semi-final", "final": "Final"}
+
+
+def _round_name(raw):
+    if not raw:
+        return None
+    r = _ROUND.get(str(raw).lower())
+    if r:
+        return r
+    return f"Matchday {raw}" if str(raw).isdigit() else raw   # group stage
+
+
 def header(eid: int) -> dict:
     d = _md(eid)
     g = (d or {}).get("general") or {}
@@ -93,7 +107,7 @@ def header(eid: int) -> dict:
     return {
         "available": True, "event_id": eid, "ut_id": g.get("parentLeagueId"),
         "competition": g.get("leagueName"),
-        "round": g.get("leagueRoundName") or g.get("matchRound"),
+        "round": _round_name(g.get("leagueRoundName") or g.get("matchRound")),
         "start_ts": start_ts,
         "status": stype, "status_desc": sdesc, "minute": minute,
         "home": home.get("name"), "home_id": home.get("id"),
