@@ -628,7 +628,7 @@ def cache_put(items):
 
 
 def venue(eid, warm: bool = False):
-    g = (_md(eid) or {}).get("general") or {}
-    ib = ((_md(eid) or {}).get("content") or {}).get("matchFacts", {}).get("infoBox") or {}
-    st = (ib.get("Stadium") or {})
-    return {"name": st.get("name"), "city": st.get("city")} if st.get("name") else None
+    # the frontend renders m.venue as a plain string ("Stadium · City · Country")
+    st = (((_md(eid) or {}).get("content") or {}).get("matchFacts", {}).get("infoBox") or {}).get("Stadium") or {}
+    parts = [st.get("name"), st.get("city"), st.get("country")]
+    return " · ".join(p for p in parts if p) or None
