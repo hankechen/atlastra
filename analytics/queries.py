@@ -2768,6 +2768,55 @@ class SoccerDB:
                 "tackles": _i(tk), "interceptions": _i(intc), "passes_completed": _i(pc),
                 "pass_accuracy_pct": _i(pa), "duels_won_pct": _i(dwp)}
 
+    def _wc_tile_percentiles(self, pid: int, season: str) -> dict:
+        """WC-FIELD percentiles for the profile's stat tiles under the World Cup scope:
+        rank the player's WC stats against same-position WC players (that edition, >=90
+        min). Per-90 for counts, rates as-is; a stat is ranked only when the player AND
+        >=5 peers have it (so pass%/duels% stay honest, no bogus 100ths)."""
+        edition = self._WC_EDITIONS.get(season)
+        if edition is None:
+            return {}
+        nm = self.con.execute("SELECT player_name FROM players WHERE player_id=?", [pid]).fetchone()
+        if not nm:
+            return {}
+        ours = set(_fold(nm[0]).replace("-", " ").split())
+        if not ours:
+            return {}
+        df = self.con.execute(
+            "SELECT player, position, minutes, goals, assists, xg, chances_created, "
+            "big_chances_created, dribbles_completed, duels_won, tackles, interceptions, "
+            "pass_accuracy_pct, duels_won_pct FROM wc_player_stats "
+            "WHERE season=? AND minutes>=90", [edition]).df()
+        if df.empty:
+            return {}
+        mine_i = None
+        for i, p in enumerate(df["player"]):
+            wt = set(_fold(p).replace("-", " ").split())
+            if (wt == ours or len(wt & ours) >= 2) and (
+                    mine_i is None or df["minutes"].iloc[i] > df["minutes"].iloc[mine_i]):
+                mine_i = i
+        if mine_i is None:
+            return {}
+        my = df.iloc[mine_i]
+        grp = df[df["position"] == my["position"]]
+        gmins = grp["minutes"].clip(lower=1)
+        per90 = ["goals", "assists", "xg", "chances_created", "big_chances_created",
+                 "dribbles_completed", "duels_won", "tackles", "interceptions"]
+        out = {}
+        for k in per90 + ["pass_accuracy_pct", "duels_won_pct"]:
+            raw = pd.to_numeric(grp[k], errors="coerce")
+            myv = pd.to_numeric(pd.Series([my[k]]), errors="coerce").iloc[0]
+            have = raw.notna()
+            if pd.isna(myv) or have.sum() < 5:
+                continue
+            if k in per90:
+                vals = raw[have] / gmins[have] * 90
+                mine = myv / max(my["minutes"], 1) * 90
+            else:
+                vals, mine = raw[have], myv
+            out[k] = int(round((vals <= mine).mean() * 100))
+        return out
+
     # per-stat percentile vs same-position peers (per-90 basis; rates as-is), so the
     # tiles can show where a player sits — peak of the stat = 100th percentile.
     def _progressive_stats(self, pid: int, season: str) -> dict:
@@ -3003,6 +3052,7 @@ class SoccerDB:
             "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
             "tiles": tiles, "radar": radar,
             "tile_pct": tile_pct,            # per-stat percentile vs position peers
+            "wc_tile_pct": self._wc_tile_percentiles(pid, season),  # vs the WC field (WC scope)
             "stats_scopes": scopes,          # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar
             "signature_actions": self._player_tendencies(pid),  # use case 9

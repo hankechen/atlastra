@@ -38,6 +38,7 @@ const PER90_DEFS = [
 const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined'], ['worldcup', 'World Cup']];
 let statScopes = {}, scopeTotals = 'combined', scopePer90 = 'combined';
 let tilePct = {};                                   // per-stat percentile vs position peers
+let wcTilePct = {};                                 // per-stat percentile vs the WC field (WC scope)
 
 function fmtTile(def, s) {
   const [, key, , kind] = def, v = s ? s[key] : null;
@@ -51,17 +52,20 @@ function fmtTile(def, s) {
 const pctColor = (p) => p >= 80 ? '#2fbf71' : p >= 60 ? '#7d9f3a' : p >= 40 ? '#c9a227' : '#c97a27';
 const ordinal = (n) => { const v = n % 100, s = ['th', 'st', 'nd', 'rd']; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
 // percentile bar + number shown under a stat (skip Apps — no peer percentile)
-function pctBar(key) {
-  const p = tilePct[key];
+function pctBar(key, pctMap, peer) {
+  const p = (pctMap || tilePct)[key];
   if (p == null || key === 'games') return '';
-  return `<div class="tpctw" title="${ordinal(p)} percentile vs same position across all top-5 leagues (100 = best in position)">
+  return `<div class="tpctw" title="${ordinal(p)} percentile vs ${peer || 'same position across all top-5 leagues'} (100 = best in position)">
     <div class="tpct"><i style="width:${p}%;background:${pctColor(p)}"></i></div>
     <span class="tpctn" style="color:${pctColor(p)}">${ordinal(p)}</span></div>`;
 }
-// World Cup percentiles are vs top-5-league peers (tilePct), which don't apply to a
-// tournament scope, so the WC scope shows raw values without the percentile bar.
+// The WC scope ranks against the WORLD CUP field (wcTilePct); every other scope uses
+// the top-5-league percentiles (tilePct).
 const oneTile = (def, s, scope) =>
-  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${scope === 'worldcup' ? '' : pctBar(def[1])}`;
+  `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${
+    scope === 'worldcup'
+      ? pctBar(def[1], wcTilePct, 'the World Cup field, same position')
+      : pctBar(def[1], tilePct)}`;
 
 function renderTiles(elId, defs, scope) {
   const s = statScopes[scope];
@@ -226,6 +230,7 @@ async function load(name, careerStat = 'xa', season = null) {
   // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
   statScopes = p.stats_scopes || {};
   tilePct = p.tile_pct || {};
+  wcTilePct = p.wc_tile_pct || {};
   const dflt = statScopes.combined ? 'combined' : Object.keys(statScopes)[0];
   if (!statScopes[scopeTotals]) scopeTotals = dflt;
   if (!statScopes[scopePer90]) scopePer90 = dflt;
