@@ -354,15 +354,86 @@ def player_heatmap(eid: int, pid: int) -> dict:
     return {"available": True, "points": pts}
 
 
-# ---- prediction / key moments (not available from FotMob) -------------------
-# FotMob's match "poll" is a textual insight, not a 1X2 odds market, so there's no
-# clean bookmaker consensus to surface — the Prediction tab reports unavailable.
+# ---- prediction: an Atlastra MODEL (FotMob has no 1X2 odds market) -----------
+# Poisson goals model. Each side gets a rating -- FIFA rank for national teams,
+# recent form (PPG + goal diff) for clubs -- turned into expected goals with a small
+# home edge (near-neutral for WC venues), then a 0-8 x 0-8 grid gives 1X2 + the most
+# likely scoreline. Self-contained: no external odds feed, can't be blocked.
+import math as _math   # noqa: E402
+
+
+def _rank_elo(rank):
+    return max(1350.0, 2050.0 - 6.5 * rank) if rank else 1550.0
+
+
+def _form_rating(team_id):
+    form = _form_for(team_id)
+    if not form:
+        return 1550.0
+    ppg = sum(3 if f["result"] == "W" else 1 if f["result"] == "D" else 0 for f in form) / len(form)
+    gd = sum((f["gf"] or 0) - (f["ga"] or 0) for f in form) / len(form)
+    return 1600.0 + (ppg - 1.4) * 120.0 + gd * 28.0
+
+
+def _rating(team_id, national, rank):
+    if national and rank:
+        return 0.65 * _rank_elo(rank) + 0.35 * _form_rating(team_id)
+    return _form_rating(team_id)
+
+
+def _pois(k, lam):
+    return _math.exp(-lam) * lam ** k / _math.factorial(k)
+
+
+def _model(eid):
+    """(consensus %, predicted key, most-likely scoreline) from the goals model."""
+    d = _md(eid)
+    h = header(eid)
+    teams = (d or {}).get("header", {}).get("teams") or []
+    if not h.get("available") or len(teams) < 2 or not h.get("home_id"):
+        return None
+    hr = _rating(h["home_id"], h["home_national"], teams[0].get("fifaRank"))
+    ar = _rating(h["away_id"], h["away_national"], teams[1].get("fifaRank"))
+    adv = 0.20 * (0.4 if h["home_national"] else 1.0)     # WC venues ~neutral
+    sup = max(-2.5, min(2.5, (hr - ar) / 250.0))
+    hx = max(0.25, 1.35 + sup / 2 + adv)
+    ax = max(0.25, 1.35 - sup / 2)
+    ph = pd = pa = 0.0
+    best, bestp = (0, 0), -1.0
+    for i in range(9):
+        for j in range(9):
+            p = _pois(i, hx) * _pois(j, ax)
+            if p > bestp:
+                best, bestp = (i, j), p
+            if i > j:
+                ph += p
+            elif i == j:
+                pd += p
+            else:
+                pa += p
+    tot = ph + pd + pa or 1
+    home, draw = round(ph / tot * 100), round(pd / tot * 100)
+    cons = {"home": home, "draw": draw, "away": 100 - home - draw}
+    predicted = max(cons, key=cons.get)
+    return {"consensus": cons, "predicted": predicted, "score": best,
+            "result": ("home" if best[0] > best[1] else "away" if best[1] > best[0] else "draw"),
+            "conf": round(max(ph, pd, pa) / tot * 100)}
+
+
 def prediction(eid: int) -> dict:
-    return {"available": False, "consensus": None, "books": []}
+    m = _model(eid)
+    if not m:
+        return {"available": False, "consensus": None, "books": []}
+    return {"available": True, "consensus": m["consensus"], "predicted": m["predicted"],
+            "books": [], "n_books": 0, "source": "model"}
 
 
 def score_prediction(eid: int, consensus=None):
-    return None
+    m = _model(eid)
+    if not m:
+        return None
+    return {"home": m["score"][0], "away": m["score"][1], "result": m["result"],
+            "result_conf": m["conf"], "live": False}
 
 
 def key_moments(eid: int) -> dict:
@@ -488,11 +559,13 @@ def fixture_preview(eid: int) -> dict:
         return {"available": False, "error": "Fixture not found."}
     hid, aid = h["home_id"], h["away_id"]
     h2h = (((_md(eid) or {}).get("content") or {}).get("h2h") or {}).get("summary")
+    m = _model(eid)
+    pred = {"available": True, **m["consensus"], "source": "model"} if m else {"available": False}
     return {"available": True, "event_id": eid,
             "home": h["home"], "away": h["away"], "home_id": hid, "away_id": aid,
             "home_country": h.get("home_country"), "away_country": h.get("away_country"),
             "kickoff_ts": h.get("start_ts"), "competition": h.get("competition"),
-            "prediction": {"available": False},
+            "prediction": pred,
             "h2h": {"home_wins": (h2h or [None, None, None])[0] if h2h else None,
                     "draws": (h2h or [None, None, None])[1] if h2h else None,
                     "away_wins": (h2h or [None, None, None])[2] if h2h else None},

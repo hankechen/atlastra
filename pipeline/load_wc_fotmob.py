@@ -10,6 +10,7 @@ wc_bracket) from FotMob and reuses load_wc.write_wc_rows to persist them.
 """
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,9 +70,59 @@ def _cdn(season_id, name):
         return []
 
 
-def _players(season_id, season):
+# Tournament pass% / duels% / duels-won aren't on FotMob's per-stat leaderboards, so
+# aggregate them from each finished WC match's per-player stats. Finished matches don't
+# change -> cache per match (module life), so only new matches are fetched each refresh.
+_MATCH_AGG: dict = {}   # match_id -> {player_id: [accurate, attempted, duels_won, duels_lost]}
+
+
+def _match_agg(mid: int) -> dict:
+    if mid in _MATCH_AGG:
+        return _MATCH_AGG[mid]
+    try:
+        ps = (_auth.get(f"/api/data/matchDetails?matchId={mid}")["content"]["playerStats"])
+    except Exception:                                # noqa: BLE001
+        return {}
+    agg = {}
+    for p in ps.values():
+        flat = {}
+        for g in p.get("stats") or []:
+            for _, obj in (g.get("stats") or {}).items():
+                if obj.get("key"):
+                    flat[obj["key"]] = obj.get("stat") or {}
+        ap = flat.get("accurate_passes") or {}
+        agg[p.get("id")] = [ap.get("value"), ap.get("total"),
+                            (flat.get("duel_won") or {}).get("value"),
+                            (flat.get("duel_lost") or {}).get("value")]
+    _MATCH_AGG[mid] = agg
+    return agg
+
+
+def _pass_duels(finished_ids: list) -> dict:
+    """player_id -> (pass_accuracy_pct, duels_won_pct, duels_won) over the tournament,
+    summed from each finished match's per-player passes/duels."""
+    tot = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for agg in pool.map(_match_agg, finished_ids):
+            for pid, (acc, att, won, lost) in agg.items():
+                t = tot.setdefault(pid, [0, 0, 0, 0])
+                t[0] += acc or 0
+                t[1] += att or 0
+                t[2] += won or 0
+                t[3] += lost or 0
+    out = {}
+    for pid, (acc, att, won, lost) in tot.items():
+        out[pid] = (round(acc / att * 100) if att else None,
+                    round(won / (won + lost) * 100) if (won + lost) else None,
+                    won or None)
+    return out
+
+
+def _players(season_id, season, finished_ids=None):
     """Merge the FotMob per-stat leaderboards into a per-player sheet, grade the
-    atlas rating with rate_wc, and emit wc_player_stats rows."""
+    atlas rating with rate_wc, and emit wc_player_stats rows. pass%/duels% are
+    aggregated from the finished matches' per-player stats (not on the leaderboards)."""
+    pd_map = _pass_duels(finished_ids or [])
     merged = {}
     for field, (fn, per90) in _STAT_FILES.items():
         for row in _cdn(season_id, fn):
@@ -96,6 +147,7 @@ def _players(season_id, season):
     rows = []
     for p in stats:
         r = rated.get((season, p["player_id"])) or {}
+        pa_pct, dw_pct, dw = pd_map.get(p["player_id"], (None, None, None))
         rows.append((season, p["position"], p["player_id"], p["player"], p["team"],
                      _r(p.get("rating")), _i(p.get("appearances")), _i(p.get("minutes")),
                      r.get("rating"), r.get("classification"),
@@ -103,7 +155,7 @@ def _players(season_id, season):
                      _i(p.get("shots")), _i(p.get("chances_created")),
                      _i(p.get("big_chances_created")), _i(p.get("dribbles_completed")),
                      _i(p.get("tackles")), _i(p.get("interceptions")),
-                     _i(p.get("passes_completed")), None, None, None))
+                     _i(p.get("passes_completed")), pa_pct, dw_pct, dw))
     return rows
 
 
@@ -209,7 +261,8 @@ def fetch_wc_rows(season: str = "2026") -> dict:
             if mid is not None:
                 bracket_rows.append((season, ro, seq, mid))
 
-    players = _players(season_id, season)
+    finished_ids = [r[0] for r in match_rows if r[13] == "finished" and r[0] is not None]
+    players = _players(season_id, season, finished_ids)
     return {"matches": match_rows, "standings": stand_rows, "leaders": leader_rows,
             "players": players, "bracket": bracket_rows}
 

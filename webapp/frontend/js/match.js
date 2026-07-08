@@ -193,19 +193,25 @@ async function loadPrediction() {
         <span class="asp-tm">${esc(teams.away)}</span></div>
       <div class="asp-note">🔮 Atlastra predicts ${s.live ? 'this finishes' : 'a final'} <b>${esc(teams.home)} ${s.home}–${s.away} ${esc(teams.away)}</b> · ${esc(resLabel)} (${s.result_conf}% likely)</div>
     </section>` : '';
+  // Atlastra model (no bookmaker feed) vs bookmaker-consensus rendering
+  const isModel = d.source === 'model' || !(d.books && d.books.length);
+  const srcLabel = isModel ? 'Atlastra model' : `${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}`;
+  const oddsSection = (d.books && d.books.length) ? `
+      <div class="card-h" style="margin-top:18px"><h3>Bookmaker odds <span class="muted" style="font-weight:400">(decimal)</span></h3></div>
+      <div class="ltbl-wrap"><table class="ltbl">
+        <thead><tr><th class="tl">Source</th><th>${esc(teams.home)}</th><th>Draw</th><th>${esc(teams.away)}</th></tr></thead>
+        <tbody>${oddsRows}</tbody></table></div>
+      <div class="placeholder-note" style="margin-top:10px">Win probabilities are implied from bookmaker 1X2 odds with the margin removed, averaged across sources. Not betting advice.</div>`
+    : `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: win probabilities from each side's strength — FIFA ranking for nations, recent form (results + goal difference) for clubs — with a small home edge, run through a Poisson goals model. Not betting advice.</div>`;
   body().innerHTML = aspCard + `<section class="card">
-      <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live odds</span> · ' : ''}${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}</span></div>
-      <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% implied</span></div>
+      <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live</span> · ' : ''}${srcLabel}</span></div>
+      <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% ${isModel ? 'modelled' : 'implied'}</span></div>
       <div class="pr-bar">${seg('home', 'h')}${seg('draw', 'd')}${seg('away', 'a')}</div>
       <div class="pr-legend">
         <span><i class="h"></i>${esc(teams.home)} <b>${c.home}%</b></span>
         <span><i class="d"></i>Draw <b>${c.draw}%</b></span>
         <span><i class="a"></i>${esc(teams.away)} <b>${c.away}%</b></span></div>
-      <div class="card-h" style="margin-top:18px"><h3>Bookmaker odds <span class="muted" style="font-weight:400">(decimal)</span></h3></div>
-      <div class="ltbl-wrap"><table class="ltbl">
-        <thead><tr><th class="tl">Source</th><th>${esc(teams.home)}</th><th>Draw</th><th>${esc(teams.away)}</th></tr></thead>
-        <tbody>${oddsRows}</tbody></table></div>
-      <div class="placeholder-note" style="margin-top:10px">Win probabilities are implied from bookmaker 1X2 odds with the margin removed, averaged across sources (via SofaScore). Not betting advice.</div>
+      ${oddsSection}
     </section>`;
 }
 
