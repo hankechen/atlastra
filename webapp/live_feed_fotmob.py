@@ -450,8 +450,66 @@ def score_prediction(eid: int, consensus=None):
             "result_conf": m["conf"], "live": False}
 
 
+# FotMob shot vocabulary -> readable, for the auto-generated Key Moments commentary
+_KM_BODY = {"LeftFoot": "left-footed effort", "RightFoot": "right-footed effort", "Header": "header"}
+_KM_SIT = {"RegularPlay": "open play", "IndividualPlay": "open play", "FastBreak": "a fast break",
+           "SetPiece": "a set piece", "FromCorner": "a corner", "FreeKick": "a free kick",
+           "ThrowInSetPiece": "a throw-in", "Penalty": "the spot"}
+
+
 def key_moments(eid: int) -> dict:
-    return {"available": False, "moments": []}
+    """Chronological feed of the match's KEY events — goals + red cards (timeline) and
+    the big chances / notable shots (shot map, by xG + outcome) — each with a one-line
+    auto-generated commentary string. Rule-based off FotMob's structured data."""
+    hdr = header(eid)
+    if not hdr.get("available"):
+        return {"available": False, "moments": []}
+    sm, tl = shotmap(eid), timeline(eid)
+    if not sm.get("available") and not tl.get("available"):
+        return {"available": False, "moments": []}
+    home, away = hdr.get("home"), hdr.get("away")
+    team = lambda is_home: home if is_home else away
+    moments = []
+
+    for e in (tl.get("events") or []):
+        mn, at, side = e.get("minute"), e.get("added_time"), e.get("side")
+        if e.get("type") == "goal":
+            tm = team(side == "home")
+            txt = f"GOAL — {tm}! {e.get('player')} makes it {e.get('home_score')}-{e.get('away_score')}"
+            txt += f", set up by {e['assist']}." if e.get("assist") else "."
+            moments.append({"minute": mn, "added_time": at, "kind": "goal", "side": side,
+                            "icon": "⚽", "text": txt})
+        elif e.get("type") == "card" and "red" in str(e.get("detail") or "").lower():
+            tm = team(side == "home")
+            moments.append({"minute": mn, "added_time": at, "kind": "red", "side": side,
+                            "icon": "🟥", "text": f"Red card — {e.get('player')} ({tm}) is sent off."})
+
+    for s in (sm.get("shots") or []):
+        if s.get("is_goal"):
+            continue                                  # goals already covered above
+        xg, st = s.get("xg") or 0, s.get("shot_type")
+        if not (xg >= 0.30 or (st == "save" and xg >= 0.15) or st == "post"):
+            continue
+        tm = team(s.get("is_home"))
+        body = _KM_BODY.get(s.get("body_part"), "effort")
+        sit = _KM_SIT.get(s.get("situation"))
+        frm = f" from {sit}" if sit else ""
+        xgs = f" (xG {xg:.2f})" if xg else ""
+        if st == "save":
+            icon, txt = "🧤", f"Big chance for {tm}! {s.get('player')}'s {body}{frm} forces a save{xgs}."
+        elif st == "post":
+            icon, txt = "🪵", f"Off the woodwork! {s.get('player')} ({tm}) strikes the frame{xgs}."
+        elif st == "block":
+            icon, txt = "🧱", f"{s.get('player')}'s {body}{frm} is blocked{xgs}."
+        else:
+            icon, txt = "😬", f"Big chance missed! {s.get('player')} ({tm}) sends a {body}{frm} off target{xgs}."
+        moments.append({"minute": s.get("minute"), "added_time": s.get("added_time"),
+                        "kind": "chance", "side": "home" if s.get("is_home") else "away",
+                        "icon": icon, "text": txt})
+
+    moments.sort(key=lambda m: ((m.get("minute") if m.get("minute") is not None else 0),
+                                m.get("added_time") or 0))
+    return {"available": True, "home": home, "away": away, "moments": moments}
 
 
 # ---- national teams + fixture preview (FotMob team endpoint) -----------------
