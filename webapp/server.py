@@ -728,6 +728,22 @@ def _live_refresher():
         time.sleep(LIVE_POLL if (LITE or n_live) else IDLE_POLL)
 
 
+def _wc_refresher():
+    """Rebuild the World Cup hub tables (standings/leaders/matches/bracket/player
+    ratings) from FotMob on a loop — the FotMob replacement for the Mac's WC push."""
+    import time
+    from pipeline import load_wc_fotmob as wc
+    WC_EVERY = int(os.environ.get("ATLASTRA_WC_EVERY", "900"))   # 15 min
+    WC_SEASON = os.environ.get("ATLASTRA_WC_SEASON", "2026")
+    while True:
+        try:
+            n = wc.refresh(WC_SEASON)
+            print(f"WC refresh (FotMob): {n}", flush=True)
+        except Exception as e:                         # noqa: BLE001
+            print(f"WC refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(WC_EVERY)
+
+
 def _preview_warmer():
     """Keep _PREVIEW_CACHE hot for the soonest upcoming fixtures so the Preview tab is
     instant on the first click. The pusher warms each match's SofaScore preview paths
@@ -776,6 +792,9 @@ if __name__ == "__main__":
     if LIVE_REFRESH or FOTMOB:
         threading.Thread(target=_live_refresher, daemon=True).start()
         print(f"live refresher: on ({'FotMob' if FOTMOB else 'SofaScore'}, read-write DB)")
+    if FOTMOB:                                     # WC hub straight from FotMob, no Mac
+        threading.Thread(target=_wc_refresher, daemon=True).start()
+        print("WC refresher: on (FotMob)")
     if live_feed.CACHE_MODE:
         threading.Thread(target=_preview_warmer, daemon=True).start()
         print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")
