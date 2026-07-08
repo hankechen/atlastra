@@ -366,3 +366,195 @@ def score_prediction(eid: int, consensus=None):
 
 def key_moments(eid: int) -> dict:
     return {"available": False, "moments": []}
+
+
+# ---- national teams + fixture preview (FotMob team endpoint) -----------------
+def _iso_ts(s):
+    if not s:
+        return None
+    try:
+        return int(datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%fZ")
+                   .replace(tzinfo=timezone.utc).timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+_TEAM_CACHE: dict = {}
+
+
+def _team(team_id: int) -> dict | None:
+    now = time.time()
+    hit = _TEAM_CACHE.get(team_id)
+    if hit and hit[0] > now:
+        return hit[1]
+    try:
+        d = _auth.get(f"/api/data/teams?id={int(team_id)}")
+    except Exception:                                # noqa: BLE001
+        return hit[1] if hit else None
+    _TEAM_CACHE[team_id] = (now + 300, d)
+    return d
+
+
+def _team_event_row(fx: dict) -> dict:
+    st = fx.get("status") or {}
+    started = st.get("started")
+    home, away = fx.get("home") or {}, fx.get("away") or {}
+    return {"event_id": fx.get("id"), "home": home.get("name"), "away": away.get("name"),
+            "home_score": home.get("score") if started else None,
+            "away_score": away.get("score") if started else None,
+            "competition": (fx.get("tournament") or {}).get("name"),
+            "ts": _iso_ts(st.get("utcTime")),
+            "status": "finished" if st.get("finished") else "inprogress" if started else "notstarted"}
+
+
+_SQUAD_POS = {"keepers": "Goalkeeper", "defenders": "Defender",
+              "midfielders": "Midfielder", "attackers": "Forward"}
+
+
+def national_team(team_id: int) -> dict:
+    t = _team(team_id)
+    det = (t or {}).get("details") or {}
+    if not det.get("name"):
+        return {"available": False}
+    ov = t.get("overview") or {}
+    squad, manager = [], None
+    for g in ((t.get("squad") or {}).get("squad")) or []:
+        title = g.get("title")
+        for m in g.get("members") or []:
+            if title == "coach":
+                manager = manager or m.get("name")
+            else:
+                squad.append({"id": m.get("id"), "name": m.get("name"),
+                              "position": _SQUAD_POS.get(title), "number": m.get("shirtNumber")})
+    fixt = ov.get("overviewFixtures") or []
+    fin = [f for f in fixt if (f.get("status") or {}).get("finished")]
+    results = sorted((_team_event_row(f) for f in fin),
+                     key=lambda r: r["ts"] or 0, reverse=True)[:12]
+    fixtures = sorted((_team_event_row(f) for f in fixt if not (f.get("status") or {}).get("started")),
+                      key=lambda r: r["ts"] or 0)[:8]
+    # latest XI from the most recent finished match that has a published lineup
+    latest_xi = None
+    for f in sorted(fin, key=lambda f: (f.get("status") or {}).get("utcTime") or "", reverse=True)[:4]:
+        lu = lineups(f.get("id"))
+        if not lu.get("available"):
+            continue
+        is_home = (f.get("home") or {}).get("id") == team_id
+        side = lu["home"] if is_home else lu["away"]
+        if side and side.get("starting_xi"):
+            latest_xi = {"event_id": f.get("id"),
+                         "opponent": ((f.get("away") if is_home else f.get("home")) or {}).get("name"),
+                         "is_home": is_home,
+                         "home_score": (f.get("home") or {}).get("score"),
+                         "away_score": (f.get("away") or {}).get("score"),
+                         "ts": _iso_ts((f.get("status") or {}).get("utcTime")),
+                         "formation": side.get("formation"), "starting_xi": side.get("starting_xi")}
+            break
+    return {"available": True, "id": team_id, "name": det.get("name"),
+            "country_code": NAT_ISO.get(det.get("name")), "manager": manager,
+            "latest_xi": latest_xi, "results": results, "fixtures": fixtures, "squad": squad}
+
+
+def _form_for(team_id: int):
+    ov = (_team(team_id) or {}).get("overview") or {}
+    rows = []
+    for f in reversed(ov.get("overviewFixtures") or []):
+        st = f.get("status") or {}
+        if not st.get("finished"):
+            continue
+        home, away = f.get("home") or {}, f.get("away") or {}
+        is_home = home.get("id") == team_id
+        gf = (home if is_home else away).get("score")
+        ga = (away if is_home else home).get("score")
+        if gf is None or ga is None:
+            continue
+        rows.append({"opponent": (away if is_home else home).get("name"), "gf": gf, "ga": ga,
+                     "result": "W" if gf > ga else "D" if gf == ga else "L",
+                     "comp": (f.get("tournament") or {}).get("name")})
+        if len(rows) >= 6:
+            break
+    return rows
+
+
+def _squad_names(team_id: int):
+    return [p["name"] for p in national_team(team_id).get("squad") or [] if p.get("name")]
+
+
+def fixture_preview(eid: int) -> dict:
+    """Upcoming-fixture preview from FotMob: recent form + h2h + squad names (the
+    server enriches those into key players from our ratings). No bookmaker odds."""
+    h = header(eid)
+    if not h.get("available") or not h.get("home_id"):
+        return {"available": False, "error": "Fixture not found."}
+    hid, aid = h["home_id"], h["away_id"]
+    h2h = (((_md(eid) or {}).get("content") or {}).get("h2h") or {}).get("summary")
+    return {"available": True, "event_id": eid,
+            "home": h["home"], "away": h["away"], "home_id": hid, "away_id": aid,
+            "home_country": h.get("home_country"), "away_country": h.get("away_country"),
+            "kickoff_ts": h.get("start_ts"), "competition": h.get("competition"),
+            "prediction": {"available": False},
+            "h2h": {"home_wins": (h2h or [None, None, None])[0] if h2h else None,
+                    "draws": (h2h or [None, None, None])[1] if h2h else None,
+                    "away_wins": (h2h or [None, None, None])[2] if h2h else None},
+            "home_form": _form_for(hid), "away_form": _form_for(aid),
+            "home_squad": _squad_names(hid), "away_squad": _squad_names(aid)}
+
+
+def player_club(pid: int) -> dict:
+    """A player's current club — from FotMob playerData (used in the lineup modal)."""
+    try:
+        d = _auth.get(f"/api/data/playerData?id={int(pid)}")
+    except Exception:                                # noqa: BLE001
+        return {"available": False}
+    tm = (d or {}).get("primaryTeam") or {}
+    if not tm.get("teamName"):
+        return {"available": False}
+    tid = tm.get("teamId")
+    return {"available": True, "team": tm.get("teamName"), "team_id": tid,
+            "national": False,
+            "logo": f"https://images.fotmob.com/image_resources/logo/teamlogo/{tid}.png" if tid else None}
+
+
+def team_image(team_id: int):
+    """No proxy needed — FotMob logos are on a public CDN the browser can hit
+    directly; callers can use the URL. Returns None (server falls back to the URL)."""
+    return None
+
+
+def team_logo_url(team_id: int) -> str | None:
+    return f"https://images.fotmob.com/image_resources/logo/teamlogo/{int(team_id)}.png" if team_id else None
+
+
+# ---- prewarm / relay no-ops (FotMob fetches directly; there is no relay cache) --
+def prewarm(eid, *a, **k):
+    return None
+
+
+def prewarm_players(eid, player_ids=None, *a, **k):
+    return None
+
+
+def prewarm_preview(eid, home_id=None, away_id=None, *a, **k):
+    return None
+
+
+def prewarm_team(tid, *a, **k):
+    return None
+
+
+def queue_pending(limit: int = 40):
+    return []
+
+
+def queue_has(prefix: str) -> bool:
+    return False
+
+
+def cache_put(items):
+    return 0
+
+
+def venue(eid, warm: bool = False):
+    g = (_md(eid) or {}).get("general") or {}
+    ib = ((_md(eid) or {}).get("content") or {}).get("matchFacts", {}).get("infoBox") or {}
+    st = (ib.get("Stadium") or {})
+    return {"name": st.get("name"), "city": st.get("city")} if st.get("name") else None
