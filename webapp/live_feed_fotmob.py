@@ -630,19 +630,21 @@ def fixture_preview(eid: int) -> dict:
     if not h.get("available") or not h.get("home_id"):
         return {"available": False, "error": "Fixture not found."}
     hid, aid = h["home_id"], h["away_id"]
-    h2h = (((_md(eid) or {}).get("content") or {}).get("h2h") or {}).get("summary")
+    summ = (((_md(eid) or {}).get("content") or {}).get("h2h") or {}).get("summary")
+    h2h = ({"home_wins": summ[0], "draws": summ[1], "away_wins": summ[2]}
+           if isinstance(summ, list) and len(summ) == 3 else None)
     m = _model(eid)
-    pred = {"available": True, **m["consensus"], "source": "model"} if m else {"available": False}
-    return {"available": True, "event_id": eid,
-            "home": h["home"], "away": h["away"], "home_id": hid, "away_id": aid,
-            "home_country": h.get("home_country"), "away_country": h.get("away_country"),
-            "kickoff_ts": h.get("start_ts"), "competition": h.get("competition"),
-            "prediction": pred,
-            "h2h": {"home_wins": (h2h or [None, None, None])[0] if h2h else None,
-                    "draws": (h2h or [None, None, None])[1] if h2h else None,
-                    "away_wins": (h2h or [None, None, None])[2] if h2h else None},
-            "home_form": _form_for(hid), "away_form": _form_for(aid),
-            "home_squad": _squad_names(hid), "away_squad": _squad_names(aid)}
+    return {
+        "available": True, "pending": False, "event_id": eid,
+        "competition": h.get("competition"), "round": h.get("round"),
+        "kickoff_ts": h.get("start_ts"), "status": h.get("status"),
+        "home": {"name": h["home"], "id": hid, "country": h.get("home_country"),
+                 "national": h.get("home_national"), "recent": _form_for(hid), "squad": _squad_names(hid)},
+        "away": {"name": h["away"], "id": aid, "country": h.get("away_country"),
+                 "national": h.get("away_national"), "recent": _form_for(aid), "squad": _squad_names(aid)},
+        "prediction": m["consensus"] if m else None,
+        "h2h": h2h,
+    }
 
 
 def player_club(pid: int) -> dict:
