@@ -17,6 +17,7 @@ from pipeline.load_live_fotmob import NAT_ISO, COVERED, QUAL
 _auth = FotmobAuth()
 _CACHE: dict = {}                                    # matchId -> (expires, matchDetails)
 _TTL_LIVE = 20                                       # seconds
+CACHE_MODE = False                                   # FotMob fetches directly; no relay cache
 
 
 def _md(eid: int) -> dict | None:

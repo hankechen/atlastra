@@ -65,6 +65,12 @@ def _int(v, default=0):
     except (TypeError, ValueError):
         return default
 from webapp import live_feed  # noqa: E402
+# FotMob answers from a datacenter IP (SofaScore doesn't), so with ATLASTRA_FOTMOB=1
+# the whole match-detail/national-team/preview surface is served from FotMob on the
+# server — no residential proxy, no Mac relay. The module is a drop-in for live_feed.
+FOTMOB = os.environ.get("ATLASTRA_FOTMOB") == "1"
+if FOTMOB:
+    from webapp import live_feed_fotmob as live_feed  # noqa: F811, E402
 from webapp import scout_ai  # noqa: E402
 from webapp import admin  # noqa: E402
 from webapp import seo  # noqa: E402
@@ -84,7 +90,9 @@ LIVE_REFRESH = os.environ.get("ATLASTRA_NO_LIVE_REFRESH") != "1"
 # host's datacenter IP is bot-blocked). When an ingest token is set, the server
 # must be read-write to accept those writes even with the local refresher off.
 INGEST_TOKEN = os.environ.get("ATLASTRA_INGEST_TOKEN") or None
-DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN)
+# FotMob mode runs a server-side refresher that writes live_matches, so open the DB
+# read-write for it too.
+DB_READ_ONLY = not (LIVE_REFRESH or INGEST_TOKEN or FOTMOB)
 seo.configure(DB_READ_ONLY)                    # align the sitemap/meta DB reads with the server's mode
 
 # Fully-enriched fixture previews are expensive (name-matching ~60 squad players to
@@ -682,6 +690,18 @@ def _live_refresher():
     fixtures); the cheap in-play overlay in between. Paces itself -- ~25s while
     games are live, slower when idle. Set ATLASTRA_NO_LIVE_REFRESH=1 to disable."""
     import time
+    if FOTMOB:
+        # FotMob path: rebuild live_matches from FotMob (server-side, no proxy/Mac).
+        from pipeline import load_live_fotmob as fm
+        LIVE_POLL = int(os.environ.get("ATLASTRA_LIVE_POLL", "45"))
+        IDLE_POLL = int(os.environ.get("ATLASTRA_IDLE_POLL", "300"))
+        n_live = 0
+        while True:
+            try:
+                _, n_live = fm.refresh()
+            except Exception as e:                 # noqa: BLE001
+                print(f"fotmob refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+            time.sleep(LIVE_POLL if n_live else IDLE_POLL)
     from pipeline import load_live as live
     # Gentle cadence so a single (proxy) IP doesn't trip SofaScore's per-IP rate
     # limit: the live experience rides on the cheap 1-call overlay; the heavy
@@ -753,9 +773,9 @@ if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
     admin.start_writer()
     print("admin usage log: on (buffered writer -> /admin dashboard)")
-    if LIVE_REFRESH:
+    if LIVE_REFRESH or FOTMOB:
         threading.Thread(target=_live_refresher, daemon=True).start()
-        print("live refresher: on (read-write DB; ATLASTRA_NO_LIVE_REFRESH=1 to disable)")
+        print(f"live refresher: on ({'FotMob' if FOTMOB else 'SofaScore'}, read-write DB)")
     if live_feed.CACHE_MODE:
         threading.Thread(target=_preview_warmer, daemon=True).start()
         print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")
