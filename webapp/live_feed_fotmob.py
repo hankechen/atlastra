@@ -395,6 +395,33 @@ def _rating(team_id, national, rank):
     return _form_rating(team_id)
 
 
+def _quality(eid, side, team_id):
+    """Individual-squad quality: the published XI's total market value (best signal,
+    live/near-kickoff), else the team's top-players' average rating (always available
+    pre-match). Returns (kind, value) or None."""
+    lu = ((_md(eid) or {}).get("content") or {}).get("lineup") or {}
+    mv = (lu.get(side + "Team") or {}).get("totalStarterMarketValue")
+    if mv:
+        return ("mv", mv)
+    tp = ((_team(team_id) or {}).get("overview") or {}).get("topPlayers") or {}
+    ratings = [p.get("value") for p in ((tp.get("byRating") or {}).get("players") or [])[:5]
+               if p.get("value")]
+    return ("rt", sum(ratings) / len(ratings)) if ratings else None
+
+
+def _quality_elos(eid, hid, aid):
+    """(home, away) individual-quality Elo on a comparable scale, or (None, None) if the
+    two teams don't share a signal type (so we never mix market value vs ratings)."""
+    hq, aq = _quality(eid, "home", hid), _quality(eid, "away", aid)
+    if not hq or not aq or hq[0] != aq[0]:
+        return None, None
+    if hq[0] == "mv":                                # squad market value (€) -> log Elo
+        f = lambda v: 1350.0 + 130.0 * _math.log10(max(v, 1) / 1e6)
+    else:                                            # avg top-player rating -> Elo
+        f = lambda v: 1400.0 + (v - 6.8) * 250.0
+    return f(hq[1]), f(aq[1])
+
+
 def _pois(k, lam):
     return _math.exp(-lam) * lam ** k / _math.factorial(k)
 
@@ -408,6 +435,11 @@ def _model(eid):
         return None
     hr = _rating(h["home_id"], h["home_national"], teams[0].get("fifaRank"))
     ar = _rating(h["away_id"], h["away_national"], teams[1].get("fifaRank"))
+    # factor in INDIVIDUAL squad quality (XI market value / top-players' ratings), not
+    # just team results -- blended 40% with the form/rank signal
+    hq, aq = _quality_elos(eid, h["home_id"], h["away_id"])
+    if hq is not None:
+        hr, ar = 0.6 * hr + 0.4 * hq, 0.6 * ar + 0.4 * aq
     adv = 0.20 * (0.4 if h["home_national"] else 1.0)     # WC venues ~neutral
     sup = max(-2.5, min(2.5, (hr - ar) / 250.0))
     hx = max(0.25, 1.35 + sup / 2 + adv)
