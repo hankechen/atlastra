@@ -1779,3 +1779,15 @@ html.light .cmt-sort.active{color:var(--accent)}
 
 /* The Feed — narrow, timeline-style column */
 .feed-wrap{max-width:640px}
+
+/* Coach / manager profile */
+.coach-career .cc-row,.coach-trophies .ct-row{display:flex;align-items:center;justify-content:space-between;padding:11px 2px;border-bottom:1px solid var(--border)}
+.coach-career .cc-row:last-child,.coach-trophies .ct-row:last-child{border-bottom:none}
+.cc-team{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px}
+.cc-when{color:var(--muted);font-size:13px;font-weight:500;white-space:nowrap}
+.cc-now{color:var(--green)}
+.ct-comp{display:flex;flex-direction:column}.ct-comp b{font-size:14px}.ct-comp span{color:var(--muted);font-size:12px}
+.ct-count{font-weight:800;color:var(--accent2);font-size:15px}
+/* clickable manager tag in lineups */
+.lp-mgr-lk{cursor:pointer;text-decoration:none}
+.lp-mgr-lk:hover{color:var(--accent2);text-decoration:underline}

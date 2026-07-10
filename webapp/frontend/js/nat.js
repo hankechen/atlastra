@@ -71,7 +71,9 @@ function render(d) {
     ? flagEmoji(HOME_NATION[d.name]) : flagISO2(d.country_code)) || '';
   document.getElementById('crumb').textContent = d.name;
   document.getElementById('natName').innerHTML = `${flag} ${esc(d.name)}`;
-  document.getElementById('natSub').textContent = d.manager ? `👔 ${d.manager}` : '';
+  document.getElementById('natSub').innerHTML = d.manager
+    ? `👔 ${d.manager_id ? `<a href="/coach.html?id=${d.manager_id}" title="Career & trophies">${d.manager}</a>` : d.manager}`
+    : '';
 
   // Follow (stored among teams so live alerts + "Teams you follow" pick it up;
   // isNat/natId let the profile link it back to this page) + profile Favourite.

@@ -159,8 +159,10 @@ def _lineup_side(team: dict, subs_evts: dict) -> dict:
                 "subbed_out": subs_evts.get(pid, {}).get("out")}
     starters = [row(p, True) for p in (team.get("starters") or [])]
     substitutes = [row(p, False) for p in (team.get("subs") or [])]
+    coach = team.get("coach") or {}
     return {"formation": team.get("formation"), "starting_xi": starters,
-            "substitutes": substitutes, "manager": (team.get("coach") or {}).get("name")}
+            "substitutes": substitutes, "manager": coach.get("name"),
+            "manager_id": coach.get("id")}
 
 
 def _sub_events(d: dict) -> dict:
@@ -593,12 +595,13 @@ def national_team(team_id: int) -> dict:
     if not det.get("name"):
         return {"available": False}
     ov = t.get("overview") or {}
-    squad, manager = [], None
+    squad, manager, manager_id = [], None, None
     for g in ((t.get("squad") or {}).get("squad")) or []:
         title = g.get("title")
         for m in g.get("members") or []:
             if title == "coach":
-                manager = manager or m.get("name")
+                if manager is None:
+                    manager, manager_id = m.get("name"), m.get("id")
             else:
                 squad.append({"id": m.get("id"), "name": m.get("name"),
                               "position": _SQUAD_POS.get(title), "number": m.get("shirtNumber")})
@@ -627,6 +630,7 @@ def national_team(team_id: int) -> dict:
             break
     return {"available": True, "id": team_id, "name": det.get("name"),
             "country_code": NAT_ISO.get(det.get("name")), "manager": manager,
+            "manager_id": manager_id,
             "latest_xi": latest_xi, "results": results, "fixtures": fixtures, "squad": squad}
 
 
@@ -677,6 +681,41 @@ def fixture_preview(eid: int) -> dict:
         "prediction": m["consensus"] if m else None,
         "h2h": h2h,
     }
+
+
+def coach(coach_id: int) -> dict:
+    """A coach/manager's profile — coaching career (teams managed, with dates) and
+    trophies — from FotMob's playerData endpoint (coaches share the player id space)."""
+    try:
+        d = _auth.get(f"/api/data/playerData?id={int(coach_id)}")
+    except Exception:                                # noqa: BLE001
+        return {"available": False}
+    if not d or not d.get("name"):
+        return {"available": False}
+    ci = ((d.get("careerHistory") or {}).get("careerItems") or {}).get("coach") or {}
+    career = []
+    for e in (ci.get("teamEntries") or []):
+        career.append({"team": e.get("team"), "team_id": e.get("teamId"),
+                       "start": (e.get("startDate") or "")[:10] or None,
+                       "end": (e.get("endDate") or "")[:10] or None,
+                       "active": bool(e.get("active"))})
+    career.sort(key=lambda c: c["start"] or "", reverse=True)
+    trophies = []
+    for t in ((d.get("trophies") or {}).get("playerTrophies") or []):
+        for tour in (t.get("tournaments") or []):
+            won = tour.get("seasonsWon") or []
+            if won:
+                trophies.append({"team": t.get("teamName"), "competition": tour.get("leagueName"),
+                                 "count": len(won), "seasons": won})
+    trophies.sort(key=lambda x: x["count"], reverse=True)
+    pt = d.get("primaryTeam") or {}
+    pi = d.get("playerInformation") or []
+    ctry = next((x.get("value", {}).get("fallback") for x in pi
+                 if x.get("title") == "Country" or x.get("icon", {}).get("id") == "flag"), None)
+    return {"available": True, "id": int(coach_id), "name": d.get("name"),
+            "photo": f"https://images.fotmob.com/image_resources/playerimages/{int(coach_id)}.png",
+            "country": ctry, "current_team": pt.get("teamName"), "current_team_id": pt.get("teamId"),
+            "career": career, "trophies": trophies}
 
 
 def player_club(pid: int) -> dict:

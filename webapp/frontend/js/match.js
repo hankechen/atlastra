@@ -216,7 +216,9 @@ async function loadPrediction() {
 }
 
 // ---- Lineups (formation pitch) ----
-const mgrTag = (name) => name ? `<span class="lp-mgr" title="Manager">👔 ${esc(name)}</span>` : '';
+const mgrTag = (name, id) => !name ? ''
+  : id ? `<a class="lp-mgr lp-mgr-lk" href="/coach.html?id=${id}" title="${esc(name)} — career &amp; trophies">👔 ${esc(name)}</a>`
+       : `<span class="lp-mgr" title="Manager">👔 ${esc(name)}</span>`;
 const _surname = (n) => { const p = String(n || '').trim().split(' '); return p.length > 1 ? p[p.length - 1] : n; };
 // substitution indicators from the incidents feed: ▲ came on / ▼ went off (+ minute).
 function subBadges(p) {
@@ -283,7 +285,7 @@ function lineupSideList(s, label) {
     <span class="lu-nm">${esc(p.name)}${p.atlas_rating != null ? `<span class="lu-ar${p.atlas_est ? ' est' : ''}" title="${p.atlas_est ? 'Estimated Atlastra rating' : 'Atlastra rating (best of League/UCL)'}">${p.atlas_est ? '~' : ''}${p.atlas_rating}</span>` : ''}${subBadges(p)}</span><span class="lu-pos">${esc(p.position || '')}</span>
     ${p.rating != null ? `<span class="ratingchip sm" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : ''}</div>`;
   return `<section class="card lu-col">
-    <div class="card-h"><h3>${esc(label)}</h3><span class="see">${[mgrTag(s.manager), esc(s.formation || '')].filter(Boolean).join(' · ')}</span></div>
+    <div class="card-h"><h3>${esc(label)}</h3><span class="see">${[mgrTag(s.manager, s.manager_id), esc(s.formation || '')].filter(Boolean).join(' · ')}</span></div>
     ${(s.starting_xi || []).map(row).join('') || '<div class="placeholder-note">No starting XI.</div>'}
     ${(s.substitutes || []).length ? `<div class="lu-sub-h">Substitutes</div>${s.substitutes.map(row).join('')}` : ''}
   </section>`;
@@ -416,14 +418,14 @@ async function loadLineups(isRefresh) {
                   + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');
       body().innerHTML = note + bar + `
         <section class="card">
-          <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b>${mgrTag(d.away?.manager)}</div>
+          <div class="lp-head a"><span>${esc(head?.away || 'Away')}</span><b>${esc(d.away?.formation || '')}</b>${mgrTag(d.away?.manager, d.away?.manager_id)}</div>
           <div class="lineup-pitch">
             <span class="lp-mid"></span><span class="lp-circle"></span><span class="lp-spot"></span>
             <span class="lp-box top"></span><span class="lp-box bot"></span>
             <span class="lp-six top"></span><span class="lp-six bot"></span>
             ${chips}
           </div>
-          <div class="lp-head h">${mgrTag(d.home?.manager)}<b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
+          <div class="lp-head h">${mgrTag(d.home?.manager, d.home?.manager_id)}<b>${esc(d.home?.formation || '')}</b><span>${esc(head?.home || 'Home')}</span></div>
         </section>
         <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;margin-top:14px">
           ${subsCol(d.home, head?.home || 'Home')}${subsCol(d.away, head?.away || 'Away')}</div>`;

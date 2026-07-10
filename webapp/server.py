@@ -289,6 +289,8 @@ def api(path: str, q: dict) -> dict | list:
         if isinstance(r, dict) and r.get("available") is False:
             r["pending"] = live_feed.queue_has(f"/player/{pid}")
         return r
+    if path == "/api/coach":                  # coach/manager career + trophies (FotMob)
+        return getattr(live_feed, "coach", lambda _: {"available": False})(int(q.get("id", [0])[0]))
     if path == "/api/scout_report":           # gather data (DB), then generate via Claude
         with SoccerDB(read_only=DB_READ_ONLY) as d:
             data = d.web_player(q.get("name", ["Pedri"])[0], q.get("career_stat", ["xa"])[0],
