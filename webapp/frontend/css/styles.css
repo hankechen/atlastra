@@ -39,7 +39,7 @@ a{color:inherit;text-decoration:none}
 /* layout */
 .app{display:grid; grid-template-columns:var(--sb) 1fr; min-height:100vh}
 .sidebar{background:var(--bg2); border-right:2px solid var(--border); padding:20px 14px 14px;
-  position:sticky; top:0; height:100vh; display:flex; flex-direction:column}
+  position:sticky; top:0; height:100vh; height:100dvh; display:flex; flex-direction:column}
 .main{padding:0 26px 40px; max-width:1640px}
 
 /* sidebar */
@@ -1631,7 +1631,11 @@ html.light .cmt-sort.active{color:var(--accent)}
   .main{min-width:0}
   .main .grid>*{min-width:0}
   /* sidebar becomes a slide-in drawer toggled by the hamburger */
-  .sidebar{position:fixed;top:0;left:0;z-index:60;width:min(286px,85vw);height:100vh;
+  /* height:100dvh (not 100vh) so the drawer fits mobile Safari's VISIBLE area -- 100vh
+     runs behind Safari's bottom toolbar and hid the footer "Sign in" button. Extra
+     bottom padding clears the home-indicator safe area so the button is fully tappable. */
+  .sidebar{position:fixed;top:0;left:0;z-index:60;width:min(286px,85vw);height:100vh;height:100dvh;
+    padding-bottom:calc(14px + env(safe-area-inset-bottom));
     transform:translateX(-100%);transition:transform .22s ease;box-shadow:6px 0 30px rgba(0,0,0,.5)}
   body.sb-open .sidebar{transform:translateX(0)}
   body.sb-open{overflow:hidden}
