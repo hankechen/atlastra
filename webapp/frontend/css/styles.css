@@ -1772,3 +1772,6 @@ html.light .cmt-sort.active{color:var(--accent)}
   html.sb-collapsed .sbc-ic{transform:rotate(180deg)}   /* points » to expand */
 }
 @media (max-width: 820px){ .sb-collapse{display:none} }
+
+/* The Feed — narrow, timeline-style column */
+.feed-wrap{max-width:640px}

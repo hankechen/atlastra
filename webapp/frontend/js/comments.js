@@ -40,7 +40,7 @@
         <span class="cmt-av">${avatarHTML(null, Auth.user.username)}</span>
         <div class="cmt-boxmain">
           <textarea id="cmtInput" rows="2" maxlength="1500"
-            placeholder="Share your take${opts.subject ? ' on ' + esc(opts.subject) : ''}…"></textarea>
+            placeholder="${esc(opts.placeholder || ('Share your take' + (opts.subject ? ' on ' + opts.subject : '')))}…"></textarea>
           <div class="cmt-actions">
             <span class="cmt-err" id="cmtErr"></span>
             <button class="btn btn-primary btn-sm" id="cmtPost">Post</button>

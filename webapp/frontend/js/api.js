@@ -562,6 +562,7 @@ const ICONS = {
   teams: '<path d="M12 3l7 2.5v6.2c0 4.2-3 7.1-7 8.8-4-1.7-7-4.6-7-8.8V5.5z"/>',
   compare: '<path d="M4 9h13M14 6l3 3-3 3M20 15H7M10 12l-3 3 3 3"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16 16"/>',
+  feed: '<path d="M20 4H4a1.5 1.5 0 00-1.5 1.5v9A1.5 1.5 0 004 16h4v4l4.5-4H20a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0020 4z"/>',
   rankings: '<path d="M5 20v-5M10 20v-9M15 20v-6M20 20V7"/>',
   profile: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.4 18.5c1.1-2.2 3.1-3.3 5.6-3.3s4.5 1.1 5.6 3.3"/>',
   myplayers: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19c0-3.1 2.7-4.7 6-4.7s6 1.6 6 4.7"/><path d="M16 6.2a3 3 0 010 5.6M21 19c0-2.4-1.6-3.9-3.7-4.4"/>',
@@ -603,6 +604,7 @@ const NAV_MAIN = [
   ]],
   ['Champions League', 'ucl', '/ucl.html'],
   ['World Cup', 'worldcup', '/worldcup.html'],
+  ['Feed', 'feed', '/feed.html'],
   ['Search', 'search', '/search.html'],
 ];
 const NAV_ANALYTICS = [
