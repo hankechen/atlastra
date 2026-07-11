@@ -9,7 +9,8 @@ fetch. FotMob answers 200 from a datacenter IP, so this runs on the server 24/7.
 """
 import re
 import time
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone
 
 from pipeline.fotmob_auth import FotmobAuth
 from pipeline.load_live_fotmob import NAT_ISO, COVERED, QUAL
@@ -716,6 +717,113 @@ def coach(coach_id: int) -> dict:
             "photo": f"https://images.fotmob.com/image_resources/playerimages/{int(coach_id)}.png",
             "country": ctry, "current_team": pt.get("teamName"), "current_team_id": pt.get("teamId"),
             "career": career, "trophies": trophies}
+
+
+# --- Top Highlights --------------------------------------------------------
+# No global "top videos" endpoint exists, so we aggregate per-match: gather
+# finished matches in a window, pull each match's highlight clip (thumbnail +
+# video URL), rank by competition importance + goals + recency, take the top N.
+# A finished match's highlight never changes, so we cache it forever per id.
+
+# competition importance (lower = more important) — mirrors live.js compRank
+_COMP_RANK = {77: 0, 50: 1, 44: 2, 42: 3, 47: 4, 87: 5, 55: 6, 54: 7, 53: 8}
+_HL_CACHE: dict[int, dict | None] = {}                 # match_id -> clip | None (permanent)
+
+_YT_RE = re.compile(r"(?:youtu\.be/|youtube\.com/(?:watch\?v=|embed/|v/|shorts/))([\w-]{11})")
+
+
+def _yt_embed(url: str):
+    """A youtube.com/embed URL if `url` is a YouTube link, else None (only these
+    can play inline; FIFA.com and other sources open in a new tab)."""
+    m = _YT_RE.search(url or "")
+    return f"https://www.youtube.com/embed/{m.group(1)}" if m else None
+
+
+def _match_highlight(mid: int) -> dict | None:
+    """The highlight clip for a finished match (cached permanently), or None."""
+    if mid in _HL_CACHE:
+        return _HL_CACHE[mid]
+    res = None
+    try:
+        mf = ((_md(mid) or {}).get("content") or {}).get("matchFacts") or {}
+        hl = mf.get("highlights") or {}
+        if hl.get("url"):
+            res = {"url": hl["url"], "image": hl.get("image"), "source": hl.get("source")}
+    except Exception:                                    # noqa: BLE001
+        res = None
+    _HL_CACHE[mid] = res
+    return res
+
+
+def _goals_from(m: dict) -> int:
+    h = _num((m.get("home") or {}).get("score"))
+    a = _num((m.get("away") or {}).get("score"))
+    return int((h or 0) + (a or 0))
+
+
+def highlights(period: str = "day", limit: int = 10) -> dict:
+    """Top highlight clips of the day/week across covered competitions, ranked by
+    competition importance, then goals, then recency."""
+    days = 7 if period == "week" else 1
+    today = date.today()
+    cands, seen = [], set()
+    for delta in range(0, days + 1):                     # today back `days` days
+        d = today - timedelta(days=delta)
+        try:
+            data = _auth.get(f"/api/data/matches?date={d:%Y%m%d}")
+        except Exception:                                # noqa: BLE001
+            continue
+        for L in (data.get("leagues") or []):
+            pid = L.get("primaryId")
+            meta = COVERED.get(pid) or QUAL.get(pid)
+            if not meta:
+                continue
+            key, name, group = meta
+            for m in (L.get("matches") or []):
+                st = m.get("status") or {}
+                mid = m.get("id")
+                if not st.get("finished") or mid in seen:
+                    continue
+                seen.add(mid)
+                ts = m.get("timeTS")
+                cands.append({
+                    "m": m, "pid": pid, "competition": name, "group": group,
+                    "goals": _goals_from(m),
+                    "ts": int(ts / 1000) if ts else 0,
+                    "qual": pid in QUAL,
+                })
+    # rank first (cheap), then fetch highlights only for the top candidates
+    cands.sort(key=lambda c: (_COMP_RANK.get(c["pid"], 99) + (10 if c["qual"] else 0),
+                              -c["goals"], -c["ts"]))
+    top = cands[:max(limit * 3, 24)]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        hls = list(pool.map(lambda c: _match_highlight(c["m"].get("id")), top))
+    clips = []
+    for c, hl in zip(top, hls):
+        if not hl:
+            continue
+        m = c["m"]
+        home, away = m.get("home") or {}, m.get("away") or {}
+        intl = c["group"] == "International"
+        hs, as_ = _num(home.get("score")), _num(away.get("score"))
+        clips.append({
+            "event_id": m.get("id"),
+            "competition": c["competition"],
+            "round": ("Qualification" if c["qual"]
+                      else _round_name(m.get("tournamentStage"))),
+            "kickoff_ts": c["ts"],
+            "home": home.get("name"), "home_id": home.get("id"),
+            "home_cc": NAT_ISO.get(home.get("name")) if intl else None,
+            "away": away.get("name"), "away_id": away.get("id"),
+            "away_cc": NAT_ISO.get(away.get("name")) if intl else None,
+            "home_score": int(hs) if hs is not None else None,
+            "away_score": int(as_) if as_ is not None else None,
+            "thumbnail": hl["image"], "url": hl["url"],
+            "source": hl["source"], "embed": _yt_embed(hl["url"]),
+        })
+        if len(clips) >= limit:
+            break
+    return {"available": True, "period": period, "clips": clips}
 
 
 def player_club(pid: int) -> dict:

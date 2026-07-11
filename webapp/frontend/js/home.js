@@ -143,3 +143,27 @@ setInterval(() => { if (!document.hidden) loadLiveWidget(); }, 30000);
   });
   loadStandings('ENG-Premier League');
 })();
+
+// Top Highlights strip — the day's best clips (falls back to the week if today's
+// slate is empty). Card thumbnails open the clip; the header links to the full page.
+(async () => {
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  let r;
+  try { r = await api('/api/highlights?period=day'); } catch { return; }
+  let clips = (r && r.clips) || [];
+  if (clips.length < 3) {                       // thin day → widen to the week
+    try { const w = await api('/api/highlights?period=week'); if (w && w.clips && w.clips.length > clips.length) clips = w.clips; } catch {}
+  }
+  if (!clips.length) return;
+  const strip = document.getElementById('hlHome');
+  strip.innerHTML = clips.slice(0, 4).map(c => {
+    const thumb = c.thumbnail ? `<img src="${esc(c.thumbnail)}" alt="" loading="lazy">` : '<div class="hs-noimg"></div>';
+    const score = (c.home_score ?? '') + '–' + (c.away_score ?? '');
+    return `<a class="hs-card" href="${esc(c.url)}" target="_blank" rel="noopener">
+        <div class="hs-media">${thumb}<span class="hl-play">▶</span></div>
+        <div class="hs-cap"><span class="hs-comp">${esc(c.competition)}</span>
+          <span class="hs-mt">${esc(c.home)} <b>${score}</b> ${esc(c.away)}</span></div>
+      </a>`;
+  }).join('');
+  document.getElementById('hlCard').style.display = '';
+})();

@@ -291,6 +291,11 @@ def api(path: str, q: dict) -> dict | list:
         return r
     if path == "/api/coach":                  # coach/manager career + trophies (FotMob)
         return getattr(live_feed, "coach", lambda _: {"available": False})(int(q.get("id", [0])[0]))
+    if path == "/api/highlights":             # top clips of the day/week (FotMob, aggregated)
+        period = q.get("period", ["day"])[0]
+        period = period if period in ("day", "week") else "day"
+        return getattr(live_feed, "highlights",
+                       lambda **k: {"available": False, "clips": []})(period=period)
     if path == "/api/scout_report":           # gather data (DB), then generate via Claude
         with SoccerDB(read_only=DB_READ_ONLY) as d:
             data = d.web_player(q.get("name", ["Pedri"])[0], q.get("career_stat", ["xa"])[0],

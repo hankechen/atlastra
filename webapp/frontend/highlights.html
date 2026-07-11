@@ -3,11 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atlastra — Find the Next…</title>
+<title>Atlastra — Top Highlights</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/styles.css?v=50">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -18,16 +17,27 @@
       <div class="tb-icons"><span class="badge" data-n="3">🔔</span><div class="avatar"></div></div>
     </div>
 
-    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Find the Next…</b></div>
     <div class="page-head">
-      <div><h2>Find the Next…</h2><p>Pick a legend and Atlastra finds the active players whose statistical style is the closest match — same shape-similarity as the live Similar Players engine.</p></div>
+      <div><h2>Top Highlights</h2><p>The best clips from finished matches, ranked by competition and drama. Tap a card to watch. <span id="updated" class="muted"></span></p></div>
+      <div class="seg" id="periodTabs">
+        <button class="seg-b on" data-p="day">Today</button>
+        <button class="seg-b" data-p="week">This Week</button>
+      </div>
     </div>
 
-    <section class="card"><div class="card-h"><h3>Choose a legend</h3></div><div id="legends" class="fn-legends"></div></section>
-    <div id="fn-out"></div>
+    <div id="grid" class="hl-grid"></div>
   </main>
 </div>
+
+<div id="hlModal" class="hl-modal" hidden>
+  <div class="hl-modal-bd" id="hlModalBd">
+    <button class="hl-close" id="hlClose" aria-label="Close">✕</button>
+    <div id="hlPlayer" class="hl-player"></div>
+    <div id="hlCap" class="hl-cap"></div>
+  </div>
+</div>
+
 <script src="/js/api.js?v=21"></script>
-<script src="/js/findnext.js?v=1"></script>
+<script src="/js/highlights.js?v=2"></script>
 </body>
 </html>

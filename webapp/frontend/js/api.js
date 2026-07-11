@@ -587,6 +587,7 @@ const ICONS = {
   target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
   dnamap: '<path d="M3.5 4v16.5H20"/><circle cx="8" cy="15.5" r="1.4"/><circle cx="11.5" cy="10" r="1.4"/><circle cx="16" cy="13" r="1.4"/><circle cx="18.5" cy="6.5" r="1.4"/>',
   card: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.5" cy="11" r="2.2"/><path d="M5.5 16.4c.4-1.5 1.6-2.3 3-2.3s2.6.8 3 2.3"/><path d="M14.5 9.5h4M14.5 13h4M14.5 16.2h2.5"/>',
+  highlights: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10 9.2v5.6l4.7-2.8z" fill="currentColor" stroke="none"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -594,6 +595,7 @@ const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="curr
 // children: nested [label, icon, href] tools shown indented under the parent.
 const NAV_MAIN = [
   ['Home', 'home', '/index.html'], ['Live Matches', 'live', '/live.html', 'live'],
+  ['Highlights', 'highlights', '/highlights.html'],
   ['Players', 'players', '/players.html', null, [
     ['Compare', 'compare', '/compare.html'],
     ['Scout', 'scout', '/scout.html'],
