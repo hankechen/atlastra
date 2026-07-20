@@ -6,7 +6,7 @@
 <title>Atlastra — Top Highlights</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=50">
+<link rel="stylesheet" href="/css/styles.css?v=71">
 </head>
 <body>
 <div class="app">
@@ -18,11 +18,24 @@
     </div>
 
     <div class="page-head">
-      <div><h2>Top Highlights</h2><p>The best clips from finished matches, ranked by competition and drama. Tap a card to watch. <span id="updated" class="muted"></span></p></div>
+      <div><h2>Top Highlights</h2><p id="hlDesc">The best clips from finished matches, ranked by competition and drama. Tap a card to watch.</p></div>
       <div class="seg" id="periodTabs">
         <button class="seg-b on" data-p="day">Today</button>
         <button class="seg-b" data-p="week">This Week</button>
       </div>
+    </div>
+
+    <section class="card recap-card" id="recapCard" style="display:none">
+      <div class="card-h"><h3>🧠 Week in Review</h3><span class="see" id="recapMeta"></span></div>
+      <div id="recapBody" class="recap-body"></div>
+    </section>
+
+    <div class="seg seg-mode" id="modeTabs">
+      <button class="seg-b on" data-m="reels">🎬 Match Reels</button>
+      <button class="seg-b" data-m="goals">⚽ Top Goals</button>
+      <button class="seg-b" data-m="trending">🔥 Trending</button>
+      <button class="seg-b" data-m="shorts">🩳 Shorts</button>
+      <button class="seg-b" data-m="stars">⭐ Top 25</button>
     </div>
 
     <div id="grid" class="hl-grid"></div>
@@ -34,10 +47,11 @@
     <button class="hl-close" id="hlClose" aria-label="Close">✕</button>
     <div id="hlPlayer" class="hl-player"></div>
     <div id="hlCap" class="hl-cap"></div>
+    <a id="hlYt" class="hl-yt" href="#" target="_blank" rel="noopener" hidden>Open on YouTube ↗</a>
   </div>
 </div>
 
-<script src="/js/api.js?v=21"></script>
-<script src="/js/highlights.js?v=2"></script>
+<script src="/js/api.js?v=29"></script>
+<script src="/js/highlights.js?v=10"></script>
 </body>
 </html>

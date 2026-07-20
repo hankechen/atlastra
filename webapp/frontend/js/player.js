@@ -210,6 +210,100 @@ async function load(name, careerStat = 'xa', season = null) {
     document.getElementById('bigGameCard').style.display = '';
   }).catch(() => {});
 
+  // Recent Form — per-match log from FotMob (result, rating, G/A). Needs the FotMob
+  // player id, which is embedded in the photo URL (…/playerimages/<id>.png).
+  (function () {
+    const pm = /playerimages\/(\d+)\./.exec(p.photo || '');
+    if (!pm) return;
+    // Preferred foot + height (FotMob) — facts our DB doesn't carry.
+    api('/api/player_bio?pid=' + pm[1]).then((bio) => {
+      if (!bio || !bio.available) return;
+      if (bio.height) { document.getElementById('pheight').textContent = bio.height; document.getElementById('mHeight').hidden = false; }
+      if (bio.foot) { document.getElementById('pfoot').textContent = bio.foot; document.getElementById('mFoot').hidden = false; }
+    }).catch(() => {});
+    api('/api/player_form?pid=' + pm[1]).then((f) => {
+      if (!f || !f.available || !(f.matches || []).length) return;
+      const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      const rc = (r) => r >= 7.5 ? 'rt-hi' : r >= 6.5 ? 'rt-mid' : 'rt-lo';
+      const when = (ts) => ts ? new Date(ts * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+      const rows = f.matches.map((x) => {
+        const rp = x.result ? `<span class="fm-res ${x.result}">${x.result}</span>` : '';
+        const ga = [];
+        if (x.goals) ga.push(`<span title="${x.goals} goal${x.goals > 1 ? 's' : ''}">⚽ ${x.goals}</span>`);
+        if (x.assists) ga.push(`<span title="${x.assists} assist${x.assists > 1 ? 's' : ''}">🅰 ${x.assists}</span>`);
+        if (x.red) ga.push('<span class="fm-cd red" title="red card"></span>');
+        else if (x.yellow) ga.push('<span class="fm-cd yel" title="yellow card"></span>');
+        const rating = x.rating != null
+          ? `<span class="fm-rt ${rc(x.rating)}">${x.rating.toFixed(1)}</span>`
+          : (x.minutes > 0 && x.minutes < 20
+            ? '<span class="fm-nr" title="Too few minutes to be rated">Not enough mins</span>'
+            : '<span class="fm-nr" title="No match rating available">No rating</span>');
+        const link = x.event_id ? `/match.html?id=${x.event_id}` : '';
+        return `<tr class="fm-row"${link ? ` data-href="${link}"` : ''}>
+          <td class="fm-date">${when(x.date_ts)}</td>
+          <td class="fm-opp"><span class="fm-sc">${rp}${x.gf ?? ''}<i>–</i>${x.ga ?? ''}</span>
+            <span class="fm-tm">${x.home ? 'vs' : '@'} ${esc(x.opponent)}</span>
+            <span class="fm-comp">${esc(x.competition || '')}</span></td>
+          <td class="fm-ga">${ga.join(' ')}</td>
+          <td class="fm-mins">${x.minutes}'</td>
+          <td class="fm-rating">${x.motm ? '<span class="fm-motm" title="Player of the Match">★</span>' : ''}${rating}</td>
+        </tr>`;
+      }).join('');
+      document.getElementById('recentForm').innerHTML = `<div class="fm-wrap"><table class="fm-tbl"><tbody>${rows}</tbody></table></div>`;
+      const s = f.summary || {};
+      const pills = (s.form || '').split('').map((r) => `<i class="fm-pill ${r}">${r}</i>`).join('');
+      const bits = [];
+      if (s.avg_rating != null) bits.push(`Avg <b>${s.avg_rating.toFixed(2)}</b>`);
+      if (s.goals) bits.push(`${s.goals} G`);
+      if (s.assists) bits.push(`${s.assists} A`);
+      document.getElementById('formSummary').innerHTML =
+        `<span class="fm-pills">${pills}</span>${bits.length ? ' · ' + bits.join(' · ') : ''}`;
+      document.getElementById('formCard').style.display = '';
+      document.querySelectorAll('#recentForm tr[data-href]').forEach((tr) => {
+        tr.onclick = () => { location.href = tr.getAttribute('data-href'); };
+      });
+    }).catch(() => {});
+  })();
+
+  // Highlights & skills video (searched on YouTube; shown only if found)
+  api('/api/player_video?name=' + encodeURIComponent(p.name)).then((v) => {
+    if (!v || !v.available || !v.thumbnail) return;
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const link = document.getElementById('hlVid');
+    link.href = v.url;
+    link.innerHTML = `<div class="pv-thumb"><img src="${esc(v.thumbnail)}" alt="" loading="lazy"><span class="pv-play">▶</span></div>
+      <div class="pv-meta"><b>${esc(v.title || (p.name + ' — skills & goals'))}</b><span>Watch on YouTube ↗</span></div>`;
+    document.getElementById('hlVidSrc').textContent = 'YouTube';
+    document.getElementById('hlVidCard').style.display = '';
+  }).catch(() => {});
+
+  // Signature Skills — Gemini watches the player's reel and ranks their moves.
+  // First view for a player runs the analysis (~15-30s); cached forever after.
+  const sigCard = document.getElementById('sigSkillCard'), sigBox = document.getElementById('sigSkills');
+  sigCard.style.display = '';
+  sigBox.innerHTML = '<div class="sig-load">✨ Analysing highlight reel…</div>';
+  api('/api/signature_skills?name=' + encodeURIComponent(p.name)).then((s) => {
+    if (!s || !s.available || !(s.skills || []).length) { sigCard.style.display = 'none'; return; }
+    const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    sigBox.innerHTML = s.skills.map((x, i) => {
+      // Prefer a clip of THIS player doing the move (cut from their own reel);
+      // fall back to the generic example clip for the move if we don't have one.
+      // Whole feature is gated by SKILL_CLIPS_ENABLED (api.js) — off = data kept, ▶ hidden.
+      const clipsOn = (typeof SKILL_CLIPS_ENABLED === 'undefined') ? true : SKILL_CLIPS_ENABLED;
+      const own = clipsOn ? x.clip : null;
+      const generic = clipsOn && !own && typeof skillClipId === 'function' && skillClipId(x.skill);
+      const playable = own || generic;
+      const attr = own
+        ? ` data-clipurl="${esc(own)}" data-cliplabel="${esc(p.name + ' — ' + x.skill)}"`
+        : (generic ? ` data-skillclip="${esc(x.skill)}"` : '');
+      return `<div class="sig-row${playable ? ' has-clip' : ''}"${attr}>
+        <span class="sig-rk">${i + 1}</span>
+        <div class="sig-txt"><b>${esc(x.skill)}</b><span>${esc(x.note)}</span></div>
+        ${playable ? `<span class="sig-play" title="${own ? 'Watch him do it' : 'See an example'}">▶</span>` : ''}</div>`;
+    }).join('');
+    document.getElementById('sigSkillSrc').textContent = 'AI · tap a move';
+  }).catch(() => { sigCard.style.display = 'none'; });
+
   // dual ratings (League + UCL, common-metric)
   const lg = p.ratings?.league, ucl = p.ratings?.ucl;
   document.getElementById('rLeague').textContent = lg?.rating ?? '—';

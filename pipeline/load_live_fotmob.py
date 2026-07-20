@@ -117,6 +117,8 @@ def _map(m: dict, key: str, name: str, group: str, is_qual: bool):
     stype, sdesc = _status(st)
     minute = _minute(st) if stype == "inprogress" else None
     hs, as_ = _int(home.get("score")), _int(away.get("score"))
+    if stype not in ("finished", "inprogress"):         # scheduled games have no score
+        hs = as_ = None                                 # (FotMob sends 0-0 for not-started)
     winner = None
     if stype == "finished" and hs is not None and as_ is not None:
         winner = 1 if hs > as_ else 2 if as_ > hs else 3

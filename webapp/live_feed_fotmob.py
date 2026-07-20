@@ -7,8 +7,11 @@ One signed /api/data/matchDetails call per match feeds every tab (header, stats,
 lineups, shot map, timeline, players), cached briefly so opening a match is one
 fetch. FotMob answers 200 from a datacenter IP, so this runs on the server 24/7.
 """
+import json
 import re
 import time
+import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
@@ -84,6 +87,20 @@ def _round_name(raw):
     if r:
         return r
     return f"Matchday {raw}" if str(raw).isdigit() else raw   # group stage
+
+
+# Words in a round name that mean it's a single-leg knockout (can't end in a draw).
+_KO_WORDS = ("final", "quarter", "semi", "round of", "knockout", "play-off", "playoff", "1/")
+
+
+def _is_knockout(d, round_name=None):
+    """True if this match is a knockout tie (goes to ET/penalties, so no draw)."""
+    g = (d or {}).get("general") or {}
+    raw = str(g.get("leagueRoundName") or g.get("matchRound") or "").strip().lower()
+    if raw in _ROUND:                                     # "1/16","1/8","1/4","1/2","final"
+        return True
+    rn = (round_name or "").strip().lower()
+    return any(w in raw or w in rn for w in _KO_WORDS)
 
 
 def header(eid: int) -> dict:
@@ -444,29 +461,53 @@ def _model(eid):
     if hq is not None:
         hr, ar = 0.6 * hr + 0.4 * hq, 0.6 * ar + 0.4 * aq
     adv = 0.20 * (0.4 if h["home_national"] else 1.0)     # WC venues ~neutral
-    sup = max(-2.5, min(2.5, (hr - ar) / 250.0))
-    hx = max(0.25, 1.35 + sup / 2 + adv)
-    ax = max(0.25, 1.35 - sup / 2)
+    # Stronger supremacy (wider clamp + 0.65 weight vs the old 0.5) so lopsided games push
+    # the favourite's expected goals up to ~3-4 -> 3-0/4-0 scorelines become likely, not
+    # just 2-0. Even games stay ~1.4 each.
+    sup = max(-3.0, min(3.0, (hr - ar) / 230.0))
+    hx = max(0.2, 1.35 + sup * 0.65 + adv)
+    ax = max(0.2, 1.35 - sup * 0.65)
     ph = pd = pa = 0.0
-    best, bestp = (0, 0), -1.0
+    grid = []
     for i in range(9):
         for j in range(9):
             p = _pois(i, hx) * _pois(j, ax)
-            if p > bestp:
-                best, bestp = (i, j), p
+            grid.append(((i, j), p))
             if i > j:
                 ph += p
             elif i == j:
                 pd += p
             else:
                 pa += p
+    ko = _is_knockout(d, h.get("round"))
+    if ko and pd > 0:
+        # Knockout tie: it can't finish level. The drawn mass is resolved in extra time /
+        # penalties, split by each side's regulation win chance (the stronger side keeps a
+        # small edge in the shootout).
+        base = ph + pa
+        if base > 0:
+            ph += pd * ph / base
+            pa += pd * pa / base
+        else:
+            ph += pd / 2
+            pa += pd / 2
+        pd = 0.0
     tot = ph + pd + pa or 1
-    home, draw = round(ph / tot * 100), round(pd / tot * 100)
-    cons = {"home": home, "draw": draw, "away": 100 - home - draw}
+    if ko:
+        home = round(ph / tot * 100)
+        cons = {"home": home, "draw": 0, "away": 100 - home}
+    else:
+        home, draw = round(ph / tot * 100), round(pd / tot * 100)
+        cons = {"home": home, "draw": draw, "away": 100 - home - draw}
     predicted = max(cons, key=cons.get)
-    return {"consensus": cons, "predicted": predicted, "score": best,
-            "result": ("home" if best[0] > best[1] else "away" if best[1] > best[0] else "draw"),
-            "conf": round(max(ph, pd, pa) / tot * 100)}
+    # Top 3 most-likely EXACT scorelines with probabilities (shown on the match page).
+    # In a knockout, drop level scorelines — the tie can't end drawn.
+    score_grid = [x for x in grid if x[0][0] != x[0][1]] if ko else list(grid)
+    score_grid.sort(key=lambda x: -x[1])
+    scores = [{"home": i, "away": j, "pct": round(p / tot * 100)} for (i, j), p in score_grid[:3]]
+    best = score_grid[0][0]
+    return {"consensus": cons, "predicted": predicted, "score": best, "scores": scores,
+            "result": predicted, "conf": round(max(ph, pd, pa) / tot * 100)}
 
 
 def prediction(eid: int) -> dict:
@@ -482,7 +523,7 @@ def score_prediction(eid: int, consensus=None):
     if not m:
         return None
     return {"home": m["score"][0], "away": m["score"][1], "result": m["result"],
-            "result_conf": m["conf"], "live": False}
+            "result_conf": m["conf"], "scores": m["scores"], "live": False}
 
 
 # FotMob shot vocabulary -> readable, for the auto-generated Key Moments commentary
@@ -824,6 +865,648 @@ def highlights(period: str = "day", limit: int = 10) -> dict:
         if len(clips) >= limit:
             break
     return {"available": True, "period": period, "clips": clips}
+
+
+# --- Top Goals (YouTube-sourced individual goal clips) ---------------------
+# FotMob has no per-action video, but it has the DATA for every goal (scorer,
+# assist, minute, xG). We rank goals by competition + how spectacular the finish
+# was (low xG = screamer), then find each goal's clip on YouTube — those ARE
+# embeddable, so unlike the FIFA match reels they play in-page. Search results
+# for a finished goal never change, so we cache each query permanently.
+
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/122.0 Safari/537.36")
+_YT_CACHE: dict[str, list] = {}                        # query -> [videoId, ...] (permanent)
+_YT_ONLY_VIDEO = "EgIQAQ%3D%3D"                        # search filter: type = Video
+
+
+def _yt_search(query: str, want: int = 1) -> list:
+    """Top YouTube video ids for a query (keyless scrape of the results page)."""
+    if query not in _YT_CACHE:
+        ids, seen = [], set()
+        try:
+            url = (f"https://www.youtube.com/results?search_query="
+                   f"{urllib.parse.quote(query)}&sp={_YT_ONLY_VIDEO}")
+            req = urllib.request.Request(url, headers={
+                "User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9",
+                "Cookie": "CONSENT=YES+1"})              # skip the EU consent interstitial
+            html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+            for vid in re.findall(r'"videoRenderer":\{"videoId":"([\w-]{11})"', html):
+                if vid not in seen:
+                    seen.add(vid)
+                    ids.append(vid)
+                if len(ids) >= 6:
+                    break
+        except Exception:                                # noqa: BLE001 — YouTube blip -> no clip
+            ids = []
+        _YT_CACHE[query] = ids
+    return _YT_CACHE[query][:want]
+
+
+def _goal_events(mid: int) -> list:
+    """Open-play/penalty goals from a finished match (own goals excluded)."""
+    d = _md(mid) or {}
+    ev = ((d.get("content") or {}).get("matchFacts") or {}).get("events") or {}
+    out = []
+    for e in (ev.get("events") or []):
+        if e.get("type") != "Goal" or e.get("ownGoal") or e.get("isPenaltyShootoutEvent"):
+            continue
+        sm = e.get("shotmapEvent") or {}
+        xg = sm.get("expectedGoals")
+        out.append({
+            "scorer": e.get("fullName") or e.get("nameStr"),
+            "scorer_id": e.get("playerId"),
+            "assist": (e.get("assistStr") or None),
+            "minute": e.get("timeStr") or (str(e.get("time")) if e.get("time") is not None else None),
+            "is_home": bool(e.get("isHome")),
+            "xg": xg if isinstance(xg, (int, float)) else None,
+            "penalty": (sm.get("situation") == "Penalty") or (e.get("goalDescriptionKey") == "penalty"),
+        })
+    return out
+
+
+def top_goals(period: str = "day", limit: int = 12) -> dict:
+    """The best goals of the day/week with an embeddable YouTube clip each,
+    ranked by competition importance, then how spectacular the finish was."""
+    days = 7 if period == "week" else 1
+    today = date.today()
+    matches, seen = [], set()
+    for delta in range(0, days + 1):
+        d = today - timedelta(days=delta)
+        try:
+            data = _auth.get(f"/api/data/matches?date={d:%Y%m%d}")
+        except Exception:                                # noqa: BLE001
+            continue
+        for L in (data.get("leagues") or []):
+            pid = L.get("primaryId")
+            meta = COVERED.get(pid) or QUAL.get(pid)
+            if not meta:
+                continue
+            _key, name, group = meta
+            for m in (L.get("matches") or []):
+                st = m.get("status") or {}
+                mid = m.get("id")
+                if not st.get("finished") or mid in seen or not _goals_from(m):
+                    continue
+                seen.add(mid)
+                rank = _COMP_RANK.get(pid, 99) + (10 if pid in QUAL else 0)
+                matches.append({"m": m, "rank": rank, "competition": name, "group": group,
+                                "ngoals": _goals_from(m), "ts": int((m.get("timeTS") or 0) / 1000)})
+    # mine goals only from the more important matches (bounds matchDetails fetches)
+    matches.sort(key=lambda c: (c["rank"], -c["ngoals"], -c["ts"]))
+    top_m = matches[:20]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        per = list(pool.map(lambda c: _goal_events(c["m"].get("id")), top_m))
+    goals = []
+    for c, gl in zip(top_m, per):
+        m = c["m"]
+        home, away = m.get("home") or {}, m.get("away") or {}
+        intl = c["group"] == "International"
+        for g in gl:
+            if not g["scorer"]:
+                continue
+            team = home if g["is_home"] else away
+            opp = away if g["is_home"] else home
+            xg = g["xg"]
+            wow = (1 - xg) if xg is not None else 0.5     # low xG (screamer) ranks higher
+            goals.append({**g, "team": team.get("name"), "opponent": opp.get("name"),
+                          "team_cc": NAT_ISO.get(team.get("name")) if intl else None,
+                          "competition": c["competition"], "rank": c["rank"], "ts": c["ts"],
+                          "event_id": m.get("id"), "wow": wow,
+                          "worldie": xg is not None and xg < 0.06 and not g["penalty"]})
+    goals.sort(key=lambda g: (g["rank"], -g["wow"], -g["ts"]))
+    goals = goals[:limit]
+
+    def _query(g):
+        yr = datetime.utcfromtimestamp(g["ts"]).year if g["ts"] else ""
+        return f'{g["scorer"]} goal vs {g["opponent"]} {g["competition"]} {yr}'.strip()
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        vids = list(pool.map(lambda g: _yt_search(_query(g), 1), goals))
+    clips = []
+    for g, v in zip(goals, vids):
+        if not v:
+            continue
+        vid = v[0]
+        clips.append({
+            "scorer": g["scorer"], "scorer_id": g["scorer_id"], "assist": g["assist"],
+            "minute": g["minute"], "team": g["team"], "team_cc": g["team_cc"],
+            "opponent": g["opponent"], "competition": g["competition"],
+            "xg": round(g["xg"], 2) if g["xg"] is not None else None,
+            "penalty": g["penalty"], "worldie": g["worldie"], "event_id": g["event_id"],
+            "video_id": vid, "url": f"https://youtu.be/{vid}",
+            # note: no in-page embed — broadcaster/FIFA content-ID blocks embedding on
+            # most football clips (undetectable keyless), so cards open YouTube directly.
+            "embed": None,
+            "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+        })
+    return {"available": True, "period": period, "clips": _enrich_stats(clips)}
+
+
+# --- Trending (most-viewed football clips on YouTube) ----------------------
+# The closest free stand-in for "viral clips of the day" (X/Reddit are paywalled/
+# blocked). We search YouTube across football queries, keep clips uploaded within
+# the window, and rank by view count — surfacing official highlights AND viral
+# creator content (edits, skills comps). Results move, so we cache with a TTL.
+
+_TREND_QUERIES = ["football goals", "soccer skills", "football highlights",
+                  "world cup goals", "premier league goals", "football wonder goal"]
+_TREND_CACHE: dict[str, tuple] = {}                    # period -> (expiry, payload)
+_TREND_TTL = 1800                                      # 30 min
+_UNIT_DAYS = {"minute": 1 / 1440, "hour": 1 / 24, "day": 1, "week": 7, "month": 30, "year": 365}
+
+
+def _parse_views(s: str) -> int:
+    m = re.search(r'([\d,.]+)\s*(K|M|B)?\s*views', s or "")
+    if not m:
+        return 0
+    return int(float(m.group(1).replace(",", "")) * {"K": 1e3, "M": 1e6, "B": 1e9}.get(m.group(2), 1))
+
+
+def _age_days(s: str):
+    m = re.search(r'(\d+)\s*(minute|hour|day|week|month|year)s?\s*ago', s or "")
+    return int(m.group(1)) * _UNIT_DAYS[m.group(2)] if m else None
+
+
+def _yt_results(query: str, sp: str = "EgQIAxABGAE%3D") -> list:
+    """Parsed YouTube search results: id/title/views/age/etc. Default sp filters to
+    'uploaded this week'; pass sp='' for relevance-ranked all-time results."""
+    url = (f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+           + (f"&sp={sp}" if sp else ""))
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9", "Cookie": "CONSENT=YES+1"})
+        html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+    except Exception:                                    # noqa: BLE001
+        return []
+    out = []
+    for chunk in html.split('"videoRenderer":{')[1:]:
+        chunk = chunk[:4000]
+        vid = re.match(r'"videoId":"([\w-]{11})"', chunk)
+        title = re.search(r'"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"', chunk)
+        if not vid or not title:
+            continue
+        views = re.search(r'"viewCountText":\{"simpleText":"((?:[^"\\]|\\.)*)"', chunk)
+        pub = re.search(r'"publishedTimeText":\{"simpleText":"((?:[^"\\]|\\.)*)"', chunk)
+        length = re.search(r'"lengthText":\{[^}]*"simpleText":"([\d:]+)"', chunk)
+        ch = re.search(r'"ownerText":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"', chunk)
+        out.append({
+            "id": vid.group(1),
+            "title": _json_unescape(title.group(1)),
+            "views": _parse_views(views.group(1) if views else ""),
+            "age": pub.group(1) if pub else "",
+            "length": length.group(1) if length else "",
+            "channel": _json_unescape(ch.group(1)) if ch else "",
+        })
+    return out
+
+
+def _json_unescape(s: str) -> str:
+    try:
+        return json.loads('"' + s + '"')
+    except Exception:                                    # noqa: BLE001
+        return s
+
+
+# --- YouTube per-video engagement (views + likes) -------------------------- #
+# Views come free in search results, but LIKES only live on the watch page, so we
+# scrape it per video (cached 6h). NOTE: YouTube removed public DISLIKE counts in
+# Nov 2021 — there is no real dislike number to show, for any video.
+_YTSTATS_CACHE: dict[str, tuple] = {}                  # vid -> (expiry, {views,likes})
+_YTSTATS_TTL = 6 * 3600
+
+
+def _yt_stat_one(vid: str) -> dict:
+    hit = _YTSTATS_CACHE.get(vid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    stats = {"views": None, "likes": None}
+    try:
+        req = urllib.request.Request("https://www.youtube.com/watch?v=" + vid, headers={
+            "User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9", "Cookie": "CONSENT=YES+1"})
+        html = urllib.request.urlopen(req, timeout=12).read().decode("utf-8", "replace")
+        v = (re.search(r'"viewCount":\{"simpleText":"([\d,]+)', html)
+             or re.search(r'"viewCount":"(\d+)"', html))
+        if v:
+            stats["views"] = int(re.sub(r"[^\d]", "", v.group(1)))
+        lk = (re.search(r'like this video along with ([\d,]+) other people', html)
+              or re.search(r'"accessibilityText":"([\d,]+) likes"', html)
+              or re.search(r'"likeCount":"(\d+)"', html))
+        if lk:
+            stats["likes"] = int(re.sub(r"[^\d]", "", lk.group(1)))
+    except Exception:                                    # noqa: BLE001
+        pass
+    _YTSTATS_CACHE[vid] = (time.time() + _YTSTATS_TTL, stats)
+    return stats
+
+
+def _enrich_stats(clips: list) -> list:
+    """Attach fresh views/likes (from the YouTube watch page) to clips carrying a
+    video_id. Best-effort: a failed fetch just leaves that clip's stats as-is/None."""
+    ids = [c.get("video_id") for c in clips if c.get("video_id")]
+    if not ids:
+        return clips
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        stats = dict(zip(ids, pool.map(_yt_stat_one, ids)))
+    for c in clips:
+        s = stats.get(c.get("video_id"))
+        if not s:
+            continue
+        if s.get("views") is not None:
+            c["views"] = s["views"]
+        c["likes"] = s.get("likes")
+    return clips
+
+
+def trending(period: str = "week") -> dict:
+    """Most-viewed football clips uploaded within the window (day/week)."""
+    hit = _TREND_CACHE.get(period)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    max_days = 2 if period == "day" else 7
+    pool = {}
+    for q in _TREND_QUERIES:
+        for v in _yt_results(q):
+            age = _age_days(v["age"])
+            if age is not None and age <= max_days and v["id"] not in pool:
+                pool[v["id"]] = v
+    top = sorted(pool.values(), key=lambda v: -v["views"])[:15]
+    clips = [{
+        "video_id": v["id"], "title": v["title"], "channel": v["channel"],
+        "views": v["views"], "length": v["length"], "age": v["age"],
+        "url": f"https://youtu.be/{v['id']}", "embed": None,
+        "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg",
+    } for v in top]
+    out = {"available": True, "period": period, "clips": _enrich_stats(clips)}
+    _TREND_CACHE[period] = (time.time() + _TREND_TTL, out)
+    return out
+
+
+# --- Shorts (viral football skills / dribbling / edits, TikTok-style) ------
+# YouTube Shorts are the accessible stand-in for TikTok (which is captcha-walled).
+# They come back in search as `shortsLockupViewModel` (not videoRenderer), with
+# title+views inside accessibilityText. Ranked by views (skills content is
+# evergreen, so no date window). Cached 1h.
+
+_SHORTS_QUERIES = ["football skills shorts", "football dribbling shorts", "football edit shorts",
+                   "soccer nutmeg shorts", "football freestyle shorts", "football skills"]
+_SHORTS_CACHE: dict[str, tuple] = {}
+_SHORTS_TTL = 3600
+
+
+def _acc_views(s: str) -> int:
+    m = re.search(r'([\d.,]+)\s*(million|billion|thousand)?\s*views', s or "")
+    if not m:
+        return 0
+    return int(float(m.group(1).replace(",", ""))
+               * {"thousand": 1e3, "million": 1e6, "billion": 1e9}.get(m.group(2), 1))
+
+
+def _shorts_results(query: str) -> list:
+    url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(query)}"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": _UA, "Accept-Language": "en-US,en;q=0.9", "Cookie": "CONSENT=YES+1"})
+        html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+    except Exception:                                    # noqa: BLE001
+        return []
+    out = []
+    for chunk in html.split('"shortsLockupViewModel"')[1:]:
+        chunk = chunk[:1500]
+        vid = re.search(r'"videoId":"([\w-]{11})"', chunk)
+        acc = re.search(r'"accessibilityText":"((?:[^"\\]|\\.)*?)"', chunk)
+        if not vid or not acc:
+            continue
+        a = _json_unescape(acc.group(1))
+        title = re.match(r'(.*?),\s*[\d.,]+\s*(?:million|billion|thousand)?\s*views', a)
+        out.append({"id": vid.group(1), "title": title.group(1) if title else a,
+                    "views": _acc_views(a)})
+    return out
+
+
+def shorts() -> dict:
+    """Most-viewed football skills / dribbling / edit Shorts (TikTok-style)."""
+    hit = _SHORTS_CACHE.get("all")
+    if hit and hit[0] > time.time():
+        return hit[1]
+    pool = {}
+    for q in _SHORTS_QUERIES:
+        for v in _shorts_results(q):
+            if v["id"] not in pool or v["views"] > pool[v["id"]]["views"]:
+                pool[v["id"]] = v
+    top = sorted(pool.values(), key=lambda v: -v["views"])[:18]
+    clips = [{
+        "video_id": v["id"], "title": v["title"], "views": v["views"],
+        "url": f"https://www.youtube.com/shorts/{v['id']}", "embed": None,
+        "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg",
+    } for v in top]
+    out = {"available": True, "clips": _enrich_stats(clips)}
+    _SHORTS_CACHE["all"] = (time.time() + _SHORTS_TTL, out)
+    return out
+
+
+# --- Top 25 stars (reputation-ranked) + their best skills video ------------
+# Reputation isn't in our data, so this is a curated editorial list of the most
+# renowned attackers/midfielders. An "agent" fetches each one's best skills/
+# highlights video from YouTube. List + best videos are evergreen → cached 24h.
+
+_STARS = [
+    ("Harry Kane", "Bayern Munich", "ST"),
+    ("Michael Olise", "Bayern Munich", "W"),
+    ("Lamine Yamal", "Barcelona", "W"),
+    ("Kylian Mbappé", "Real Madrid", "ST"),
+    ("Declan Rice", "Arsenal", "CM"),
+    ("Ousmane Dembélé", "PSG", "FW"),
+    ("Luis Díaz", "Bayern Munich", "W"),
+    ("Khvicha Kvaratskhelia", "PSG", "W"),
+    ("Bruno Fernandes", "Manchester United", "AM"),
+    ("Vitinha", "PSG", "CM"),
+    ("Erling Haaland", "Manchester City", "ST"),
+    ("Arda Güler", "Real Madrid", "AM"),
+    ("Pedri", "Barcelona", "CM"),
+    ("Rayan Cherki", "Manchester City", "AM"),
+    ("Nico Paz", "Como", "AM"),
+    ("Raphinha", "Barcelona", "W"),
+    ("Nuno Mendes", "PSG", "LB"),
+    ("Vinícius Jr", "Real Madrid", "W"),
+    ("Julián Álvarez", "Atlético Madrid", "ST"),
+    ("Joshua Kimmich", "Bayern Munich", "CM"),
+    ("Achraf Hakimi", "PSG", "RB"),
+    ("Yan Diomande", "RB Leipzig", "W"),
+    ("Antoine Semenyo", "Bournemouth", "W"),
+    ("Jude Bellingham", "Real Madrid", "CM"),
+    ("João Neves", "PSG", "CM"),
+]
+# less-famous names need the club to disambiguate the YouTube search (e.g. two Vitinhas)
+_STARS_QUALIFY = {"Vitinha", "Nico Paz", "Yan Diomande", "João Neves", "Nuno Mendes",
+                  "Rayan Cherki", "Arda Güler", "Michael Olise"}
+_STARS_CACHE: dict[str, tuple] = {}
+_STARS_TTL = 86400                                     # 24h
+_YEAR_2025_PLUS = re.compile(r'20(2[5-9]|[3-9]\d)')    # a 2025+ year in a title
+
+
+def _skills_video(name: str, club: str | None = None) -> dict | None:
+    """Best RECENT (2025+) skills/highlights video for a player, or None. Biases the
+    search to recent uploads, then picks the first result that is actually from 2025
+    onward (by upload age or a 2025+ year in the title), falling back to the top hit."""
+    q = f"{name} {club} skills goals 2025" if club else f"{name} skills goals 2025"
+    res = _yt_results(q, sp="")                              # relevance-ranked
+    if not res:
+        return None
+
+    def recent(v):
+        ad = _age_days(v.get("age"))
+        return (ad is not None and ad <= 550) or bool(_YEAR_2025_PLUS.search(v.get("title") or ""))
+
+    return next((v for v in res if recent(v)), res[0])
+
+
+def top_stars() -> dict:
+    """The curated top-25 (by reputation, not our ratings), each with their best
+    recent (2025+) skills/highlights video (searched on YouTube)."""
+    hit = _STARS_CACHE.get("all")
+    if hit and hit[0] > time.time():
+        return hit[1]
+
+    def fetch(item):
+        idx, (name, club, pos) = item
+        v = _skills_video(name, club if name in _STARS_QUALIFY else None)
+        return {
+            "rank": idx + 1, "player": name, "club": club, "position": pos,
+            "video_id": v["id"] if v else None,
+            "title": v["title"] if v else None,
+            "url": f"https://youtu.be/{v['id']}" if v else None,
+            "embed": None,
+            "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg" if v else None,
+        }
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        clips = list(pool.map(fetch, enumerate(_STARS)))
+    clips = [c for c in clips if c["video_id"]]
+    out = {"available": True, "clips": _enrich_stats(clips)}
+    _STARS_CACHE["all"] = (time.time() + _STARS_TTL, out)
+    return out
+
+
+_PVID_CACHE: dict[str, tuple] = {}                     # name -> (expiry, payload)
+
+
+def player_video(name: str) -> dict:
+    """Best skills/highlights video for any player, searched on YouTube. Cached 24h."""
+    name = (name or "").strip()
+    if not name:
+        return {"available": False}
+    hit = _PVID_CACHE.get(name)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    v = _skills_video(name)                              # recent (2025+) skills video
+    out = ({"available": True, "player": name, "video_id": v["id"], "title": v["title"],
+            "url": f"https://youtu.be/{v['id']}",
+            "thumbnail": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg"}
+           if v else {"available": False, "player": name})
+    _PVID_CACHE[name] = (time.time() + 86400, out)
+    return out
+
+
+# --- Player recent form (FotMob per-match log) -----------------------------
+# FotMob's playerData carries a `recentMatches` list (rating, minutes, G/A, cards,
+# result) — a real game-by-game form log. We key by the FotMob player id, which the
+# profile already has embedded in the player's photo URL (playerimages/<id>.png).
+_PFORM_CACHE: dict[int, tuple] = {}                    # pid -> (expiry, payload)
+_PFORM_TTL = 3600
+
+
+def player_form(pid: int, limit: int = 8) -> dict:
+    """Recent games for a FotMob player id: opponent, result, rating, G/A, minutes."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {"available": False}
+    hit = _PFORM_CACHE.get(pid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        d = _auth.get(f"/api/data/playerData?id={pid}")
+    except Exception:                                    # noqa: BLE001
+        return {"available": False}
+    raw = (d or {}).get("recentMatches") or []
+    matches = []
+    for m in raw:
+        if not m.get("playedInMatch") or m.get("onBench"):
+            continue                                     # only games he actually featured in
+        home = m.get("isHomeTeam")
+        hs, as_ = _num(m.get("homeScore")), _num(m.get("awayScore"))
+        gf = hs if home else as_
+        ga = as_ if home else hs
+        result = None
+        if gf is not None and ga is not None:
+            result = "W" if gf > ga else ("D" if gf == ga else "L")
+        rr = (m.get("ratingProps") or {}).get("rating")
+        try:
+            rating = float(rr) if rr not in (None, "") else None
+        except (TypeError, ValueError):
+            rating = None
+        if rating is not None and rating <= 0:           # 0.0 = too few minutes to be rated
+            rating = None
+        ut = ((m.get("matchDate") or {}).get("utcTime"))
+        try:
+            ts = int(datetime.strptime(ut, "%Y-%m-%dT%H:%M:%S.%fZ")
+                     .replace(tzinfo=timezone.utc).timestamp()) if ut else None
+        except (ValueError, TypeError):
+            ts = None
+        matches.append({
+            "event_id": m.get("id"),
+            "date_ts": ts,
+            "competition": m.get("leagueName"),
+            "team": m.get("teamName"),
+            "opponent": m.get("opponentTeamName"),
+            "opponent_id": m.get("opponentTeamId"),
+            "home": bool(home),
+            "gf": int(gf) if gf is not None else None,
+            "ga": int(ga) if ga is not None else None,
+            "result": result,
+            "rating": round(rating, 1) if rating is not None else None,
+            "goals": int(_num(m.get("goals")) or 0),
+            "assists": int(_num(m.get("assists")) or 0),
+            "yellow": int(_num(m.get("yellowCards")) or 0),
+            "red": int(_num(m.get("redCards")) or 0),
+            "minutes": int(_num(m.get("minutesPlayed")) or 0),
+            "motm": bool(m.get("playerOfTheMatch")),
+        })
+    matches.sort(key=lambda x: -(x["date_ts"] or 0))
+    matches = matches[:max(1, limit)]
+    rated = [x["rating"] for x in matches if x["rating"] is not None]
+    summary = {
+        "form": "".join(x["result"] for x in matches if x["result"])[::-1],  # oldest→newest L-to-R
+        "avg_rating": round(sum(rated) / len(rated), 2) if rated else None,
+        "goals": sum(x["goals"] for x in matches),
+        "assists": sum(x["assists"] for x in matches),
+        "games": len(matches),
+    }
+    out = {"available": bool(matches), "player_id": pid,
+           "matches": matches, "summary": summary}
+    _PFORM_CACHE[pid] = (time.time() + _PFORM_TTL, out)
+    return out
+
+
+# --- Player bio (foot, height) from FotMob playerData ----------------------
+_PBIO_CACHE: dict[int, tuple] = {}                     # pid -> (expiry, payload)
+
+
+def player_bio(pid: int) -> dict:
+    """Preferred foot + height for a FotMob player id (from playerData.playerInformation).
+    Cheap facts FotMob has that our DB doesn't. Cached 24h."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {"available": False}
+    hit = _PBIO_CACHE.get(pid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        d = _auth.get(f"/api/data/playerData?id={pid}")
+    except Exception:                                    # noqa: BLE001
+        return {"available": False}
+    info = {(it.get("title") or "").lower(): it.get("value")
+            for it in ((d or {}).get("playerInformation") or [])}
+
+    def val(k):
+        v = info.get(k)
+        if isinstance(v, dict):
+            return v.get("fallback") or v.get("key") or v.get("numberValue")
+        return v
+    foot = val("preferred foot")
+    hv = info.get("height")
+    height_cm = hv.get("numberValue") if isinstance(hv, dict) else None
+    out = {"available": True, "player_id": pid,
+           "foot": (str(foot).title() if foot else None),
+           "height_cm": int(height_cm) if height_cm else None,
+           "height": (val("height") or None)}
+    _PBIO_CACHE[pid] = (time.time() + 86400, out)
+    return out
+
+
+# --- Weekly recap data -----------------------------------------------------
+# Raw facts (results, standout performers, best goals) for the AI week-in-review.
+
+def _flat_pstats(pl: dict) -> dict:
+    out = {}
+    for g in (pl.get("stats") or []):
+        for k, v in (g.get("stats") or {}).items():
+            out[k] = (v.get("stat") or {}).get("value") if isinstance(v, dict) else v
+    return out
+
+
+def week_summary_data() -> dict:
+    """Results, top-rated performers and best goals across the past 7 days."""
+    today = date.today()
+    matches, seen = [], set()
+    for delta in range(0, 8):
+        d = today - timedelta(days=delta)
+        try:
+            data = _auth.get(f"/api/data/matches?date={d:%Y%m%d}")
+        except Exception:                                # noqa: BLE001
+            continue
+        for L in (data.get("leagues") or []):
+            pid = L.get("primaryId")
+            meta = COVERED.get(pid) or QUAL.get(pid)
+            if not meta:
+                continue
+            _key, name, group = meta
+            for m in (L.get("matches") or []):
+                st = m.get("status") or {}
+                mid = m.get("id")
+                if not st.get("finished") or mid in seen:
+                    continue
+                seen.add(mid)
+                rank = _COMP_RANK.get(pid, 99) + (10 if pid in QUAL else 0)
+                matches.append({"m": m, "rank": rank, "competition": name,
+                                "ngoals": _goals_from(m), "ts": int((m.get("timeTS") or 0) / 1000)})
+    matches.sort(key=lambda c: (c["rank"], -c["ngoals"], -c["ts"]))
+
+    results = []
+    for c in matches[:14]:
+        m = c["m"]
+        h, a = m.get("home") or {}, m.get("away") or {}
+        hs, as_ = _num(h.get("score")), _num(a.get("score"))
+        results.append({
+            "competition": c["competition"],
+            "round": ("Qualification" if c["rank"] >= 10 else _round_name(m.get("tournamentStage"))),
+            "home": h.get("name"), "away": a.get("name"),
+            "home_score": int(hs) if hs is not None else None,
+            "away_score": int(as_) if as_ is not None else None})
+
+    perf = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        mds = list(pool.map(lambda c: _md(c["m"].get("id")), matches[:16]))
+    for c, d in zip(matches[:16], mds):
+        ps = ((d or {}).get("content") or {}).get("playerStats") or {}
+        h, a = c["m"].get("home") or {}, c["m"].get("away") or {}
+        for pl in ps.values():
+            f = _flat_pstats(pl)
+            r = f.get("FotMob rating")
+            if not isinstance(r, (int, float)):
+                continue
+            team = pl.get("teamName")
+            opp = a.get("name") if team == h.get("name") else h.get("name")
+            perf.append({"name": pl.get("name"), "team": team, "opponent": opp,
+                         "rating": round(r, 2), "goals": int(f.get("Goals") or 0),
+                         "assists": int(f.get("Assists") or 0), "potm": bool(pl.get("isPotm")),
+                         "competition": c["competition"]})
+    perf.sort(key=lambda p: -p["rating"])
+    top_perf, seen_p = [], set()
+    for p in perf:                                       # one row per player (their best game)
+        if p["name"] in seen_p:
+            continue
+        seen_p.add(p["name"])
+        top_perf.append(p)
+        if len(top_perf) >= 12:
+            break
+
+    goals = [{"scorer": g["scorer"], "team": g["team"], "opponent": g["opponent"],
+              "minute": g["minute"], "xg": g["xg"], "worldie": g["worldie"], "assist": g["assist"]}
+             for g in top_goals("week", limit=8).get("clips", [])]
+    return {"results": results, "performers": top_perf, "goals": goals}
 
 
 def player_club(pid: int) -> dict:

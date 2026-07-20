@@ -6,7 +6,7 @@
 <title>Atlastra — Player Profile</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=50">
+<link rel="stylesheet" href="/css/styles.css?v=71">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -37,6 +37,8 @@
               <div class="m"><span>Nationality</span><b id="pnat">—</b></div>
               <div class="m"><span>Market Value</span><b id="pmv">—</b></div>
               <div class="m"><span>Avg Rating</span><b id="pavg">—</b></div>
+              <div class="m" id="mHeight" hidden><span>Height</span><b id="pheight">—</b></div>
+              <div class="m" id="mFoot" hidden><span>Preferred Foot</span><b id="pfoot">—</b></div>
               <div class="m"><span>Contract</span><b><span class="placeholder-note">n/a</span></b></div>
             </div>
             <div class="cta"><button id="followBtn" class="btn btn-primary">★ Follow</button><button id="favBtn" class="btn btn-ghost">♡ Favourite</button><button id="watchBtn" class="btn btn-ghost">🔖 Watch</button><a id="scoutLink" class="btn btn-ghost" href="/scoutreport.html">📋 Scout Report</a><a id="cardLink" class="btn btn-ghost" href="/card.html">🎴 Card</a><a id="compareLink" class="btn btn-ghost" href="/compare.html">⇄ Compare</a></div>
@@ -71,6 +73,14 @@
     <section class="card" style="margin-top:18px">
       <div class="card-h"><h3>Per-90 Statistics</h3><div class="scopetog" id="togPer90"></div></div>
       <div class="tiles" id="tiles"></div></section>
+
+    <!-- Recent Form — per-match log (FotMob), shown only when available -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card" id="formCard" style="display:none">
+        <div class="card-h"><h3>Recent Form</h3><span class="see" id="formSummary"></span></div>
+        <div id="recentForm"></div>
+      </section>
+    </div>
 
     <!-- pinned-analysis banner: shown only when viewing a past season -->
     <div id="pinnedBanner" class="pinned-banner" hidden></div>
@@ -122,14 +132,26 @@
         <div id="bigGame"></div></section>
     </div>
 
+    <!-- highlights video + AI signature-skills (Gemini reads the reel) — shown when found -->
+    <div class="grid" style="grid-template-columns:1fr 1fr; margin-top:18px">
+      <section class="card" id="hlVidCard" style="display:none">
+        <div class="card-h"><h3>🎬 Highlights &amp; Skills</h3><span class="see" id="hlVidSrc"></span></div>
+        <a id="hlVid" class="pv-vid" href="#" target="_blank" rel="noopener"></a>
+      </section>
+      <section class="card" id="sigSkillCard" style="display:none">
+        <div class="card-h"><h3>✨ Signature Skills</h3><span class="see" id="sigSkillSrc"></span></div>
+        <div id="sigSkills" class="sig-skills"></div>
+      </section>
+    </div>
+
     <!-- fan comments -->
     <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
       <section class="card" id="comments"></section>
     </div>
   </main>
 </div>
-<script src="/js/api.js?v=21"></script>
+<script src="/js/api.js?v=29"></script>
 <script src="/js/comments.js?v=1"></script>
-<script src="/js/player.js?v=21"></script>
+<script src="/js/player.js?v=31"></script>
 </body>
 </html>

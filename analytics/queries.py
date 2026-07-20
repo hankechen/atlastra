@@ -431,7 +431,16 @@ class SoccerDB:
                     best = (player, rating, cls, apps, mins)
         if not best:
             return None
-        return {"rating": int(best[1]), "classification": best[2],
+        rating, cls = int(best[1]), best[2]
+        # apply the same manual WC rating override the directory uses, so the profile
+        # gauge matches — and recompute the classification band from the new rating.
+        ov = self._WC_RATING_OVERRIDE.get(nm[0].lower()) or self._WC_RATING_OVERRIDE.get(best[0].lower())
+        if ov is not None:
+            rating = int(ov)
+            cls = ("World-Class" if rating >= 90 else "Elite" if rating >= 80
+                   else "Above Average" if rating >= 65 else "Average" if rating >= 50
+                   else "Below Average")
+        return {"rating": rating, "classification": cls,
                 "apps": _i(best[3]), "minutes": _i(best[4]), "edition": edition}
 
     _WC_POS = {"G": "Goalkeeper", "D": "Defender", "M": "Midfielder", "F": "Forward"}
@@ -1562,6 +1571,88 @@ class SoccerDB:
                                      "value": fmt(r.value, kind)} for r in sub.itertuples()]})
         return {"available": True, "leaders": leaders}
 
+    def tactics_squad(self, team: str, season: str = FOCUS_SEASON) -> list[dict]:
+        """A team's players with rating, detailed position, per-90 stats and rate stats —
+        the raw material the Tactics Lab engine turns into role/unit strengths. Combined
+        stats are row-stacked per competition, so we aggregate per player (sum counts,
+        minutes-weighted rates) for the season."""
+        q = """
+        WITH agg AS (
+          SELECT player_id, sum(minutes) mins, sum(goals) g, sum(assists) a,
+                 sum(xg) xg, sum(xa) xa, sum(shots) sh, sum(chances_created) cc,
+                 sum(big_chances_created) bcc, sum(dribbles_completed) drb,
+                 sum(tackles) tkl, sum(interceptions) intc, sum(passes_completed) pc,
+                 sum(clearances) clr,
+                 sum(duels_won_pct*minutes)/nullif(sum(minutes),0) dwp,
+                 sum(pass_accuracy_pct*minutes)/nullif(sum(minutes),0) pap,
+                 sum(aerial_duels_won_pct*minutes)/nullif(sum(minutes),0) awp,
+                 sum(dribble_success_pct*minutes)/nullif(sum(minutes),0) dsp
+          FROM v_stats_combined_player WHERE season = ? GROUP BY player_id)
+        SELECT f.player, COALESCE(f.detailed_position, f.main_position) AS pos, f.rating,
+               a.mins, a.g, a.a, a.xg, a.xa, a.sh, a.cc, a.bcc, a.drb, a.tkl, a.intc,
+               a.pc, a.clr, a.dwp, a.pap, a.awp, a.dsp, pe.fpid
+        FROM v_player_profile_full f JOIN agg a ON a.player_id = f.player_id
+        LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                   WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+               ON pe.player_id = f.player_id
+        WHERE lower(f.team) = lower(?) AND a.mins >= 300 AND f.rating IS NOT NULL
+        ORDER BY f.rating DESC NULLS LAST LIMIT 26
+        """
+        df = self.con.execute(q, [season, team]).df()
+        out = []
+        for r in df.itertuples():
+            mins = r.mins or 1
+            def p90(v):
+                return round((v or 0) / mins * 90, 3)
+            out.append({
+                "player": r.player, "position": r.pos, "rating": _i(r.rating),
+                "minutes": _i(r.mins), "photo": self.player_photo(r.fpid),
+                "per90": {"goals": p90(r.g), "assists": p90(r.a), "xg": p90(r.xg),
+                          "xa": p90(r.xa), "shots": p90(r.sh), "chances": p90(r.cc),
+                          "big_chances": p90(r.bcc), "dribbles": p90(r.drb),
+                          "tackles": p90(r.tkl), "interceptions": p90(r.intc),
+                          "passes": p90(r.pc), "clearances": p90(r.clr)},
+                "pct": {"duels": _r(r.dwp, 0), "passing": _r(r.pap, 0),
+                        "aerial": _r(r.awp, 0), "dribble": _r(r.dsp, 0)},
+            })
+        return out or self._tactics_squad_national(team)
+
+    def _tactics_squad_national(self, team: str) -> list[dict]:
+        """National-team squad for the Tactics Lab, from the latest World Cup's
+        wc_player_stats (coarse G/D/M/F positions; the engine maps those to slots).
+        Rating uses the same manual WC override the WC directory shows."""
+        row = self.con.execute("SELECT max(season) FROM wc_player_stats").fetchone()
+        season = row[0] if row and row[0] else None
+        if season is None:
+            return []
+        df = self.con.execute("""
+            SELECT player, position, atlas_rating, player_id, minutes, goals, assists, xg,
+                   shots, chances_created, big_chances_created, dribbles_completed, tackles,
+                   interceptions, passes_completed, pass_accuracy_pct, duels_won_pct
+            FROM wc_player_stats
+            WHERE season = ? AND lower(team) = lower(?) AND atlas_rating IS NOT NULL
+            ORDER BY atlas_rating DESC LIMIT 26
+        """, [season, team]).df()
+        ov = self._WC_RATING_OVERRIDE
+        out = []
+        for r in df.itertuples():
+            mins = r.minutes or 1
+            def p90(v):
+                return round((v or 0) / mins * 90, 3)
+            rating = int(ov.get(str(r.player).lower(), r.atlas_rating))
+            out.append({
+                "player": r.player, "position": r.position, "rating": rating,
+                "minutes": _i(r.minutes), "photo": self.player_photo(r.player_id),
+                "per90": {"goals": p90(r.goals), "assists": p90(r.assists), "xg": p90(r.xg),
+                          "xa": 0.0, "shots": p90(r.shots), "chances": p90(r.chances_created),
+                          "big_chances": p90(r.big_chances_created), "dribbles": p90(r.dribbles_completed),
+                          "tackles": p90(r.tackles), "interceptions": p90(r.interceptions),
+                          "passes": p90(r.passes_completed), "clearances": 0.0},
+                "pct": {"duels": _r(r.duels_won_pct, 0), "passing": _r(r.pass_accuracy_pct, 0),
+                        "aerial": 0, "dribble": 0},
+            })
+        return out
+
     # tab groups for the Players directory -> rating position_groups
     PLAYER_GROUPS = {"FWD": ["ST", "W"], "MID": ["AM", "CM", "DM"],
                      "DEF": ["FB", "CB"], "GK": ["GK"]}
@@ -1665,7 +1756,7 @@ class SoccerDB:
     # Applied at read time so they reorder the grid and survive WC data refreshes.
     _WC_RATING_OVERRIDE = {"ousmane dembélé": 88, "bradley barcola": 78,
                            "dayot upamecano": 76, "william saliba": 74,
-                           "jules koundé": 70, "lucas digne": 56}
+                           "jules koundé": 70, "lucas digne": 56, "pedri": 68}
 
     def _wc_photo(self, name):
         """FotMob photo for a WC player whose name doesn't join the players table

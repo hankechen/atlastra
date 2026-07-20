@@ -23,6 +23,11 @@ _BUF_LOCK = threading.Lock()
 _FLUSH_EVERY = 5.0            # seconds between batch writes
 _RETAIN_DAYS = 120           # prune hits older than this
 _started = False
+# A "unique visitor" must have made at least this many requests in the window. A real
+# browser loading one page fires the page hit + several API calls (its JS fetching
+# data), so humans clear it easily; single-URL crawlers/link-preview bots (1 hit, and
+# a fresh vid every time since they don't keep the cookie) are excluded.
+_MIN_UNIQ_HITS = 3
 
 
 def record_hit(path: str, kind: str, vid: str | None) -> None:
@@ -117,10 +122,12 @@ def overview() -> dict:
         hits_1d = scalar("SELECT count(*) FROM analytics_hits WHERE ts >= ?", [day])
         hits_7d = scalar("SELECT count(*) FROM analytics_hits WHERE ts >= ?", [week])
         hits_total = scalar("SELECT count(*) FROM analytics_hits")
-        uniq_1d = scalar("SELECT count(DISTINCT vid) FROM analytics_hits "
-                         "WHERE ts >= ? AND vid <> ''", [day])
-        uniq_7d = scalar("SELECT count(DISTINCT vid) FROM analytics_hits "
-                         "WHERE ts >= ? AND vid <> ''", [week])
+        uniq_1d = scalar("SELECT count(*) FROM (SELECT vid FROM analytics_hits "
+                         "WHERE ts >= ? AND vid <> '' GROUP BY vid HAVING count(*) >= ?)",
+                         [day, _MIN_UNIQ_HITS])
+        uniq_7d = scalar("SELECT count(*) FROM (SELECT vid FROM analytics_hits "
+                         "WHERE ts >= ? AND vid <> '' GROUP BY vid HAVING count(*) >= ?)",
+                         [week, _MIN_UNIQ_HITS])
         page_1d = scalar("SELECT count(*) FROM analytics_hits WHERE ts >= ? AND kind='page'", [day])
         api_1d = scalar("SELECT count(*) FROM analytics_hits WHERE ts >= ? AND kind='api'", [day])
 

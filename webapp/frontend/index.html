@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/css/styles.css?v=50">
+<link rel="stylesheet" href="/css/styles.css?v=71">
 </head>
 <body>
 <div class="app">
@@ -88,6 +88,13 @@
       <div id="hlHome" class="hl-strip"></div>
     </section>
 
+    <!-- promo: AI signature-skills feature (hidden until featured players load) -->
+    <section class="card sig-promo" id="sigPromo" style="display:none;margin-top:18px">
+      <div class="card-h"><h3>✨ Signature Skills — AI-analysed</h3><a class="see" href="/players.html">Explore players →</a></div>
+      <p class="sig-promo-sub">We watched every star's highlight reel and broke down their go-to moves. Look for the <span class="hl-mark" style="position:static">▶</span> on any player to see theirs.</p>
+      <div id="sigPromoGrid" class="sig-promo-grid"></div>
+    </section>
+
     <!-- row 2: games / top10 / team of week -->
     <div class="grid" style="grid-template-columns:repeat(3,1fr); margin-top:18px">
       <section class="card"><div class="card-h"><h3>Games</h3><a class="see" href="/daily.html">Daily →</a></div><div class="glist" id="gamesList"></div></section>
@@ -114,7 +121,7 @@
     </div>
   </main>
 </div>
-<script src="/js/api.js?v=21"></script>
-<script src="/js/home.js?v=2"></script>
+<script src="/js/api.js?v=29"></script>
+<script src="/js/home.js?v=6"></script>
 </body>
 </html>

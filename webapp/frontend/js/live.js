@@ -4,8 +4,8 @@ attachSearchDropdown(document.getElementById('searchBox'));
 const STATES = [
   ['today', 'Today', "All of today's matches — live, upcoming and finished, by kickoff time."],
   ['live', 'Live', 'Matches in play right now.'],
-  ['upcoming', 'Upcoming', 'Scheduled fixtures, soonest first.'],
-  ['recent', 'Results', 'Recently finished matches.'],
+  ['upcoming', 'Upcoming', 'Scheduled fixtures over the next 7 days, soonest first.'],
+  ['recent', 'Results', 'Finished matches from the past 3 days, newest first.'],
 ];
 let data = { today: [], live: [], upcoming: [], recent: [] };
 let active = null;
@@ -67,11 +67,12 @@ function render() {
   const list = data[active];
   const desc = STATES.find(([k]) => k === active)[2];
   const feed = document.getElementById('feed');
+  const head = `<p class="tab-desc muted">${desc}</p>`;
   if (!list.length) {
-    feed.innerHTML = `<section class="card"><div class="placeholder-note">No ${active === 'recent' ? 'results' : active} matches in the current window.</div></section>`;
+    feed.innerHTML = `${head}<section class="card"><div class="placeholder-note">No ${active === 'recent' ? 'results' : active} matches in the current window.</div></section>`;
     return;
   }
-  feed.innerHTML = byCompetition(list).map(([comp, ms]) => `
+  feed.innerHTML = head + byCompetition(list).map(([comp, ms]) => `
     <section class="card live-group">
       <div class="card-h"><h3>${comp}</h3><span class="see">${ms.length} match${ms.length > 1 ? 'es' : ''}</span></div>
       ${ms.map(matchRow).join('')}

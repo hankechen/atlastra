@@ -21,7 +21,13 @@ function tileVal(kind, s, key, nTeams) {
 
 async function load(name) {
   const d = await api('/api/team?name=' + encodeURIComponent(name));
-  if (!d.team) { document.getElementById('crumb').textContent = 'not found'; return; }
+  if (!d.team) {
+    document.getElementById('crumb').textContent = 'not found';
+    document.getElementById('tname').textContent = 'Team not found';
+    document.querySelector('.tsub').style.display = 'none';   // hide the stray " · " / "—" placeholders
+    document.getElementById('trank').style.display = 'none';
+    return;
+  }
   document.getElementById('crumb').textContent = d.team;
   document.getElementById('tcrest').innerHTML = crestHTML(d.team_logo, 'crest-xl') || '🛡️';
   document.getElementById('tname').textContent = d.team;

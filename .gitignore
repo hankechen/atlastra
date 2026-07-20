@@ -17,3 +17,17 @@ downloaded_files/
 reports/
 data/scout_reports.sqlite
 logs/
+/venv_ml/
+
+# Large binary assets / experiments (deployed via scp, not git)
+webapp/frontend/clips/
+ml/
+# Local networking / DNS helper config (unrelated to the app)
+tools/*.mobileconfig
+tools/*.plist
+tools/dns_watchdog.py
+# Clip-pipeline data artifacts (regenerable)
+tools/clip_verify.json
+tools/clips_manifest.json
+tools/recut.json
+tools/reextract_manifest.json

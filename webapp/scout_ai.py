@@ -267,26 +267,24 @@ def scout_report(data: dict, refresh: bool = False) -> dict:
             return {"available": True, "cached": True, "report": row[0], "model": row[1],
                     "generated_at": row[2], "player": data["name"], "season": data.get("season")}
 
-    have_key = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
-    if have_key:
+    user = ("Write the scouting report from this player's data (JSON):\n\n"
+            + json.dumps(_summary(data), ensure_ascii=False))
+    report, model_used = None, None
+    from webapp import gemini
+    if gemini.available():                              # preferred: Gemini
+        report = gemini.generate(SYSTEM + "\n\n---\n\n" + user, temperature=0.5)
+        model_used = "gemini-flash" if report else None
+    if not report and (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         try:
             import anthropic
-            client = anthropic.Anthropic()
-            msg = client.messages.create(
-                model=MODEL, max_tokens=4000,
-                thinking={"type": "adaptive"},
-                system=SYSTEM,
-                messages=[{"role": "user", "content":
-                           "Write the scouting report from this player's data (JSON):\n\n"
-                           + json.dumps(_summary(data), ensure_ascii=False)}],
-            )
+            msg = anthropic.Anthropic().messages.create(
+                model=MODEL, max_tokens=4000, thinking={"type": "adaptive"},
+                system=SYSTEM, messages=[{"role": "user", "content": user}])
             report = "".join(b.text for b in msg.content if b.type == "text").strip()
-            model_used = MODEL
-            if not report:                      # empty completion -> fall back
-                report, model_used = _local_report(data), ENGINE_NAME
-        except Exception:  # noqa: BLE001 -- any API error falls back to the offline engine
-            report, model_used = _local_report(data), ENGINE_NAME
-    else:
+            model_used = MODEL if report else None
+        except Exception:  # noqa: BLE001
+            report = None
+    if not report:                                      # offline fallback
         report, model_used = _local_report(data), ENGINE_NAME
 
     generated_at = datetime.datetime.now().isoformat(timespec="seconds")

@@ -1,19 +1,34 @@
 renderSidebar('Home');
 attachSearchDropdown(document.getElementById('searchBox'));
 
-// ---- live matches widget (real SofaScore feed) ----
-// Show what's on: live games first, then the soonest upcoming, then latest results.
-// Re-polls every 30s so in-play scores stay current without a page reload.
+// ---- big-games widget ----
+// Home page shows only the marquee competitions — the World Cup (& other majors),
+// the top-5 leagues, or the actual Champions League (NOT UCL qualification). Live
+// big games come first, followed by upcoming big fixtures; if none are in play, it
+// shows the latest big-game results alongside what's next. Re-polls every 30s.
+const isBigGame = (m) => {
+  const g = m.group || '';
+  if (g === 'International' || g === 'Top 5 Leagues') return true;   // WC/Euro/Copa + top-5
+  if (g === 'Champions League') return !/qualif/i.test(m.round || '');  // real UCL, not qual
+  return false;
+};
 async function loadLiveWidget() {
   const box = document.getElementById('liveMatches');
   try {
-    const d = await api('/api/live?recent=4&upcoming=5');
-    const feed = [...d.live, ...d.upcoming, ...d.recent].slice(0, 5);
+    const d = await api('/api/live?recent=40&upcoming=20');
+    const live = d.live.filter(isBigGame);
+    const upcoming = d.upcoming.filter(isBigGame);
+    const recent = d.recent.filter(isBigGame);
+    // in play -> live + upcoming; nothing on -> latest results + upcoming fixtures
+    const feed = live.length
+      ? [...live, ...upcoming].slice(0, 6)
+      : [...recent.slice(0, 3), ...upcoming.slice(0, 3)].slice(0, 6);
     box.innerHTML = feed.length ? feed.map(matchRow).join('')
-      : '<div class="placeholder-note">No fixtures in the current window.</div>';
+      : '<div class="placeholder-note">No big games right now.</div>';
     const note = box.parentElement.querySelector('.placeholder-note');
-    if (note) note.textContent = d.live.length
-      ? `${d.live.length} match${d.live.length > 1 ? 'es' : ''} live now` : 'No live matches right now';
+    if (note) note.textContent = !feed.length ? ''
+      : live.length ? `${live.length} big match${live.length > 1 ? 'es' : ''} live now`
+        : 'Latest results & upcoming big games';
   } catch {
     box.innerHTML = '<div class="placeholder-note">Live feed unavailable.</div>';
   }
@@ -166,4 +181,36 @@ setInterval(() => { if (!document.hidden) loadLiveWidget(); }, 30000);
       </a>`;
   }).join('');
   document.getElementById('hlCard').style.display = '';
+})();
+
+// Signature Skills promo — showcase a few marquee players' AI-analysed moves.
+// Only features players already in the analysed set, so every call is a cache hit
+// (never triggers a slow fresh analysis on the home page).
+(async () => {
+  const FEATURED = ['Lamine Yamal', 'Vinícius Júnior', 'Kylian Mbappe-Lottin',
+    'Jude Bellingham', 'Erling Haaland', 'Pedri', 'Ousmane Dembélé', 'Bruno Fernandes'];
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  let cached;
+  try { cached = new Set((await api('/api/highlight_players')).players); } catch { return; }
+  const pick = FEATURED.filter(n => cached.has(n)).sort(() => Math.random() - 0.5).slice(0, 3);
+  if (!pick.length) return;
+  const results = await Promise.all(pick.map(n =>
+    api('/api/signature_skills?name=' + encodeURIComponent(n)).catch(() => null)));
+  const ytId = (url) => { const m = /youtu\.be\/([\w-]{11})/.exec(url || ''); return m ? m[1] : null; };
+  const cards = [];
+  for (const r of results) {
+    if (!r || !r.available || !(r.skills || []).length) continue;
+    const id = ytId(r.video);
+    const thumb = id ? `<img src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt="" loading="lazy">` : '';
+    const moves = r.skills.slice(0, 3).map(s => {
+      const clip = typeof skillClipId === 'function' && skillClipId(s.skill);
+      return `<span class="sig-chip${clip ? ' has-clip' : ''}"${clip ? ` data-skillclip="${esc(s.skill)}"` : ''}>${esc(s.skill)}</span>`;
+    }).join('');
+    cards.push(`<a class="sig-p" href="/player.html?name=${encodeURIComponent(r.player)}">
+      <div class="sig-p-thumb">${thumb}<span class="hl-play">▶</span></div>
+      <div class="sig-p-body"><b>${esc(r.player)}</b><div class="sig-p-moves">${moves}</div></div></a>`);
+  }
+  if (!cards.length) return;
+  document.getElementById('sigPromoGrid').innerHTML = cards.join('');
+  document.getElementById('sigPromo').style.display = '';
 })();

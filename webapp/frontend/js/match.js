@@ -179,19 +179,25 @@ async function loadPrediction() {
   const c = d.consensus;
   const teams = { home: head?.home || 'Home', draw: 'Draw', away: head?.away || 'Away' };
   const predLabel = d.predicted === 'draw' ? 'Draw' : `${teams[d.predicted]} win`;
+  // Knockout ties can't end level -> no draw outcome; drop the Draw segment/legend.
+  const noDraw = (c.draw || 0) === 0;
   const seg = (k, cls) => `<div class="pr-seg ${cls}${d.predicted === k ? ' pred' : ''}" style="width:${c[k]}%" title="${esc(teams[k])} ${c[k]}%">${c[k] >= 10 ? c[k] + '%' : ''}</div>`;
   const oddsRows = d.books.map((b, i) => `<tr><td class="tl">Bookmaker ${i + 1}</td>
     <td>${b.odds.home}</td><td>${b.odds.draw}</td><td>${b.odds.away}</td></tr>`).join('');
   const liveOdds = head?.status === 'inprogress';
   const s = d.score;
-  const resLabel = s && (s.result === 'draw' ? 'Draw' : `${teams[s.result]} win`);
-  const aspCard = s ? `<section class="card asp-card">
-      <div class="card-h"><h3>Atlastra Prediction</h3><span class="see">${s.live ? '<span class="live">● projected final</span>' : 'most likely scoreline'}</span></div>
-      <div class="asp">
-        <span class="asp-tm">${esc(teams.home)}</span>
-        <span class="asp-sc">${s.home}<span class="asp-dash">–</span>${s.away}</span>
-        <span class="asp-tm">${esc(teams.away)}</span></div>
-      <div class="asp-note">🔮 Atlastra predicts ${s.live ? 'this finishes' : 'a final'} <b>${esc(teams.home)} ${s.home}–${s.away} ${esc(teams.away)}</b> · ${esc(resLabel)} (${s.result_conf}% likely)</div>
+  const scores = (s && s.scores) || [];
+  const maxPct = scores.length ? (scores[0].pct || 1) : 1;
+  const scoreRows = scores.map((x, i) => `
+      <div class="asp3-row${i === 0 ? ' top' : ''}">
+        <span class="asp3-sc">${x.home}<i>–</i>${x.away}</span>
+        <span class="asp3-bar"><i style="width:${Math.round((x.pct / maxPct) * 100)}%"></i></span>
+        <span class="asp3-pct">${x.pct}%</span></div>`).join('');
+  const aspCard = scores.length ? `<section class="card asp-card">
+      <div class="card-h"><h3>Atlastra Prediction</h3><span class="see">${s.live ? '<span class="live">● projected</span>' : 'most likely scores'}</span></div>
+      <div class="asp3-head"><span class="asp3-tm">${esc(teams.home)}</span><span class="asp3-vs">vs</span><span class="asp3-tm">${esc(teams.away)}</span></div>
+      <div class="asp3">${scoreRows}</div>
+      <div class="asp-note">🔮 Most likely${s.live ? ' final' : ''}: <b>${esc(teams.home)} ${scores[0].home}–${scores[0].away} ${esc(teams.away)}</b></div>
     </section>` : '';
   // Atlastra model (no bookmaker feed) vs bookmaker-consensus rendering
   const isModel = d.source === 'model' || !(d.books && d.books.length);
@@ -206,10 +212,10 @@ async function loadPrediction() {
   body().innerHTML = aspCard + `<section class="card">
       <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live</span> · ' : ''}${srcLabel}</span></div>
       <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% ${isModel ? 'modelled' : 'implied'}</span></div>
-      <div class="pr-bar">${seg('home', 'h')}${seg('draw', 'd')}${seg('away', 'a')}</div>
+      <div class="pr-bar">${seg('home', 'h')}${noDraw ? '' : seg('draw', 'd')}${seg('away', 'a')}</div>
       <div class="pr-legend">
         <span><i class="h"></i>${esc(teams.home)} <b>${c.home}%</b></span>
-        <span><i class="d"></i>Draw <b>${c.draw}%</b></span>
+        ${noDraw ? '' : `<span><i class="d"></i>Draw <b>${c.draw}%</b></span>`}
         <span><i class="a"></i>${esc(teams.away)} <b>${c.away}%</b></span></div>
       ${oddsSection}
     </section>`;
@@ -410,7 +416,9 @@ async function loadLineups(isRefresh) {
   // a live/finished match the icons fill in a moment later via a second paint().
   const paint = () => {
     if (!live()) return;                                          // user switched tabs mid-load
-    const bar = `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
+    // Once the match is over the stats are final, so there's nothing to refresh --
+    // drop the "Refresh stats" button (and its now-purposeless bar) for finished games.
+    const bar = head?.status === 'finished' ? '' : `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
       new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       }</span><button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
     if (hRows && aRows) {

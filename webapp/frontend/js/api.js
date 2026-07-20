@@ -588,6 +588,8 @@ const ICONS = {
   dnamap: '<path d="M3.5 4v16.5H20"/><circle cx="8" cy="15.5" r="1.4"/><circle cx="11.5" cy="10" r="1.4"/><circle cx="16" cy="13" r="1.4"/><circle cx="18.5" cy="6.5" r="1.4"/>',
   card: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="8.5" cy="11" r="2.2"/><path d="M5.5 16.4c.4-1.5 1.6-2.3 3-2.3s2.6.8 3 2.3"/><path d="M14.5 9.5h4M14.5 13h4M14.5 16.2h2.5"/>',
   highlights: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10 9.2v5.6l4.7-2.8z" fill="currentColor" stroke="none"/>',
+  blog: '<path d="M5 3.5h9l5 5V20.5H5z"/><path d="M13.5 3.5V9H19"/><path d="M8 12.5h8M8 15.5h8M8 18h5"/>',
+  tactics: '<rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M12 3.5v17M3.5 12h17"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.4" fill="currentColor" stroke="none"/><path d="M9 8h5M10 16h4"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -607,6 +609,8 @@ const NAV_MAIN = [
   ['Champions League', 'ucl', '/ucl.html'],
   ['World Cup', 'worldcup', '/worldcup.html'],
   ['Feed', 'feed', '/feed.html'],
+  ['Tactics Lab', 'tactics', '/tactics.html'],
+  ['Blog', 'blog', '/blog.html'],
   ['Search', 'search', '/search.html'],
 ];
 const NAV_ANALYTICS = [
@@ -767,6 +771,86 @@ function matchRow(m) {
     ${tag}</div>${venue}`;
 }
 
+// ---- "has highlights" marker -------------------------------------------------
+// A small ▶ badge next to players whose highlight reel we've analysed (Top 25 are
+// pre-warmed; grows as profiles are viewed). The set loads once; rows render a
+// hidden badge tagged with the player name, and decorateHighlights() reveals the
+// ones in the set (covers the race where a list renders before the set arrives).
+let HL_PLAYERS = new Set();
+const hlAttr = (name) => String(name || '').replace(/"/g, '&quot;');
+function hlBadge(name) {
+  const on = HL_PLAYERS.has(name);
+  return `<span class="hl-mark" data-hlp="${hlAttr(name)}"${on ? '' : ' hidden'} title="Highlights available">▶</span>`;
+}
+function decorateHighlights() {
+  document.querySelectorAll('.hl-mark[data-hlp]').forEach(el => {
+    if (HL_PLAYERS.has(el.getAttribute('data-hlp'))) el.hidden = false;
+  });
+}
+api('/api/highlight_players').then(d => {
+  HL_PLAYERS = new Set((d && d.players) || []);
+  decorateHighlights();
+}).catch(() => {});
+
+// ---- skill example clips -----------------------------------------------------
+// A self-hosted example clip for each signature move (/clips/<id>.mp4). Click a
+// move on a profile to see what it looks like. Maps the AI's skill phrasing -> id.
+const SKILL_CLIP = {
+  stepover: 'stepover', elastico: 'elastico', 'la croqueta': 'la_croqueta', roulette: 'roulette',
+  'cruyff turn': 'cruyff_turn', nutmeg: 'nutmeg', 'body feint': 'body_feint',
+  'chop/cut inside': 'chop', chop: 'chop', 'cut inside': 'chop', 'ball roll': 'ball_roll',
+  rabona: 'rabona', 'rainbow flick': 'rainbow_flick', sombrero: 'sombrero', backheel: 'backheel',
+  'fake shot': 'fake_shot', 'chip/dink': 'chip', chip: 'chip', dink: 'chip', trivela: 'trivela',
+  curler: 'curler', volley: 'volley', knuckleball: 'knuckleball',
+};
+const SKILL_CLIPS_ENABLED = false;  // OFF: hides all skill clips (own + generic). Files/data kept; flip to re-enable.
+function skillClipId(name) {
+  if (!SKILL_CLIPS_ENABLED) return null;
+  const k = String(name || '').toLowerCase().trim();
+  if (SKILL_CLIP[k]) return SKILL_CLIP[k];
+  const norm = k.replace(/[^a-z]/g, '');
+  for (const key in SKILL_CLIP) {
+    const nk = key.replace(/[^a-z]/g, '');
+    if (nk && (norm.startsWith(nk) || nk.startsWith(norm))) return SKILL_CLIP[key];
+  }
+  return null;
+}
+function openSkillClip(name) {
+  const id = skillClipId(name);
+  if (!id) return;
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  let m = document.getElementById('skClipModal');
+  if (!m) { m = document.createElement('div'); m.id = 'skClipModal'; m.className = 'sk-modal'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="sk-modal-bd"><button class="sk-close" aria-label="Close">✕</button>
+    <video src="/clips/${id}.mp4" autoplay loop muted playsinline controls></video>
+    <div class="sk-cap"><b>${e(name)}</b> — example</div></div>`;
+  m.hidden = false;
+  const close = () => { m.hidden = true; const v = m.querySelector('video'); if (v) v.pause(); };
+  m.onclick = (ev) => { if (ev.target === m || ev.target.classList.contains('sk-close')) close(); };
+  document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+}
+// Open a specific clip URL (used for per-player skill clips cut from their own reel).
+function openClipUrl(url, label) {
+  if (!url) return;
+  const e = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  let m = document.getElementById('skClipModal');
+  if (!m) { m = document.createElement('div'); m.id = 'skClipModal'; m.className = 'sk-modal'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="sk-modal-bd"><button class="sk-close" aria-label="Close">✕</button>
+    <video src="${e(url)}" autoplay loop muted playsinline controls></video>
+    <div class="sk-cap"><b>${e(label || 'Signature move')}</b></div></div>`;
+  m.hidden = false;
+  const close = () => { m.hidden = true; const v = m.querySelector('video'); if (v) v.pause(); };
+  m.onclick = (ev) => { if (ev.target === m || ev.target.classList.contains('sk-close')) close(); };
+  document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+}
+// delegated: data-clipurl (this player's own clip) or data-skillclip (generic example)
+document.addEventListener('click', (e) => {
+  const own = e.target.closest && e.target.closest('[data-clipurl]');
+  if (own) { e.preventDefault(); e.stopPropagation(); openClipUrl(own.getAttribute('data-clipurl'), own.getAttribute('data-cliplabel')); return; }
+  const el = e.target.closest && e.target.closest('[data-skillclip]');
+  if (el) { e.preventDefault(); e.stopPropagation(); openSkillClip(el.getAttribute('data-skillclip')); }
+});
+
 // player list row used by rankings / trending
 function playerRow(p, { chip, arrow, value } = {}) {
   const end = chip ? `<span class="ratingchip">${p.rating}</span>`
@@ -774,6 +858,6 @@ function playerRow(p, { chip, arrow, value } = {}) {
     : `<span>${value ?? p.rating}</span>`;
   return `<div class="prow" onclick="location.href='${pHref(p.player)}'"><span class="rk">${p.rank}</span>
     <span class="pic" title="${p.player}">${avatarHTML(p.photo, p.player)}</span>
-    <span><div class="nm">${p.player}</div><div class="sub">${crestHTML(p.team_logo, 'crest-sm')}${p.team} · ${p.position}</div></span>
+    <span><div class="nm">${p.player}${hlBadge(p.player)}</div><div class="sub">${crestHTML(p.team_logo, 'crest-sm')}${p.team} · ${p.position}</div></span>
     <span class="end">${end}</span></div>`;
 }

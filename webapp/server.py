@@ -72,6 +72,86 @@ FOTMOB = os.environ.get("ATLASTRA_FOTMOB") == "1"
 if FOTMOB:
     from webapp import live_feed_fotmob as live_feed  # noqa: F811, E402
 from webapp import scout_ai  # noqa: E402
+from webapp import weekly_recap  # noqa: E402
+from webapp import signature_skills  # noqa: E402
+from webapp import blog  # noqa: E402
+from webapp import tactics  # noqa: E402
+
+_TAC_SQUAD: dict = {}                                     # team -> (expiry, squad) cache
+
+
+def _tac_squad(d, team):
+    import time as _t
+    hit = _TAC_SQUAD.get(team.lower())
+    if hit and hit[0] > _t.time():
+        return hit[1]
+    sq = d.tactics_squad(team) if team else []
+    _TAC_SQUAD[team.lower()] = (_t.time() + 600, sq)
+    return sq
+
+
+def _xi_wire(xi):
+    """Serialize XI slots for the client — display fields + role, no heavy stats."""
+    out = []
+    for s in xi:
+        p = s.get("player")
+        out.append({"id": s["id"], "family": s["family"], "line": s["line"],
+                    "x": s["x"], "y": s["y"], "role": s["role"],
+                    "player": ({"player": p["player"], "rating": p["rating"],
+                                "position": p["position"], "photo": p.get("photo")}
+                               if p else None)})
+    return out
+
+
+def _tac_rebuild(d, team, slots):
+    """Rebuild engine XI (full player stats) from wire slots {id,family,line,role,player}."""
+    squad = _tac_squad(d, team)
+    by_name = {p["player"]: p for p in squad}
+    xi = []
+    for s in (slots or []):
+        pl = s.get("player")
+        name = pl.get("player") if isinstance(pl, dict) else pl
+        full = by_name.get(name)
+        xi.append({"id": s.get("id"), "family": s.get("family"), "line": s.get("line"),
+                   "x": s.get("x", 50), "y": s.get("y", 50),
+                   "role": s.get("role") or tactics.DEFAULT_ROLE.get(s.get("family"), ""),
+                   "player": full})
+    return xi, squad
+
+
+_TAC_ADVISOR: dict = {}                                   # cache: prompt-hash -> text
+
+
+def _tactics_advisor(b):
+    """AI analyst writeup grounded in the engine's computed numbers (Gemini free tier)."""
+    import hashlib
+    from webapp import gemini
+    team = b.get("team") or "the team"
+    m, u = b.get("metrics") or {}, b.get("units") or {}
+    tac = b.get("tactics") or {}
+    weak = [w.get("title") for w in (b.get("weaknesses") or [])]
+    opp = b.get("opponent_name")
+    key = hashlib.md5(jdumps([team, m, u, tac, weak, opp]).encode()).hexdigest()
+    if key in _TAC_ADVISOR:
+        return {"available": True, "text": _TAC_ADVISOR[key], "cached": True}
+    if not gemini.available():
+        return {"available": False}
+    prompt = (
+        f"You are an elite football tactical analyst. Given this model output for {team}"
+        + (f" (vs {opp})" if opp else "") + ", write a SHORT, sharp scouting read.\n\n"
+        f"Unit strengths (0-99): {u}\n"
+        f"Projected metrics: {m}\n"
+        f"Tactical settings (0-100, 50=neutral): {tac}\n"
+        f"Flagged weaknesses: {weak or 'none'}\n\n"
+        "Write 3 tight paragraphs, no headers, ~120 words total: (1) the team's tactical "
+        "identity in this setup; (2) the single biggest risk and why; (3) ONE concrete change "
+        "with its likely effect. Reference the actual numbers. Confident, specific, no fluff.")
+    txt = gemini.generate(prompt, temperature=0.5)
+    if not txt:
+        return {"available": False}
+    txt = txt.strip()
+    _TAC_ADVISOR[key] = txt
+    return {"available": True, "text": txt}
 from webapp import admin  # noqa: E402
 from webapp import seo  # noqa: E402
 
@@ -152,7 +232,8 @@ def jdumps(obj):
     """JSON-encode an API payload, guaranteeing valid JSON (no NaN/Inf tokens)."""
     return json.dumps(_finite(obj), default=str)
 CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
-      ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png"}
+      ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png",
+      ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
 # Live match-detail endpoints proxy SofaScore (server-side TLS bypass) and never
@@ -296,12 +377,64 @@ def api(path: str, q: dict) -> dict | list:
         period = period if period in ("day", "week") else "day"
         return getattr(live_feed, "highlights",
                        lambda **k: {"available": False, "clips": []})(period=period)
+    if path == "/api/top_goals":              # best goals of the day/week w/ YouTube clips
+        period = q.get("period", ["day"])[0]
+        period = period if period in ("day", "week") else "day"
+        return getattr(live_feed, "top_goals",
+                       lambda **k: {"available": False, "clips": []})(period=period)
+    if path == "/api/trending":               # most-viewed football clips on YouTube
+        period = q.get("period", ["week"])[0]
+        period = period if period in ("day", "week") else "week"
+        return getattr(live_feed, "trending",
+                       lambda **k: {"available": False, "clips": []})(period=period)
+    if path == "/api/shorts":                 # viral football Shorts (skills/edits, TikTok-style)
+        return getattr(live_feed, "shorts",
+                       lambda: {"available": False, "clips": []})()
+    if path == "/api/top_stars":              # top-25 reputation stars + best skills video
+        return getattr(live_feed, "top_stars",
+                       lambda: {"available": False, "clips": []})()
+    if path == "/api/player_video":           # best skills/highlights video for a player (YouTube)
+        return getattr(live_feed, "player_video",
+                       lambda _n: {"available": False})(q.get("name", [""])[0])
+    if path == "/api/player_form":            # recent per-match form (FotMob), keyed by fotmob player id
+        return getattr(live_feed, "player_form",
+                       lambda _p: {"available": False})(q.get("pid", [""])[0])
+    if path == "/api/player_bio":             # foot + height (FotMob), keyed by fotmob player id
+        return getattr(live_feed, "player_bio",
+                       lambda _p: {"available": False})(q.get("pid", [""])[0])
+    if path == "/api/signature_skills":       # Gemini reads the player's reel -> ranked skills
+        name = q.get("name", [""])[0]
+        pv = getattr(live_feed, "player_video", lambda _n: {})(name) or {}
+        url = pv.get("url") if pv.get("available") else None
+        return signature_skills.generate(name, url, refresh=q.get("refresh", ["0"])[0] == "1")
+    if path == "/api/highlight_players":       # names of players that have highlight reels
+        return {"players": signature_skills.cached_players()}
+    if path == "/api/blog":                    # blog index, or a single post with ?slug=
+        slug = q.get("slug", [""])[0]
+        return blog.get_post(slug) if slug else blog.list_posts()
+    if path == "/api/weekly_recap":           # AI week-in-review (top performers, goals, results)
+        gather = getattr(live_feed, "week_summary_data", None)
+        if gather is None:
+            return {"available": False, "error": "Recap unavailable."}
+        return weekly_recap.generate(gather(), refresh=q.get("refresh", ["0"])[0] == "1")
     if path == "/api/scout_report":           # gather data (DB), then generate via Claude
         with SoccerDB(read_only=DB_READ_ONLY) as d:
             data = d.web_player(q.get("name", ["Pedri"])[0], q.get("career_stat", ["xa"])[0],
                                 q.get("season", [None])[0])
         return scout_ai.scout_report(data, refresh=q.get("refresh", ["0"])[0] == "1")
     with SoccerDB(read_only=DB_READ_ONLY) as d:
+        if path == "/api/tactics/squad":       # Tactics Lab: squad + auto XI for a formation
+            team = q.get("team", [""])[0]
+            formation = q.get("formation", ["4-3-3"])[0]
+            if formation not in tactics.FORMATIONS:
+                formation = "4-3-3"
+            squad = _tac_squad(d, team)
+            xi = tactics.build_xi(squad, formation) if squad else []
+            return {"available": bool(squad), "team": team, "formation": formation,
+                    "squad": squad, "xi": _xi_wire(xi),
+                    "formations": list(tactics.FORMATIONS.keys()),
+                    "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,
+                    "tactic_keys": tactics.TACTIC_KEYS, "tactic_defaults": tactics.DEFAULT_TACTICS}
         if path == "/api/overview":
             return d.web_overview()
         if path == "/api/rankings":
@@ -594,6 +727,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             res, err = auth.toggle_like(_int(b.get("id")), user["id"])
             self._json(res if res else {"error": err}, 200 if res else 400)
+            return
+        if u.path == "/api/tactics/sim":               # Tactics Lab simulation
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                xi, _ = _tac_rebuild(d, b.get("team", ""), b.get("xi"))
+                opp = None
+                ob = b.get("opponent") or {}
+                if ob.get("team") and ob.get("xi"):
+                    oxi, _ = _tac_rebuild(d, ob["team"], ob["xi"])
+                    opp = {"name": ob["team"], "tactics": ob.get("tactics"),
+                           "units": tactics.team_units(oxi, ob.get("tactics"))}
+            self._json(tactics.simulate(xi, b.get("tactics"), opponent=opp))
+            return
+        if u.path == "/api/tactics/advisor":           # AI analyst writeup (Gemini free tier)
+            self._json(_tactics_advisor(b))
             return
         self._json({"error": "Not found"}, 404)
 

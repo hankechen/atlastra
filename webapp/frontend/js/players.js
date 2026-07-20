@@ -44,7 +44,7 @@ const card = (p) => `
       <div class="photo">${avatarHTML(p.photo, p.player)}</div>
       <div class="rt">${p.rating ?? '—'}</div>
     </div>
-    <div class="nm">${p.player}</div>
+    <div class="nm">${p.player}${hlBadge(p.player)}</div>
     <div class="sub">${crestHTML(p.team_logo, 'crest-sm')}${p.team} · ${p.position}</div>
     <span class="cls">${p.classification ?? ''}</span>
     <div class="row">
@@ -62,7 +62,7 @@ const formerCard = (p) => `
       <div class="photo">${avatarHTML(p.photo, p.player)}</div>
       <div class="rt">${p.rating ?? '—'}</div>
     </div>
-    <div class="nm">${p.player}</div>
+    <div class="nm">${p.player}${hlBadge(p.player)}</div>
     <div class="sub">${crestHTML(p.team_logo, 'crest-sm')}${p.team} · ${p.position}</div>
     <span class="cls">${p.classification ?? ''} · ${p.season}</span>
     <div class="rsplit">League <b>${p.rating_league ?? '—'}</b>${p.rating_ucl != null ? ` · UCL <b>${p.rating_ucl}</b>` : ''} <span class="cmb">→ combined ${p.rating ?? '—'}</span></div>
@@ -83,7 +83,7 @@ const wcCard = (p) => `
       <div class="photo">${avatarHTML(p.photo, p.player)}</div>
       <div class="rt">${p.rating ?? '—'}</div>
     </div>
-    <div class="nm">${p.player}</div>
+    <div class="nm">${p.player}${hlBadge(p.player)}</div>
     <div class="sub"><span style="margin-right:5px">${wcFlagFor(p.team, p.cc)}</span>${p.team} · ${p.position}</div>
     <span class="cls">${p.classification ?? ''}</span>
     <div class="row">
