@@ -1615,7 +1615,28 @@ class SoccerDB:
                 "pct": {"duels": _r(r.dwp, 0), "passing": _r(r.pap, 0),
                         "aerial": _r(r.awp, 0), "dribble": _r(r.dsp, 0)},
             })
-        return out or self._tactics_squad_national(team)
+        return self._tactics_compress_ratings(out or self._tactics_squad_national(team))
+
+    @staticmethod
+    def _tactics_compress_ratings(squad: list[dict]) -> list[dict]:
+        """The Atlas rating is percentile-harsh (a squad player at a giant club can read
+        44). For the Tactics Lab we compress ratings toward the squad's own level and
+        apply a team-quality-scaled floor — so a world-class squad bottoms out ~60 and
+        the spread is tighter, while weaker teams keep lower floors. Order-preserving."""
+        rts = [p["rating"] for p in squad if p.get("rating") is not None]
+        if len(rts) < 3:
+            return squad
+        rts_sorted = sorted(rts, reverse=True)
+        team_level = sum(rts_sorted[:11]) / len(rts_sorted[:11])   # core-XI strength
+        mean = sum(rts) / len(rts)
+        floor = max(42, min(63, round(team_level - 13)))           # world-class → ~60
+        for p in squad:
+            r = p.get("rating")
+            if r is None:
+                continue
+            comp = 0.55 * r + 0.45 * mean                          # pull toward squad mean
+            p["rating"] = int(max(floor, min(96, round(comp))))
+        return squad
 
     def _tactics_squad_national(self, team: str) -> list[dict]:
         """National-team squad for the Tactics Lab, from the latest World Cup's

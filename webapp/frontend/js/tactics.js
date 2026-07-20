@@ -67,7 +67,7 @@ let _simT; const debouncedSim = () => { clearTimeout(_simT); _simT = setTimeout(
 // ---- render pitch + tactics ----
 function chipHTML(s) {
   const p = s.player, nm = p ? p.player.split(' ').slice(-1)[0] : '—';
-  const ph = p && p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy">` : '';
+  const ph = p && p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" draggable="false">` : '';
   return `<button class="tl-chip" style="left:${s.x}%;bottom:${s.y}%" data-slot="${s.id}">
       <span class="tl-ph">${ph}<i class="tl-rt">${p ? p.rating : '-'}</i></span>
       <span class="tl-nm">${esc(nm)}</span><span class="tl-role">${esc(s.role)}</span></button>`;
@@ -104,13 +104,13 @@ function render() {
     ${sideToggle()}
     <div class="tl-grid">
       <section class="card tl-pitchwrap">
-        <div class="tl-pitchhead"><b>${esc(a.team)}</b><span class="muted">${a.formation} · tap a player to change role or swap</span></div>
+        <div class="tl-pitchhead"><b>${esc(a.team)}</b><span class="muted">${a.formation} · drag a player onto another to swap · tap to change role</span></div>
         <div class="tl-pitch">${fieldSVG()}${chips}</div></section>
       <section class="card tl-tactics"><div class="card-h"><h3>Tactical Instructions</h3></div>${groups}</section>
     </div>
     <div id="tlResults" class="tl-results"></div>`;
   document.querySelectorAll('input[data-tac]').forEach((el) => { el.oninput = () => { cur().tactics[el.dataset.tac] = +el.value; document.getElementById('tv-' + el.dataset.tac).textContent = el.value; debouncedSim(); }; });
-  document.querySelectorAll('.tl-chip').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); openSlotEditor(el.dataset.slot); }; });
+  document.querySelectorAll('.tl-chip').forEach((el) => { el.addEventListener('pointerdown', (e) => chipDown(e, el)); });
   document.querySelectorAll('.tl-sidebtn').forEach((el) => { el.onclick = () => { S.active = el.dataset.side; render(); runSim(); }; });
 }
 
@@ -134,11 +134,55 @@ function openSlotEditor(slotId) {
   document.getElementById('popRole').onchange = (e) => { s.role = e.target.value; document.getElementById('popNote').textContent = (S.roles[s.family] || {})[s.role]?.note || ''; const el = document.querySelector(`.tl-chip[data-slot="${s.id}"] .tl-role`); if (el) el.textContent = s.role; runSim(); };
   document.getElementById('popSwap').onchange = (e) => { const np = a.squad.find((p) => p.player === e.target.value); const oth = a.xi.find((x) => x !== s && x.player && x.player.player === e.target.value); if (oth) oth.player = s.player; s.player = np; render(); runSim(); closePop(); };
   pop.querySelector('.tl-pop-x').onclick = closePop;
-  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };   // close on backdrop only
+  document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', esc); } });
   const pid = s.player && /playerimages\/(\d+)\./.exec(s.player.photo || '');
   if (pid) api('/api/player_bio?pid=' + pid[1]).then((b) => { const el = document.getElementById('popBio'); if (el && b && b.available) { const bits = [s.player.position, 'rating ' + s.player.rating]; if (b.foot) bits.push(b.foot + ' foot'); if (b.height) bits.push(b.height); el.textContent = bits.filter(Boolean).join(' · '); } }).catch(() => {});
 }
 function closePop() { const p = document.getElementById('tlPop'); if (p) p.remove(); }
+
+// ---- drag-to-swap (pointer events: mouse + touch) ----
+let _drag = null;
+function chipDown(e, el) {
+  if (e.button != null && e.button !== 0) return;
+  _drag = { slot: el.dataset.slot, el, x0: e.clientX, y0: e.clientY, moved: false, ghost: null };
+}
+function targetChip(x, y) {
+  const el = document.elementFromPoint(x, y);
+  return el && el.closest ? el.closest('.tl-chip') : null;
+}
+function onDragMove(e) {
+  if (!_drag) return;
+  if (!_drag.moved && Math.hypot(e.clientX - _drag.x0, e.clientY - _drag.y0) < 6) return;
+  if (!_drag.moved) {
+    _drag.moved = true;
+    _drag.el.classList.add('tl-dragging');
+    const g = document.createElement('div'); g.className = 'tl-ghost';
+    g.appendChild(_drag.el.querySelector('.tl-ph').cloneNode(true));
+    document.body.appendChild(g); _drag.ghost = g;
+  }
+  _drag.ghost.style.left = e.clientX + 'px'; _drag.ghost.style.top = e.clientY + 'px';
+  document.querySelectorAll('.tl-chip.tl-drop').forEach((c) => c.classList.remove('tl-drop'));
+  const t = targetChip(e.clientX, e.clientY);
+  if (t && t !== _drag.el) t.classList.add('tl-drop');
+  e.preventDefault();
+}
+function onDragUp(e) {
+  if (!_drag) return;
+  const d = _drag; _drag = null;
+  if (d.ghost) d.ghost.remove();
+  d.el.classList.remove('tl-dragging');
+  document.querySelectorAll('.tl-chip.tl-drop').forEach((c) => c.classList.remove('tl-drop'));
+  if (!d.moved) { openSlotEditor(d.slot); return; }        // a tap → open the editor
+  const t = targetChip(e.clientX, e.clientY);
+  if (t && t.dataset.slot && t.dataset.slot !== d.slot) {   // drop on another chip → swap players
+    const xi = cur().xi, a = xi.find((s) => s.id === d.slot), b = xi.find((s) => s.id === t.dataset.slot);
+    if (a && b) { const tmp = a.player; a.player = b.player; b.player = tmp; render(); runSim(); }
+  }
+}
+document.addEventListener('pointermove', onDragMove, { passive: false });
+document.addEventListener('pointerup', onDragUp);
+document.addEventListener('pointercancel', () => { if (_drag) { if (_drag.ghost) _drag.ghost.remove(); _drag.el.classList.remove('tl-dragging'); document.querySelectorAll('.tl-chip.tl-drop').forEach((c) => c.classList.remove('tl-drop')); _drag = null; } });
 
 // ---- results ----
 const UNIT_META = [['attack', 'Attack'], ['midfield', 'Midfield'], ['defense', 'Defense'],
@@ -242,7 +286,6 @@ async function loadAdvisor() {
 
 // ---- init ----
 fillTeams();
-document.addEventListener('click', closePop);
 document.getElementById('loadBtn').onclick = () => {
   S.sides.A.team = document.getElementById('teamInput').value.trim() || 'Real Madrid';
   S.sides.A.formation = document.getElementById('formSel').value || '4-3-3';
