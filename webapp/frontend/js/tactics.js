@@ -25,15 +25,26 @@ const TACTICS_META = [
     ['compactness', 'Compactness', 'Open', 'Compact'],
   ]],
 ];
-const CLUBS = ['Real Madrid', 'Barcelona', 'Manchester City', 'Arsenal', 'Liverpool', 'Bayern Munich',
-  'PSG', 'Inter', 'Atlético Madrid', 'Bayer Leverkusen', 'Manchester United', 'Chelsea', 'Tottenham',
-  'Newcastle United', 'Napoli', 'AC Milan', 'Juventus', 'Borussia Dortmund', 'Aston Villa', 'Bournemouth'];
+// entries are DB team name, or [db_name, friendly_label] where the DB stores a different name
+const CLUBS = ['Real Madrid', 'Barcelona', 'Manchester City', 'Arsenal', 'Liverpool',
+  ['Bayern München', 'Bayern Munich'], 'PSG', ['Internazionale', 'Inter'], 'Atlético Madrid',
+  'Bayer Leverkusen', 'Manchester United', 'Chelsea', ['Tottenham Hotspur', 'Tottenham'],
+  'Newcastle United', 'Napoli', ['Milan', 'AC Milan'], 'Juventus', 'Borussia Dortmund',
+  'Aston Villa', 'Bournemouth'];
 const NATIONS = ['Argentina', 'France', 'Brazil', 'England', 'Spain', 'Germany', 'Portugal', 'Netherlands',
-  'Belgium', 'Croatia', 'Morocco', 'Uruguay', 'Colombia', 'Mexico', 'Japan', 'Korea Republic', 'USA'];
+  'Belgium', 'Croatia', 'Morocco', 'Uruguay', 'Colombia', 'Mexico', 'Japan', 'USA'];
+function teamOptions(withNone) {
+  const opt = (t) => { const v = Array.isArray(t) ? t[0] : t, l = Array.isArray(t) ? t[1] : t; return `<option value="${esc(v)}">${esc(l)}</option>`; };
+  const grp = (lbl, arr) => `<optgroup label="${lbl}">${arr.map(opt).join('')}</optgroup>`;
+  return (withNone ? '<option value="">none — profile mode</option>' : '') + grp('Clubs', CLUBS) + grp('National teams', NATIONS);
+}
+function ensureOption(sel, val) {   // keep a deep-linked/custom team selectable
+  if (val && !Array.from(sel.options).some((o) => o.value === val)) sel.insertBefore(new Option(val, val), sel.firstChild);
+  sel.value = val;
+}
 function fillTeams() {
-  document.getElementById('teamList').innerHTML =
-    CLUBS.map((t) => `<option value="${esc(t)}">Club</option>`).join('') +
-    NATIONS.map((t) => `<option value="${esc(t)}">National team</option>`).join('');
+  document.getElementById('teamInput').innerHTML = teamOptions(false);
+  document.getElementById('oppInput').innerHTML = teamOptions(true);
 }
 
 // ---- data ----
@@ -68,8 +79,9 @@ let _simT; const debouncedSim = () => { clearTimeout(_simT); _simT = setTimeout(
 function chipHTML(s) {
   const p = s.player, nm = p ? p.player.split(' ').slice(-1)[0] : '—';
   const ph = p && p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" draggable="false">` : '';
+  const brk = p && p.breakout ? `<i class="tl-brk" title="Breakout season — Atlas rating above FIFA, rating boosted +${p.breakout}">⚡</i>` : '';
   return `<button class="tl-chip" style="left:${s.x}%;bottom:${s.y}%" data-slot="${s.id}">
-      <span class="tl-ph">${ph}<i class="tl-rt">${p ? p.rating : '-'}</i></span>
+      <span class="tl-phwrap"><span class="tl-ph">${ph}</span><i class="tl-rt">${p ? p.rating : '-'}</i>${brk}</span>
       <span class="tl-nm">${esc(nm)}</span><span class="tl-role">${esc(s.role)}</span></button>`;
 }
 // Pitch markings drawn behind the chips (halfway line, circle, penalty boxes, goals).
@@ -104,7 +116,7 @@ function render() {
     ${sideToggle()}
     <div class="tl-grid">
       <section class="card tl-pitchwrap">
-        <div class="tl-pitchhead"><b>${esc(a.team)}</b><span class="muted">${a.formation} · drag a player onto another to swap · tap to change role</span></div>
+        <div class="tl-pitchhead"><b>${esc(a.team)}</b><span class="muted">${esc(a.formation)} · drag to reposition · drop on a player to swap · tap to change role</span></div>
         <div class="tl-pitch">${fieldSVG()}${chips}</div></section>
       <section class="card tl-tactics"><div class="card-h"><h3>Tactical Instructions</h3></div>${groups}</section>
     </div>
@@ -167,6 +179,30 @@ function onDragMove(e) {
   if (t && t !== _drag.el) t.classList.add('tl-drop');
   e.preventDefault();
 }
+// Derive a player's role family from where they're dropped, so moving a player actually
+// reshapes the side (a CB dragged into midfield becomes a midfielder, etc.). x/y are 0-100
+// with y measured from the goal-line up (same as the chip's left%/bottom% anchor).
+function familyFromPos(x, y) {
+  if (y < 13) return { family: 'GK', line: 'GK' };
+  const wide = x <= 21 || x >= 79;
+  if (y < 36) return { family: wide ? 'FB' : 'CB', line: 'DEF' };
+  if (y < 64) {
+    if (wide) return y < 50 ? { family: 'FB', line: 'MID' } : { family: 'W', line: 'ATT' };
+    if (y < 46) return { family: 'DM', line: 'MID' };
+    if (y < 56) return { family: 'CM', line: 'MID' };
+    return { family: 'AM', line: 'MID' };
+  }
+  return { family: wide ? 'W' : 'ST', line: 'ATT' };
+}
+// Once a player is freely moved, the side is no longer a stock formation.
+function markCustom() {
+  cur().formation = 'Custom';
+  const fs = document.getElementById('formSel');
+  if (fs && S.active === 'A') {                              // formSel tracks side A
+    if (!Array.from(fs.options).some((o) => o.value === 'Custom')) fs.add(new Option('Custom', 'Custom'));
+    fs.value = 'Custom';
+  }
+}
 function onDragUp(e) {
   if (!_drag) return;
   const d = _drag; _drag = null;
@@ -174,11 +210,29 @@ function onDragUp(e) {
   d.el.classList.remove('tl-dragging');
   document.querySelectorAll('.tl-chip.tl-drop').forEach((c) => c.classList.remove('tl-drop'));
   if (!d.moved) { openSlotEditor(d.slot); return; }        // a tap → open the editor
+  const xi = cur().xi, a = xi.find((s) => s.id === d.slot);
   const t = targetChip(e.clientX, e.clientY);
   if (t && t.dataset.slot && t.dataset.slot !== d.slot) {   // drop on another chip → swap players
-    const xi = cur().xi, a = xi.find((s) => s.id === d.slot), b = xi.find((s) => s.id === t.dataset.slot);
+    const b = xi.find((s) => s.id === t.dataset.slot);
     if (a && b) { const tmp = a.player; a.player = b.player; b.player = tmp; render(); runSim(); }
+    return;
   }
+  // drop on empty pitch → reposition the player and re-derive their role family (custom formation)
+  const pitch = document.querySelector('.tl-pitch');
+  if (!a || !pitch) return;
+  const rect = pitch.getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+  const nx = Math.max(4, Math.min(96, (e.clientX - rect.left) / rect.width * 100));
+  const ny = Math.max(3, Math.min(96, (rect.bottom - e.clientY) / rect.height * 100));
+  a.x = Math.round(nx); a.y = Math.round(ny);
+  // keep exactly one keeper: a GK stays a GK wherever he roams; nobody else becomes a GK
+  let fam = a.family === 'GK' ? { family: 'GK', line: 'GK' } : familyFromPos(nx, ny);
+  if (fam.family === 'GK' && a.family !== 'GK') fam = { family: 'CB', line: 'DEF' };
+  if (fam.family !== a.family) {
+    a.family = fam.family; a.line = fam.line;
+    a.role = (S.roleDefaults && S.roleDefaults[fam.family]) || Object.keys(S.roles[fam.family] || {})[0] || '';
+  }
+  markCustom(); render(); runSim();
 }
 document.addEventListener('pointermove', onDragMove, { passive: false });
 document.addEventListener('pointerup', onDragUp);
@@ -190,6 +244,26 @@ const UNIT_META = [['attack', 'Attack'], ['midfield', 'Midfield'], ['defense', '
 const METRIC_META = [['xg', 'xG', 2, 1], ['xga', 'xGA', 2, -1], ['possession', 'Possession %', 0, 1],
   ['ppda', 'PPDA', 1, -1], ['progression', 'Progression', 0, 1], ['territory', 'Territory %', 0, 1]];
 const barColor = (v) => v >= 78 ? '#1f9d55' : v >= 60 ? '#5570f0' : v >= 45 ? '#e0a12b' : '#e0325b';
+
+// Recent-form panel inside the matchup card — shows each side's last league + UCL results
+// (and how deep they went in Europe), which nudge the win probabilities.
+const _RND = { Final: 'Final', Semifinals: 'Semis', Quarterfinals: 'QF', 'Round of 16': 'R16', 'Playoff round': 'Playoff', 'League phase': 'League phase', 'Group stage': 'Group' };
+function formCard(r, oppName) {
+  const f = r.form; if (!f) return '';
+  const chips = (rec) => [...(rec || '')].map((c) => `<i class="tl-fchip ${c}">${c}</i>`).join('');
+  const line = (fx, nm) => {
+    const short = esc(nm.split(' ')[0]);
+    if (!fx || (!fx.league && !fx.ucl)) return `<div class="tl-frow"><span class="tl-fnm">${short}</span><span class="tl-fdim">no recent match data</span></div>`;
+    const val = (fx.form >= 0 ? '+' : '') + Number(fx.form).toFixed(2);
+    const lg = fx.league ? `<span class="tl-fseg">Lg ${chips(fx.league.record)}</span>` : '';
+    const uc = fx.ucl ? `<span class="tl-fseg">UCL ${chips(fx.ucl.record)}${fx.ucl.best_round ? ' <em>' + esc(_RND[fx.ucl.best_round] || fx.ucl.best_round) + '</em>' : ''}</span>` : '';
+    return `<div class="tl-frow"><span class="tl-fnm">${short}</span><b class="tl-fval ${fx.form >= 0 ? 'good' : 'bad'}">${val}</b>${lg}${uc}</div>`;
+  };
+  const adj = r.form_adj;
+  const tilt = adj && Math.abs(adj.diff) > 0.05
+    ? `<div class="tl-fnote">↳ recent form tilts the odds toward <b>${esc((adj.diff > 0 ? cur().team : oppName).split(' ')[0])}</b></div>` : '';
+  return `<div class="tl-form"><div class="tl-fhdr">Recent form <span class="muted">last 6 · league + UCL</span></div>${line(f.home, cur().team)}${line(f.away, oppName)}${tilt}</div>`;
+}
 
 function renderResults(r) {
   if (!r || !r.units) return;
@@ -218,22 +292,43 @@ function renderResults(r) {
           <div class="tl-wpseg draw" style="width:${w.draw}%">${w.draw >= 10 ? 'Draw ' + w.draw + '%' : ''}</div>
           <div class="tl-wpseg opp" style="width:${w.away}%">${esc(oppName.split(' ')[0])} ${w.away}%</div></div>
         <div class="tl-xgc"><span>${esc(cur().team.split(' ')[0])} xG <b>${r.metrics.xg.toFixed(2)}</b></span><span>${esc(oppName.split(' ')[0])} xG <b>${(r.opponent_metrics ? r.opponent_metrics.xg : 0).toFixed(2)}</b></span></div>
+        ${formCard(r, oppName)}
         <div class="tl-battles"><div class="tl-blbl"><span>${esc(cur().team.split(' ')[0])}</span><span>${esc(oppName.split(' ')[0])}</span></div>${battles}</div></section>`;
   }
   document.getElementById('tlResults').innerHTML = `
+    ${projCard(r.projection)}
     ${matchup}
     ${vizCard(r.viz)}
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Projected Metrics</h3>${prev ? '<span class="muted">Δ vs last run</span>' : ''}</div><div class="tl-metrics">${metrics}</div></section>
-      <section class="card tl-card"><div class="card-h"><h3>Unit Strengths</h3></div>${units}<div class="tl-foot">* pace is an estimate (no tracking data): position baseline nudged by dribble volume & clearances.</div></section>
+      <section class="card tl-card"><div class="card-h"><h3>Unit Strengths</h3></div>${units}<div class="tl-foot">Ratings &amp; attributes are EA FC / FIFA 26 player cards (stable, ability-based) — pace, shooting, passing &amp; defending are real card values, not season stats.</div></section>
     </div>
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Tactical Weaknesses</h3></div>${weak}</section>
       <section class="card tl-card"><div class="card-h"><h3>Style Match</h3><span class="muted">closest famous sides</span></div>${style}
-        <div class="tl-adv"><button id="advBtn" class="btn btn-ghost">🧠 Ask the AI analyst</button><div id="advOut"></div></div></section>
+        <div class="tl-adv"><div class="tl-advhdr">🧠 AI analyst read</div>
+          <div id="advOut">${_lastAdvText || '<div class="tl-loading sm">Reading your setup…</div>'}</div></div></section>
     </div>`;
   S.lastMetrics[S.active] = { ...r.metrics };
-  document.getElementById('advBtn').onclick = loadAdvisor;
+  scheduleAdvisor();
+}
+
+// ---- season & cup projection ----
+function ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+function projCard(p) {
+  if (!p) return '';
+  const stages = (p.run || []).map((s) => `<div class="tl-pstage"><span class="tl-psl">${esc(s.stage)}</span>
+      <span class="tl-utrack sm"><i style="width:${s.reach}%;background:${barColor(s.reach)}"></i></span><b>${s.reach}%</b></div>`).join('');
+  const league = p.kind === 'club'
+    ? `<div class="tl-projrow"><span class="tl-pbadge">🏆 ${esc(p.league)}</span><b>${ordinal(p.position)}</b>
+        <span class="muted">projected · ${p.points} pts</span></div>` : '';
+  const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
+      <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
+  return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
+      <span class="muted">from this setup${p.kind === 'club' ? '' : ' · WC/Euro'}</span></div>
+    ${league}${cup}
+    <div class="tl-pstages">${stages}</div>
+    <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). Knockout ties carry realistic variance.</div></section>`;
 }
 
 // ---- visualization: shape + passing network + territory heat ----
@@ -273,30 +368,59 @@ function vizCard(viz) {
     <div class="tl-vizlabels"><span>↑ attacking direction</span><span>possession ${viz.possession}% · territory ${viz.territory}%</span></div></section>`;
 }
 
+// The analyst auto-updates when the setup settles (debounced so it doesn't fire on every
+// slider tick), cached by setup so an unchanged state doesn't re-hit the model.
+let _advT, _lastAdvKey = '', _lastAdvText = '';
+function scheduleAdvisor() { clearTimeout(_advT); _advT = setTimeout(loadAdvisor, 1400); }
 async function loadAdvisor() {
-  const out = document.getElementById('advOut'), btn = document.getElementById('advBtn');
-  btn.disabled = true; out.innerHTML = '<div class="tl-loading sm">Analysing…</div>';
-  const r = S.sim;
+  const r = S.sim; if (!r || !r.units) return;
+  const key = JSON.stringify([cur().team, r.metrics, r.units, cur().tactics, hasB() ? other().team : null]);
+  if (key === _lastAdvKey && _lastAdvText) return;         // setup unchanged → keep current read
+  const out = document.getElementById('advOut'); if (out && !_lastAdvText) out.innerHTML = '<div class="tl-loading sm">Reading your setup…</div>';
   const payload = { team: cur().team, metrics: r.metrics, units: r.units, tactics: cur().tactics, weaknesses: r.weaknesses, opponent_name: hasB() ? other().team : null };
   let a; try { a = await fetch('/api/tactics/advisor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { a = null; }
-  btn.disabled = false;
-  if (!a || !a.available) { out.innerHTML = '<div class="tl-advtext muted">AI analyst is unavailable right now.</div>'; return; }
-  out.innerHTML = `<div class="tl-advtext"><p>${esc(a.text).replace(/\n+/g, '</p><p>')}</p></div>`;
+  const el = document.getElementById('advOut'); if (!el) return;
+  if (!a || !a.available) { if (!_lastAdvText) el.innerHTML = '<div class="tl-advtext muted">AI analyst is unavailable right now.</div>'; return; }
+  _lastAdvKey = key; _lastAdvText = `<div class="tl-advtext"><p>${esc(a.text).replace(/\n+/g, '</p><p>')}</p></div>`;
+  el.innerHTML = _lastAdvText;
 }
 
 // ---- init ----
 fillTeams();
+const teamSel = document.getElementById('teamInput'), oppSel = document.getElementById('oppInput');
 document.getElementById('loadBtn').onclick = () => {
-  S.sides.A.team = document.getElementById('teamInput').value.trim() || 'Real Madrid';
+  S.sides.A.team = teamSel.value || 'Real Madrid';
   S.sides.A.formation = document.getElementById('formSel').value || '4-3-3';
-  S.sides.B.team = document.getElementById('oppInput').value.trim();
+  S.sides.B.team = oppSel.value;
   S.active = 'A'; loadAll();
 };
-document.getElementById('formSel').onchange = () => { cur().formation = document.getElementById('formSel').value; loadSide(S.active).then(() => { render(); runSim(); }); };
+// team / opponent selects auto-load on change (like the formation dropdown)
+teamSel.onchange = () => { S.sides.A.team = teamSel.value; S.active = 'A'; loadAll(); };
+// Changing the opponent must KEEP the team you've been building (side A) — its custom
+// positions, roles, swaps and tactics. Only (re)load the opponent side.
+oppSel.onchange = async () => {
+  S.sides.B.team = oppSel.value;
+  if (!S.sides.A.xi.length) { S.active = 'A'; loadAll(); return; }   // A not loaded yet → full load
+  if (S.sides.B.team) {
+    if (S.sides.B.formation === 'Custom') S.sides.B.formation = '4-3-3';  // fresh opponent → stock shape
+    await loadSide('B');
+    if (S.sides.B.error) { S.sides.B.team = ''; S.sides.B.xi = []; S.sides.B.squad = []; ensureOption(oppSel, ''); }
+  } else {
+    S.sides.B.xi = []; S.sides.B.squad = [];
+  }
+  if (!hasB() && S.active === 'B') S.active = 'A';   // opponent cleared while viewing it
+  S.lastMetrics.B = null;
+  render(); runSim();
+};
+document.getElementById('formSel').onchange = () => {
+  const v = document.getElementById('formSel').value;
+  if (v === 'Custom') return;                 // custom layout already applied; picking a preset re-loads it
+  cur().formation = v; loadSide(S.active).then(() => { render(); runSim(); });
+};
 // deep-link a matchup: /tactics.html?a=Real Madrid&b=Manchester City
 const _qp = new URLSearchParams(location.search);
 if (_qp.get('a')) S.sides.A.team = _qp.get('a');
 if (_qp.get('b')) S.sides.B.team = _qp.get('b');
-document.getElementById('teamInput').value = S.sides.A.team;
-document.getElementById('oppInput').value = S.sides.B.team;
+ensureOption(teamSel, S.sides.A.team);
+ensureOption(oppSel, S.sides.B.team);
 loadAll();

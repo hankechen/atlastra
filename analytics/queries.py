@@ -1571,11 +1571,176 @@ class SoccerDB:
                                      "value": fmt(r.value, kind)} for r in sub.itertuples()]})
         return {"available": True, "leaders": leaders}
 
+    _FIFA_FPID = None
+
+    def _fotmob_name_index(self):
+        """{folded full name / 'initial|surname' / surname -> fotmob_player_id} for photos.
+        Built once from player_enrichment (static), so FIFA squad names can resolve a photo."""
+        if SoccerDB._FIFA_FPID is not None:
+            return SoccerDB._FIFA_FPID
+        idx = {}
+        try:
+            rows = self.con.execute(
+                "SELECT pl.player_name, max(pe.fotmob_player_id) FROM players pl "
+                "JOIN player_enrichment pe ON pe.player_id = pl.player_id "
+                "WHERE pe.fotmob_player_id IS NOT NULL GROUP BY pl.player_name").fetchall()
+            for name, fpid in rows:
+                if fpid is None:
+                    continue
+                f = _fold(name)
+                t = f.split()
+                idx.setdefault(f, fpid)
+                if len(t) >= 2:
+                    idx.setdefault(t[0][0] + "|" + t[-1], fpid)
+                    idx.setdefault(t[-1], fpid)          # surname
+                    idx.setdefault(t[-2], fpid)          # alt surname (e.g. Mbappe-Lottin)
+        except Exception:                                # noqa: BLE001
+            pass
+        SoccerDB._FIFA_FPID = idx
+        return idx
+
+    _ATLAS_IDX = None
+
+    def atlas_rating_index(self):
+        """{folded name -> best current-season Atlas rating (max of league & UCL scope)}.
+        Used by the Tactics Lab to detect breakout seasons: if a player's Atlas
+        league/UCL rating clears their FIFA overall, they over-performed and get a boost."""
+        if SoccerDB._ATLAS_IDX is not None:
+            return SoccerDB._ATLAS_IDX
+        idx = {}
+        try:
+            rows = self.con.execute(
+                "SELECT pl.player_name, max(prc.rating) FROM player_ratings_combined prc "
+                "JOIN players pl ON pl.player_id = prc.player_id "
+                "WHERE prc.season = ? AND prc.minutes >= 450 "
+                "GROUP BY pl.player_name", [FOCUS_SEASON]).fetchall()
+            for name, rating in rows:
+                if rating is None:
+                    continue
+                f = _fold(name)
+                t = f.split()
+                idx[f] = max(idx.get(f, 0), int(rating))
+                if len(t) >= 2:
+                    key = t[0][0] + "|" + t[-1]
+                    idx[key] = max(idx.get(key, 0), int(rating))
+        except Exception:                                # noqa: BLE001
+            pass
+        SoccerDB._ATLAS_IDX = idx
+        return idx
+
+    # deepest UCL round reached maps to a "campaign quality" signal (a finalist beat elite
+    # sides; a group/playoff exit did not). Keyed by the round labels stored in ucl_matches.
+    _UCL_DEPTH = {"Final": 1.0, "Semifinals": 0.6, "Quarterfinals": 0.2, "Round of 16": -0.2,
+                  "Playoff round": -0.5, "League phase": -0.7, "Group stage": -0.7,
+                  "Qualifying": -0.9, "Preliminary": -0.9}
+    # our Tactics Lab team names differ from the names stored in ucl_matches — map the ones
+    # that aren't a plain substring (e.g. "PSG" is stored as "Paris Saint-Germain").
+    _UCL_ALIAS = {"PSG": "Paris Saint-Germain", "Internazionale": "Inter",
+                  "Bayern München": "Bayern", "Atlético Madrid": "Atlético",
+                  "Borussia Dortmund": "Dortmund", "Milan": "Milan"}
+
+    def team_form_rating(self, team: str, season: str = FOCUS_SEASON, last: int = 6) -> dict:
+        """Recent-form rating for a CLUB from its latest league AND UCL results — a signed
+        score (~-1 weak … +1 strong, 0 = average) the Tactics Lab uses to nudge a matchup.
+        Combines points-per-game + xG differential (league) with UCL results + how deep the
+        club went (a finalist outranks a group-stage exit). Returns {} for teams we can't map."""
+        def _clip(v, lo=-1.0, hi=1.0):
+            return max(lo, min(hi, v))
+
+        def _norm_ppg(ppg):
+            return _clip((ppg - 1.5) / 1.5)                    # 1.5 ppg ≈ average form
+
+        out = {"form": 0.0}
+        # ---- league: team_match_stats (has xG) ----
+        try:
+            lf = self.team_form(team, season, last)
+        except Exception:                                       # noqa: BLE001
+            lf = None
+        league_score = None
+        if lf is not None and len(lf):
+            pts = lf["result"].map({"W": 3, "D": 1, "L": 0})
+            ppg = float(pts.mean())
+            xgd = float((lf["xg_for"] - lf["xg_against"]).mean())
+            league_score = 0.6 * _norm_ppg(ppg) + 0.4 * _clip(xgd / 1.5)
+            out["league"] = {"score": round(league_score, 3), "ppg": round(ppg, 2),
+                             "xgdiff": round(xgd, 2), "n": int(len(lf)),
+                             "record": "".join(lf["result"].tolist()[::-1])}   # oldest→newest
+        # ---- UCL: ucl_matches (results + how far they got) ----
+        ucl_score = None
+        tok = self._UCL_ALIAS.get(team, team)
+        try:
+            latest = self.con.execute("SELECT max(season) FROM ucl_matches").fetchone()[0]
+            rows = self.con.execute(
+                """SELECT home_name, away_name, home_goals, away_goals, round
+                   FROM ucl_matches
+                   WHERE season = ? AND home_goals IS NOT NULL
+                     AND (home_name ILIKE '%'||?||'%' OR away_name ILIKE '%'||?||'%')
+                   ORDER BY match_date DESC LIMIT ?""",
+                [latest, tok, tok, last]).fetchall()
+        except Exception:                                       # noqa: BLE001
+            rows = []
+        if rows:
+            ftok = _fold(tok)
+            def _is_home(name):
+                return ftok in _fold(name)
+            pts, results, depth, best_round = [], [], -0.7, None
+            for hn, an, hg, ag, rnd in rows:
+                is_home = _is_home(hn)
+                gf, ga = (hg, ag) if is_home else (ag, hg)
+                pts.append(3 if gf > ga else 1 if gf == ga else 0)
+                results.append("W" if gf > ga else "D" if gf == ga else "L")
+                dv = self._UCL_DEPTH.get(rnd, -0.5)
+                if dv >= depth:
+                    depth, best_round = dv, rnd
+            ppg = sum(pts) / len(pts)
+            ucl_score = 0.4 * _norm_ppg(ppg) + 0.6 * depth
+            out["ucl"] = {"score": round(ucl_score, 3), "ppg": round(ppg, 2),
+                          "depth": round(depth, 2), "n": len(rows),
+                          "record": "".join(results[::-1]), "best_round": best_round}
+        # ---- combine (both matter equally, per the design) ----
+        parts = [s for s in (league_score, ucl_score) if s is not None]
+        if parts:
+            if league_score is not None and ucl_score is not None:
+                out["form"] = round(0.5 * league_score + 0.5 * ucl_score, 3)
+            else:
+                out["form"] = round(parts[0], 3)
+        return out
+
     def tactics_squad(self, team: str, season: str = FOCUS_SEASON) -> list[dict]:
-        """A team's players with rating, detailed position, per-90 stats and rate stats —
-        the raw material the Tactics Lab engine turns into role/unit strengths. Combined
-        stats are row-stacked per competition, so we aggregate per player (sum counts,
-        minutes-weighted rates) for the season."""
+        """A team's squad for the Tactics Lab. Clubs are built from the FIFA / EA FC roster
+        (current transfers, ability-based ratings + attributes); national teams fall back to
+        World Cup data. Photos are resolved from our FotMob enrichment by name where possible."""
+        from webapp import fifa
+        roster = fifa.club_squad(team)
+        if roster:
+            idx = self._fotmob_name_index()
+
+            def photo_for(c):
+                for nm in (c["n"], c.get("ln")):         # try short then long name
+                    if not nm:
+                        continue
+                    t = _fold(nm).split()
+                    if not t:
+                        continue
+                    for k in (_fold(nm), (t[0][0] + "|" + t[-1]) if len(t) >= 2 else None, t[-1]):
+                        fp = idx.get(k) if k else None
+                        if fp:
+                            return self.player_photo(fp)
+                return None
+            out = []
+            for c in roster:
+                out.append({
+                    "player": c["n"], "position": c["pos"], "rating": c["o"],
+                    "minutes": None, "photo": photo_for(c),
+                    "fifa": {k: c[k] for k in ("o", "pac", "sho", "pas", "dri", "def", "phy", "hea")},
+                    "foot": c.get("foot"), "per90": {}, "pct": {},
+                })
+            return out
+        return self._tactics_squad_national(team)
+
+    def _tactics_squad_db(self, team: str, season: str = FOCUS_SEASON) -> list[dict]:
+        """Legacy DB-derived squad (Understat/FotMob season stats). Kept as a reference; the
+        live path now uses FIFA rosters for clubs."""
         q = """
         WITH agg AS (
           SELECT player_id, sum(minutes) mins, sum(goals) g, sum(assists) a,

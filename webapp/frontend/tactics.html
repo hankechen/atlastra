@@ -6,7 +6,7 @@
 <title>Atlastra — Tactics Lab</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=75">
+<link rel="stylesheet" href="/css/styles.css?v=78">
 </head>
 <body>
 <div class="app">
@@ -19,14 +19,14 @@
 
     <div class="page-head">
       <div><h2>Tactics Lab <span class="tl-beta">beta</span></h2>
-        <p>An explainable tactical sandbox. Build an XI, assign roles, tune the system — and see the projected profile, weaknesses and <b>why</b>, grounded in real player data. Add an opponent to simulate the matchup.</p></div>
+        <p>An explainable tactical sandbox built on <b>EA FC / FIFA 26 player ratings</b>. Build an XI, assign roles, tune the system — and see the projected profile, league &amp; cup projections, weaknesses and <b>why</b>. Add an opponent to simulate the matchup.</p></div>
     </div>
 
     <!-- controls -->
     <div class="tl-controls">
-      <label class="tl-ctl"><span>Team</span><input id="teamInput" list="teamList" placeholder="e.g. Real Madrid"><datalist id="teamList"></datalist></label>
+      <label class="tl-ctl"><span>Team</span><select id="teamInput"></select></label>
       <label class="tl-ctl"><span>Formation</span><select id="formSel"></select></label>
-      <label class="tl-ctl"><span>Opponent <i class="tl-opt">(optional)</i></span><input id="oppInput" list="teamList" placeholder="none — profile mode"></label>
+      <label class="tl-ctl"><span>Opponent <i class="tl-opt">(optional)</i></span><select id="oppInput"></select></label>
       <button id="loadBtn" class="btn btn-primary">Load</button>
     </div>
 
@@ -34,6 +34,6 @@
   </main>
 </div>
 <script src="/js/api.js?v=29"></script>
-<script src="/js/tactics.js?v=8"></script>
+<script src="/js/tactics.js?v=14"></script>
 </body>
 </html>

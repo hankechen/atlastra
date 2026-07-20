@@ -7,6 +7,7 @@ One signed /api/data/matchDetails call per match feeds every tab (header, stats,
 lineups, shot map, timeline, players), cached briefly so opening a match is one
 fetch. FotMob answers 200 from a datacenter IP, so this runs on the server 24/7.
 """
+import gzip
 import json
 import re
 import time
@@ -1423,6 +1424,71 @@ def player_bio(pid: int) -> dict:
            "height_cm": int(height_cm) if height_cm else None,
            "height": (val("height") or None)}
     _PBIO_CACHE[pid] = (time.time() + 86400, out)
+    return out
+
+
+# --- UCL top speed (real UEFA tracking) → pace for the Tactics Lab -----------
+# The Champions League exposes physical stats FotMob doesn't for domestic leagues.
+# We pull the full "Top speed" leaderboard (max sprint km/h per player, keyed by FotMob
+# player id) so the Tactics Lab can use REAL pace instead of an estimate. Cached 12h.
+_UCL_SPEED_CACHE: dict[str, tuple] = {}
+
+
+_TEAMSQUAD_CACHE: dict[str, tuple] = {}
+
+
+def fotmob_squad(team_id) -> list:
+    """Current squad from FotMob's team page: [{id, name, group, shirt}] (group is
+    keepers/defenders/midfielders/attackers). The authoritative live roster + player ids
+    (→ correct photos). Cached 6h."""
+    key = str(team_id)
+    hit = _TEAMSQUAD_CACHE.get(key)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    out = []
+    try:
+        d = _auth.get(f"/api/data/teams?id={team_id}")
+        for grp in (((d or {}).get("squad") or {}).get("squad") or []):
+            title = grp.get("title")
+            if title == "coach":
+                continue
+            for m in (grp.get("members") or []):
+                if m.get("id") and m.get("name"):
+                    out.append({"id": m["id"], "name": m["name"], "group": title,
+                                "shirt": m.get("shirtNumber")})
+    except Exception:                                      # noqa: BLE001
+        pass
+    if out:
+        _TEAMSQUAD_CACHE[key] = (time.time() + 6 * 3600, out)
+    return out
+
+
+def ucl_top_speeds() -> dict:
+    """{fotmob_player_id: top_speed_kmh} for the current Champions League season."""
+    hit = _UCL_SPEED_CACHE.get("all")
+    if hit and hit[0] > time.time():
+        return hit[1]
+    out: dict[int, float] = {}
+    try:
+        d = _auth.get("/api/data/leagues?id=42")          # no season → current UCL
+        ts = next((c for c in ((d or {}).get("stats", {}).get("players") or [])
+                   if c.get("header") == "Top speed"), None)
+        url = ts and ts.get("fetchAllUrl")
+        if url:
+            req = urllib.request.Request(url, headers={"User-Agent": _UA})
+            raw = urllib.request.urlopen(req, timeout=20).read()
+            try:
+                raw = gzip.decompress(raw)
+            except Exception:                              # noqa: BLE001
+                pass
+            lst = (json.loads(raw).get("TopLists") or [{}])[0].get("StatList") or []
+            for e in lst:
+                pid, v = e.get("ParticiantId"), e.get("StatValue")
+                if pid and v:
+                    out[int(pid)] = float(v)
+    except Exception:                                      # noqa: BLE001
+        pass
+    _UCL_SPEED_CACHE["all"] = (time.time() + 12 * 3600, out)
     return out
 
 

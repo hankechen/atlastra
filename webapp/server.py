@@ -78,14 +78,100 @@ from webapp import blog  # noqa: E402
 from webapp import tactics  # noqa: E402
 
 _TAC_SQUAD: dict = {}                                     # team -> (expiry, squad) cache
+# Club → FotMob team id (authoritative live roster + correct player-photo ids).
+_FOTMOB_TEAM_ID = {
+    "Real Madrid": 8633, "Barcelona": 8634, "Manchester City": 8456, "Arsenal": 9825,
+    "Liverpool": 8650, "Bayern München": 9823, "PSG": 9847, "Internazionale": 8636,
+    "Atlético Madrid": 9906, "Bayer Leverkusen": 8178, "Manchester United": 10260,
+    "Chelsea": 8455, "Tottenham Hotspur": 8586, "Newcastle United": 10261, "Napoli": 9875,
+    "Milan": 8564, "Juventus": 9885, "Borussia Dortmund": 9789, "Aston Villa": 10252,
+    "Bournemouth": 8678,
+}
+_GROUP_POS = {"keepers": "GK", "defenders": "CB", "midfielders": "CM", "attackers": "ST"}
+# Manual roster overrides {team: [(player_name, fotmob_id)]} — force a player into a squad
+# regardless of FotMob's live roster (e.g. loaned-out players the user wants available).
+_SQUAD_ADD = {
+    "Real Madrid": [("Endrick", 1406729)],
+}
+
+
+def _build_club_squad(team, tid):
+    """Current squad from FotMob's team page (roster + correct player-photo ids), with FIFA/
+    EA FC ratings + attributes matched in by name. `_SQUAD_ADD` force-includes extra players."""
+    from webapp import fifa
+    members = list(getattr(live_feed, "fotmob_squad", lambda _i: [])(tid) or [])
+    have = {m["name"].lower() for m in members}
+    for nm, pid in _SQUAD_ADD.get(team, []):
+        if nm.lower() not in have:
+            members.append({"id": pid, "name": nm, "group": "attackers", "shirt": None})
+    out = []
+    for m in members:
+        c = fifa.match(m["name"])
+        pos = (c.get("pos") if c else None) or _GROUP_POS.get(m.get("group"), "CM")
+        out.append({
+            "player": m["name"], "position": pos, "rating": (c["o"] if c else 70),
+            "minutes": None, "shirt": m.get("shirt"),
+            "photo": f"https://images.fotmob.com/image_resources/playerimages/{m['id']}.png",
+            "fifa": ({k: c[k] for k in ("o", "pac", "sho", "pas", "dri", "def", "phy", "hea")} if c else None),
+            "per90": {}, "pct": {},
+        })
+    return out
 
 
 def _tac_squad(d, team):
     import time as _t
+    import re as _re
     hit = _TAC_SQUAD.get(team.lower())
     if hit and hit[0] > _t.time():
         return hit[1]
-    sq = d.tactics_squad(team) if team else []
+    from webapp import fifa
+    tid = _FOTMOB_TEAM_ID.get(team)
+    if tid:                                              # club → FotMob roster + FIFA ratings
+        sq = _build_club_squad(team, tid)
+    else:                                                # national → World Cup squad + FIFA
+        sq = d.tactics_squad(team) if team else []
+        for p in sq:
+            if p.get("fifa"):
+                continue
+            c = fifa.match(p.get("player") or "")
+            if c:
+                p["rating"] = c["o"]
+                p["fifa"] = c
+    # REAL top sprint speed (km/h) from the UCL physical-tracking leaderboard, keyed by the
+    # FotMob player id embedded in each photo URL. FIFA pace wins in the engine, but keep it.
+    speeds = getattr(live_feed, "ucl_top_speeds", lambda: {})() or {}
+    if speeds:
+        for p in sq:
+            m = _re.search(r"playerimages/(\d+)", p.get("photo") or "")
+            kmh = speeds.get(int(m.group(1))) if m else None
+            if kmh:
+                p["top_speed"] = kmh
+    # Breakout boost: if a player's current-season Atlas league/UCL rating clears their FIFA
+    # overall, they over-performed the market's assessment — nudge their effective rating and
+    # attributes up so the sim rewards it. FIFA remains the base (Atlas is season-dependent).
+    from analytics.queries import _fold
+    atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
+    if atlas:
+        for p in sq:
+            f = p.get("fifa")
+            if not f:
+                continue
+            nm = _fold(p.get("player") or "")
+            t = nm.split()
+            ar = atlas.get(nm)
+            if ar is None and len(t) >= 2:
+                ar = atlas.get(t[0][0] + "|" + t[-1])
+            if ar is None:
+                continue
+            base = f.get("o", p.get("rating") or 70)
+            if ar > base + 2:
+                boost = min(6.0, (ar - base - 2) * 0.55)
+                p["breakout"] = round(boost, 1)
+                p["rating"] = min(99, int(round(base + boost)))
+                f["o"] = p["rating"]
+                for k in ("pac", "sho", "pas", "dri", "def", "phy", "hea"):
+                    if k in f and f[k]:
+                        f[k] = min(99, int(round(f[k] + boost)))
     _TAC_SQUAD[team.lower()] = (_t.time() + 600, sq)
     return sq
 
@@ -98,9 +184,26 @@ def _xi_wire(xi):
         out.append({"id": s["id"], "family": s["family"], "line": s["line"],
                     "x": s["x"], "y": s["y"], "role": s["role"],
                     "player": ({"player": p["player"], "rating": p["rating"],
-                                "position": p["position"], "photo": p.get("photo")}
+                                "position": p["position"], "photo": p.get("photo"),
+                                "breakout": p.get("breakout")}
                                if p else None)})
     return out
+
+
+_TAC_FORM: dict = {}                                     # cache: team -> form rating dict
+
+
+def _team_form(d, team):
+    """Cached recent league + UCL form rating for a club (see SoccerDB.team_form_rating)."""
+    if not team:
+        return {"form": 0.0}
+    key = team.lower()
+    if key not in _TAC_FORM:
+        try:
+            _TAC_FORM[key] = d.team_form_rating(team) or {"form": 0.0}
+        except Exception:                                # noqa: BLE001
+            _TAC_FORM[key] = {"form": 0.0}
+    return _TAC_FORM[key]
 
 
 def _tac_rebuild(d, team, slots):
@@ -730,14 +833,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if u.path == "/api/tactics/sim":               # Tactics Lab simulation
             with SoccerDB(read_only=DB_READ_ONLY) as d:
-                xi, _ = _tac_rebuild(d, b.get("team", ""), b.get("xi"))
+                team = b.get("team", "")
+                xi, _ = _tac_rebuild(d, team, b.get("xi"))
                 opp = None
+                fh = fa = None
                 ob = b.get("opponent") or {}
                 if ob.get("team") and ob.get("xi"):
                     oxi, _ = _tac_rebuild(d, ob["team"], ob["xi"])
                     opp = {"name": ob["team"], "tactics": ob.get("tactics"),
                            "units": tactics.team_units(oxi, ob.get("tactics"))}
-            self._json(tactics.simulate(xi, b.get("tactics"), opponent=opp))
+                    # recent league + UCL form for each side, to nudge the matchup
+                    fh_info = _team_form(d, team)
+                    fa_info = _team_form(d, ob["team"])
+                    fh, fa = fh_info.get("form"), fa_info.get("form")
+                res = tactics.simulate(xi, b.get("tactics"), opponent=opp, team=team,
+                                       form_home=fh, form_away=fa)
+                if opp:
+                    res["form"] = {"home": fh_info, "away": fa_info}
+            self._json(res)
             return
         if u.path == "/api/tactics/advisor":           # AI analyst writeup (Gemini free tier)
             self._json(_tactics_advisor(b))
