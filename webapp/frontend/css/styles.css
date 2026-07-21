@@ -1967,6 +1967,31 @@ a.hl-scorer:hover{color:var(--accent);text-decoration:underline}
 .nm .hl-mark{transform:translateY(-1px)}
 
 /* home Signature Skills promo card */
+/* Tactics Lab home-page promo banner */
+.tlp{display:flex;gap:22px;align-items:center;margin-top:18px;overflow:hidden;position:relative;
+  background:linear-gradient(135deg,var(--accent-soft),var(--card) 62%);
+  border:1px solid var(--border2);text-decoration:none;color:var(--text);
+  transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
+.tlp:hover{transform:translateY(-2px);border-color:var(--accent);
+  box-shadow:0 12px 30px -14px rgba(85,112,240,.55)}
+.tlp-copy{flex:1;min-width:0}
+.tlp-eyebrow{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--accent2);background:rgba(125,92,245,.14);border:1px solid rgba(125,92,245,.28);
+  padding:3px 9px;border-radius:999px;margin-bottom:10px}
+.tlp-title{font-size:30px;font-weight:800;line-height:1.05;margin:0 0 8px;letter-spacing:-.01em}
+.tlp-sub{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 12px;max-width:52ch}
+.tlp-sub b{color:var(--text);font-weight:700}
+.tlp-feats{list-style:none;margin:0 0 16px;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:6px 18px}
+.tlp-feats li{font-size:12.5px;color:var(--text);display:flex;align-items:center;gap:7px}
+.tlp-feats li i{font-style:normal;font-size:13px;flex:none;width:18px;text-align:center}
+.tlp-btn{display:inline-flex;align-items:center}
+.tlp-viz{flex:none;width:172px;align-self:stretch;display:flex;align-items:center;justify-content:center}
+.tlp-viz svg{width:100%;height:auto;max-height:210px;filter:drop-shadow(0 8px 20px rgba(0,0,0,.35))}
+@media (max-width:760px){
+  .tlp{flex-direction:column;align-items:stretch}
+  .tlp-viz{width:100%;max-width:220px;margin:0 auto}
+  .tlp-feats{grid-template-columns:1fr}
+}
 .sig-promo{background:linear-gradient(150deg,var(--accent-soft),var(--card))}
 .sig-promo-sub{color:var(--muted);font-size:13px;margin:-2px 0 14px}
 .sig-promo-sub .hl-mark{width:16px;height:16px;font-size:9px}
