@@ -1738,6 +1738,105 @@ class SoccerDB:
             return out
         return self._tactics_squad_national(team)
 
+    def _tac_photo_for_name(self, name: str):
+        """FotMob photo for a bare player name via the enrichment name index (folded full /
+        initial+surname / surname). Lets a what-if player carry a photo into any squad."""
+        idx = self._fotmob_name_index()
+        t = _fold(name).split()
+        for k in (_fold(name), (t[0][0] + "|" + t[-1]) if len(t) >= 2 else None,
+                  t[-1] if t else None):
+            fp = idx.get(k) if k else None
+            if fp:
+                return self.player_photo(fp)
+        return None
+
+    def tactics_player(self, name: str) -> dict | None:
+        """Resolve ANY player by name into a Tactics-Lab engine player dict (FIFA attrs +
+        photo + position), independent of team — so a user can drop e.g. Rodri into any
+        squad as a 'what-if' transfer. Prefers the FIFA/EA FC card (same source the club
+        squads use); falls back to DB season stats when the player has no FIFA card."""
+        from webapp import fifa
+        c = fifa.match(name)
+        if c:
+            return {
+                "player": name, "position": c.get("pos") or "CM", "rating": c["o"],
+                "minutes": None, "photo": self._tac_photo_for_name(name),
+                "fifa": {k: c[k] for k in ("o", "pac", "sho", "pas", "dri", "def", "phy", "hea")},
+                "per90": {}, "pct": {},
+            }
+        return self._tactics_player_db(name)
+
+    def _tactics_player_db(self, name: str, season: str = FOCUS_SEASON) -> dict | None:
+        """DB season-stats fallback for a single player with no FIFA card (per-90 + pct so
+        the engine's stat-derived attributes still work)."""
+        q = """
+        WITH agg AS (
+          SELECT player_id, sum(minutes) mins, sum(goals) g, sum(assists) a,
+                 sum(xg) xg, sum(xa) xa, sum(shots) sh, sum(chances_created) cc,
+                 sum(big_chances_created) bcc, sum(dribbles_completed) drb,
+                 sum(tackles) tkl, sum(interceptions) intc, sum(passes_completed) pc,
+                 sum(clearances) clr,
+                 sum(duels_won_pct*minutes)/nullif(sum(minutes),0) dwp,
+                 sum(pass_accuracy_pct*minutes)/nullif(sum(minutes),0) pap,
+                 sum(aerial_duels_won_pct*minutes)/nullif(sum(minutes),0) awp,
+                 sum(dribble_success_pct*minutes)/nullif(sum(minutes),0) dsp
+          FROM v_stats_combined_player WHERE season = ? GROUP BY player_id)
+        SELECT f.player, COALESCE(f.detailed_position, f.main_position) AS pos, f.rating,
+               a.mins, a.g, a.a, a.xg, a.xa, a.sh, a.cc, a.bcc, a.drb, a.tkl, a.intc,
+               a.pc, a.clr, a.dwp, a.pap, a.awp, a.dsp, pe.fpid
+        FROM v_player_profile_full f JOIN agg a ON a.player_id = f.player_id
+        LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                   WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+               ON pe.player_id = f.player_id
+        WHERE lower(f.player) = lower(?) AND a.mins >= 200 AND f.rating IS NOT NULL
+        ORDER BY a.mins DESC LIMIT 1
+        """
+        df = self.con.execute(q, [season, name]).df()
+        if df.empty:
+            return None
+        r = next(df.itertuples())
+        mins = r.mins or 1
+
+        def p90(v):
+            return round((v or 0) / mins * 90, 3)
+        return {
+            "player": r.player, "position": r.pos, "rating": _i(r.rating),
+            "minutes": _i(r.mins), "photo": self.player_photo(r.fpid),
+            "per90": {"goals": p90(r.g), "assists": p90(r.a), "xg": p90(r.xg),
+                      "xa": p90(r.xa), "shots": p90(r.sh), "chances": p90(r.cc),
+                      "big_chances": p90(r.bcc), "dribbles": p90(r.drb),
+                      "tackles": p90(r.tkl), "interceptions": p90(r.intc),
+                      "passes": p90(r.pc), "clearances": p90(r.clr)},
+            "pct": {"duels": _r(r.dwp, 0), "passing": _r(r.pap, 0),
+                    "aerial": _r(r.awp, 0), "dribble": _r(r.dsp, 0)},
+        }
+
+    def tactics_search(self, q: str, limit: int = 12) -> list[dict]:
+        """Name search for the Tactics Lab 'add player' box — DB players (nice names +
+        photos) enriched with the FIFA rating/position the engine uses. Ordered by quality."""
+        q = (q or "").strip()
+        if len(q) < 2:
+            return []
+        from webapp import fifa
+        rows = self.con.execute(
+            "SELECT f.player, COALESCE(f.detailed_position, f.main_position) AS pos, "
+            "       f.rating, f.team, pe.fpid "
+            "FROM v_player_profile_full f "
+            "LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment "
+            "  WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe "
+            "  ON pe.player_id = f.player_id "
+            "WHERE lower(f.player) LIKE ? AND f.rating IS NOT NULL "
+            "ORDER BY f.rating DESC NULLS LAST LIMIT ?",
+            ["%" + q.lower() + "%", limit]).fetchall()
+        out = []
+        for player, pos, rating, team, fpid in rows:
+            c = fifa.match(player)
+            out.append({"player": player,
+                        "position": (c.get("pos") if c else pos) or "CM",
+                        "rating": (c["o"] if c else (_i(rating) or 70)),
+                        "team": team, "photo": self.player_photo(fpid)})
+        return out
+
     def _tactics_squad_db(self, team: str, season: str = FOCUS_SEASON) -> list[dict]:
         """Legacy DB-derived squad (Understat/FotMob season stats). Kept as a reference; the
         live path now uses FIFA rosters for clubs."""
@@ -4269,6 +4368,174 @@ class SoccerDB:
         r = rows[0]
         enough = r["big"]["minutes"] >= 270 and r["weak"]["minutes"] >= 270
         return {"available": enough, **r, "season": season}
+
+    # ---------------------------------------------------------------- finishing
+    #  Goals vs Expected (xG) — finishing over/under-performance for a player-season,
+    #  from the Understat per-match log. Quantifies how clinical (or wasteful) a
+    #  finisher has been vs what his chances were worth, ranked against position peers,
+    #  with a cumulative Goals-vs-xG timeline for the profile chart. Domestic only.
+    _FINISHING_MIN_SHOTS = 12   # need enough attempts for the differential to mean anything
+
+    @staticmethod
+    def _finishing_verdict(pct, diff):
+        """A peer-percentile verdict (pct = percentile of G-xG per 90 within position);
+        falls back to the raw differential when there is no cohort to rank against."""
+        if pct is not None:
+            if pct >= 85:  return "Elite Finisher", "good"
+            if pct >= 68:  return "Clinical Finisher", "good"
+            if pct >= 55:  return "Efficient Finisher", "good"
+            if pct >= 42:  return "Finishes to Expectation", "neutral"
+            if pct >= 25:  return "Below Expectation", "bad"
+            return "Wasteful Finishing", "bad"
+        if diff >= 2.0:   return "Overperforming xG", "good"
+        if diff <= -2.0:  return "Underperforming xG", "bad"
+        return "Finishes to Expectation", "neutral"
+
+    def web_finishing(self, name: str, season: str = FOCUS_SEASON) -> dict:
+        """Finishing profile: Goals vs xG (over/under-performance), conversion, a
+        percentile verdict vs same-position peers, and a cumulative-timeline for the
+        chart. Hidden (available=False) for players without enough shots this season."""
+        if not self._table_exists("player_match_log"):
+            return {"available": False}
+        pid = self.find_player_id(name, season)
+        if not pid:
+            return {"available": False}
+        rows = self.con.execute("""
+            SELECT l.match_date, l.is_home, l.goals, l.shots, l.xg,
+                   COALESCE(t.team_name, 'Opponent') AS opp
+            FROM player_match_log l
+            LEFT JOIN teams t ON t.team_id = l.opponent_team_id
+            WHERE l.player_id = ? AND l.season = ? AND l.minutes > 0
+            ORDER BY l.match_date, l.game_id
+        """, [pid, season]).fetchall()
+        if not rows:
+            return {"available": False}
+
+        goals = sum(int(r[2]) for r in rows)
+        shots = sum(int(r[3]) for r in rows)
+        xg = sum(float(r[4]) for r in rows)
+        if shots < self._FINISHING_MIN_SHOTS:
+            return {"available": False}
+
+        # cumulative Goals-vs-xG timeline (one point per appearance, chronological)
+        timeline, cg, cx = [], 0, 0.0
+        for r in rows:
+            cg += int(r[2]); cx += float(r[4])
+            timeline.append({
+                "date": str(r[0]), "home": bool(r[1]), "opp": r[5],
+                "goals": int(r[2]), "xg": round(float(r[4]), 2),
+                "cum_goals": cg, "cum_xg": round(cx, 2),
+            })
+
+        # percentile of (G - xG) per 90 within the player's coarse position group
+        # (only shooters with a meaningful sample are in the cohort).
+        pr = self.con.execute("""
+            WITH agg AS (
+              SELECT l.player_id, pl.position_group AS grp,
+                     SUM(l.goals) - SUM(l.xg) AS diff, SUM(l.minutes) AS mins
+              FROM player_match_log l JOIN players pl USING(player_id)
+              WHERE l.season = ? AND pl.position_group IS NOT NULL
+              GROUP BY 1, 2
+              HAVING SUM(l.shots) >= ? AND SUM(l.minutes) > 0
+            ),
+            ranked AS (
+              SELECT player_id, grp,
+                     ROUND(100 * percent_rank() OVER (
+                         PARTITION BY grp ORDER BY diff / mins)) AS pct,
+                     COUNT(*) OVER (PARTITION BY grp) AS cohort
+              FROM agg)
+            SELECT pct, cohort FROM ranked WHERE player_id = ?
+        """, [season, self._FINISHING_MIN_SHOTS, pid]).fetchone()
+        pct = int(pr[0]) if pr and pr[0] is not None else None
+        cohort = int(pr[1]) if pr and pr[1] is not None else None
+
+        pos = self.con.execute("""
+            SELECT COALESCE(f.detailed_position, f.main_position, pl.position_group)
+            FROM players pl LEFT JOIN v_player_profile_full f ON f.player_id = pl.player_id
+            WHERE pl.player_id = ?""", [pid]).fetchone()
+        diff = round(goals - xg, 1)
+        verdict, verdict_class = self._finishing_verdict(pct, goals - xg)
+        return {
+            "available": True, "season": season, "position": (pos[0] if pos else None),
+            "goals": goals, "xg": round(xg, 1), "diff": diff,
+            "shots": shots, "conversion": round(100 * goals / shots, 1) if shots else 0.0,
+            "shots_per_goal": round(shots / goals, 1) if goals else None,
+            "percentile": pct, "cohort": cohort,
+            "verdict": verdict, "verdict_class": verdict_class,
+            "timeline": timeline,
+        }
+
+    # ------------------------------------------------------- fair market value
+    #  A GradientBoosting model (ml/train_market_value.py) estimates a player's
+    #  "fair" value from age + Atlastra rating + per-90 output + league, then flags
+    #  over/under-valuation vs the actual Transfermarkt value. Predictions + per-player
+    #  local value-drivers are precomputed into player_value_model / _drivers / _meta.
+    def _value_meta(self, season: str) -> dict | None:
+        if not self._table_exists("player_value_meta"):
+            return None
+        m = self.con.execute(
+            "SELECT n, cv_r2, cv_mae_m FROM player_value_meta WHERE season = ?",
+            [season]).fetchone()
+        return {"n": int(m[0]), "r2": float(m[1]), "mae_m": float(m[2])} if m else None
+
+    def web_value_model(self, name: str, season: str = FOCUS_SEASON) -> dict:
+        """Fair-value verdict + explainable value-drivers for one player (profile card)."""
+        if not self._table_exists("player_value_model"):
+            return {"available": False}
+        pid = self.find_player_id(name, season)
+        if not pid:
+            return {"available": False}
+        r = self.con.execute(
+            """SELECT actual_eur, predicted_eur, ratio, verdict, verdict_class
+               FROM player_value_model WHERE player_id = ? AND season = ?""",
+            [pid, season]).fetchone()
+        if not r:
+            return {"available": False}          # only the ~488 valued players are modelled
+        drivers = self.con.execute(
+            """SELECT label, impact_m FROM player_value_drivers
+               WHERE player_id = ? AND season = ? ORDER BY abs(impact_m) DESC LIMIT 5""",
+            [pid, season]).fetchall()
+        return {
+            "available": True, "season": season,
+            "actual_eur": int(r[0]), "predicted_eur": int(r[1]), "ratio": round(r[2], 3),
+            "verdict": r[3], "verdict_class": r[4],
+            "drivers": [{"label": d[0], "impact_m": round(d[1], 1)} for d in drivers],
+            "model": self._value_meta(season),
+        }
+
+    def web_value_board(self, season: str = FOCUS_SEASON, limit: int = 15) -> dict:
+        """Most under- and over-valued players by the model (a scouting leaderboard)."""
+        if not self._table_exists("player_value_model"):
+            return {"available": False, "error": "Value model not trained yet."}
+
+        def fetch(order: str) -> list:
+            df = self.con.execute(f"""
+                SELECT pl.player_name AS player,
+                       COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position,
+                       f.team, c.rating, pe.fpid,
+                       m.actual_eur, m.predicted_eur, m.ratio, m.verdict
+                FROM player_value_model m JOIN players pl USING(player_id)
+                LEFT JOIN v_player_profile_full f ON f.player_id = m.player_id
+                LEFT JOIN player_ratings_combined c
+                       ON c.player_id = m.player_id AND c.scope='league' AND c.season = ?
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id = m.player_id
+                WHERE m.season = ? ORDER BY m.ratio {order} LIMIT ?
+            """, [season, season, limit]).df()
+            out = []
+            for r in df.itertuples():
+                out.append({
+                    "player": r.player, "position": r.position, "team": r.team,
+                    "rating": None if pd.isna(r.rating) else int(r.rating),
+                    "photo": self.player_photo(r.fpid),
+                    "actual_eur": int(r.actual_eur), "predicted_eur": int(r.predicted_eur),
+                    "ratio": round(float(r.ratio), 2), "verdict": r.verdict,
+                })
+            return out
+
+        return {"available": True, "season": season, "model": self._value_meta(season),
+                "undervalued": fetch("DESC"), "overvalued": fetch("ASC")}
 
     def web_squad_key_players(self, names: list, top: int = 3, season: str = FOCUS_SEASON) -> list:
         """Match SofaScore squad names to our warehouse and return the top-rated few

@@ -12,6 +12,7 @@ import json
 import sqlite3
 import datetime
 import sys
+import threading
 
 try:
     from config import DATA_DIR
@@ -254,19 +255,20 @@ def _local_report(d: dict) -> str:
     ])
 
 
-def scout_report(data: dict, refresh: bool = False) -> dict:
-    if not data or not data.get("name"):
-        return {"available": False, "error": "Player not found."}
-    key = f"{data['name']}|{data.get('season', '')}"
-    con = _conn()
-    if not refresh:
-        row = con.execute("SELECT report, model, generated_at FROM reports WHERE key = ?",
-                          [key]).fetchone()
-        if row:
-            con.close()
-            return {"available": True, "cached": True, "report": row[0], "model": row[1],
-                    "generated_at": row[2], "player": data["name"], "season": data.get("season")}
+# Players whose AI report is currently being written in a background thread, so we
+# don't kick off a second generation for the same player while one is in flight.
+_INFLIGHT: set = set()
+_INFLIGHT_LOCK = threading.Lock()
 
+
+def _cached_row(con, key):
+    return con.execute("SELECT report, model, generated_at FROM reports WHERE key = ?",
+                       [key]).fetchone()
+
+
+def _generate_ai(data: dict) -> tuple:
+    """Write the full scouting report via LLM (Gemini preferred, then Claude), falling
+    back to the instant rule-based report offline. Returns (report, model_used)."""
     user = ("Write the scouting report from this player's data (JSON):\n\n"
             + json.dumps(_summary(data), ensure_ascii=False))
     report, model_used = None, None
@@ -286,11 +288,67 @@ def scout_report(data: dict, refresh: bool = False) -> dict:
             report = None
     if not report:                                      # offline fallback
         report, model_used = _local_report(data), ENGINE_NAME
+    return report, model_used
 
+
+def _write_cache(key: str, report: str, model_used: str) -> str:
     generated_at = datetime.datetime.now().isoformat(timespec="seconds")
+    con = _conn()
     con.execute("INSERT OR REPLACE INTO reports VALUES (?,?,?,?)",
                 [key, report, model_used, generated_at])
     con.commit()
     con.close()
-    return {"available": True, "cached": False, "report": report, "model": model_used,
-            "generated_at": generated_at, "player": data["name"], "season": data.get("season")}
+    return generated_at
+
+
+def _bg_generate(data: dict, key: str):
+    """Run the (slow) LLM generation off the request path and persist it to the cache.
+    Deduped per key so a burst of requests only triggers one generation."""
+    with _INFLIGHT_LOCK:
+        if key in _INFLIGHT:
+            return
+        _INFLIGHT.add(key)
+
+    def run():
+        try:
+            report, model_used = _generate_ai(data)
+            _write_cache(key, report, model_used)
+        except Exception as e:  # noqa: BLE001
+            print(f"scout report bg: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        finally:
+            with _INFLIGHT_LOCK:
+                _INFLIGHT.discard(key)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def scout_report(data: dict, refresh: bool = False) -> dict:
+    """Return a scouting report for a player.
+
+    Insta-load: a cached AI report is served immediately. Otherwise we return the
+    instant rule-based report right away (so the page never blocks on the LLM) and
+    kick off AI generation in the background; the client polls without ``refresh``
+    and swaps in the AI version once it lands in the cache."""
+    if not data or not data.get("name"):
+        return {"available": False, "error": "Player not found."}
+    key = f"{data['name']}|{data.get('season', '')}"
+    con = _conn()
+    if not refresh:
+        row = _cached_row(con, key)
+        con.close()
+        if row:
+            return {"available": True, "cached": True, "pending": False, "report": row[0],
+                    "model": row[1], "generated_at": row[2], "player": data["name"],
+                    "season": data.get("season")}
+    else:
+        con.execute("DELETE FROM reports WHERE key = ?", [key])  # force a fresh AI write
+        con.commit()
+        con.close()
+
+    # No cached report yet -> generate the AI version in the background and return the
+    # instant rule-based report so the page fills immediately.
+    _bg_generate(data, key)
+    generated_at = datetime.datetime.now().isoformat(timespec="seconds")
+    return {"available": True, "cached": False, "pending": True, "report": _local_report(data),
+            "model": ENGINE_NAME, "generated_at": generated_at, "player": data["name"],
+            "season": data.get("season")}

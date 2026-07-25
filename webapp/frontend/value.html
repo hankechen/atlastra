@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Value Finder</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=76">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Value Finder</b></div>
+    <div class="page-head">
+      <div><h2>Value Finder</h2><p>A machine-learning model estimates each player's <b>fair market value</b> from age, Atlastra rating, per-90 output and league — then compares it to the actual Transfermarkt value to surface who looks <b>under-</b> or <b>over-valued</b>.</p></div>
+    </div>
+
+    <div id="vf-out"></div>
+  </main>
+</div>
+<script src="/js/api.js?v=29"></script>
+<script src="/js/value.js?v=1"></script>
+</body>
+</html>

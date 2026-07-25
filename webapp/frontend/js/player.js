@@ -2,7 +2,7 @@ renderSidebar('Players');
 Chart.defaults.color = '#7f8aa3';
 Chart.defaults.borderColor = 'rgba(150,158,178,.22)';
 Chart.defaults.font.family = 'Inter';
-let radarChart, careerChart;
+let radarChart, careerChart, finChart;
 let curSeason = null;                                // selected season (raw code)
 const setText = (id, t) => { const el = document.getElementById(id); if (el) el.textContent = t; };
 
@@ -208,6 +208,22 @@ async function load(name, careerStat = 'xa', season = null) {
         <div class="bgp-row"><label>vs Bottom-half · ${b.weak.apps} apps <b>${b.weak.ga90.toFixed(2)} G+A/90</b></label>${bar(b.weak.ga90, 'weak')}</div>
       </div></div>`;
     document.getElementById('bigGameCard').style.display = '';
+  }).catch(() => {});
+
+  // Finishing vs Expected — Goals − xG over/under-performance (Understat match log).
+  // Shown only for players with enough shots this season; hidden for the rest.
+  api('/api/finishing?name=' + encodeURIComponent(p.name)).then((f) => {
+    if (!f || !f.available) return;
+    renderFinishing(f);
+    document.getElementById('finishingCard').style.display = '';
+  }).catch(() => {});
+
+  // Fair Value model — over/undervalued vs the model estimate, with value-drivers.
+  // Only ~488 players have a Transfermarkt value to model against, so hide otherwise.
+  api('/api/value_model?name=' + encodeURIComponent(p.name)).then((v) => {
+    if (!v || !v.available) return;
+    renderValue(v);
+    document.getElementById('valueCard').style.display = '';
   }).catch(() => {});
 
   // Recent Form — per-match log from FotMob (result, rating, G/A). Needs the FotMob
@@ -471,6 +487,105 @@ function drawCareer(career, stat) {
     options: { plugins: { legend: { display: false }, tooltip: { enabled: true } },
       scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(150,158,178,.22)' }, beginAtZero: true } } },
   });
+}
+
+// Finishing vs Expected: headline (Goals/xG/differential/conversion + peer percentile
+// verdict) plus a cumulative Goals-vs-xG line chart across the season's appearances.
+function renderFinishing(f) {
+  const sign = f.diff > 0 ? '+' : '';
+  const dcls = f.diff >= 0.5 ? 'good' : f.diff <= -0.5 ? 'bad' : 'neutral';
+  document.getElementById('finVerdict').innerHTML =
+    `<span class="fin-badge ${f.verdict_class}">${f.verdict}</span>`;
+  const stat = (v, l, cls) => `<div class="fin-stat"><b class="${cls || ''}">${v}</b><span>${l}</span></div>`;
+  const pctBlock = f.percentile == null ? '' :
+    `<div class="fin-pct"><label>Finishing vs ${(f.position || 'position')} peers
+       <b>${f.percentile}<sup>th</sup> pct</b></label>
+       <div class="fin-pbar"><i class="${dcls}" style="width:${Math.max(2, f.percentile)}%"></i></div></div>`;
+  document.getElementById('finHead').innerHTML =
+    `<div class="fin-head">
+       ${stat(f.goals, 'Goals')}
+       ${stat(f.xg.toFixed(1), 'Expected (xG)')}
+       ${stat(sign + f.diff.toFixed(1), 'G − xG', dcls)}
+       ${stat(f.conversion.toFixed(0) + '%', 'Conversion')}
+       ${stat(f.shots_per_goal == null ? '—' : f.shots_per_goal.toFixed(1), 'Shots / Goal')}
+     </div>${pctBlock}`;
+  const cohort = f.cohort ? ` among ${f.cohort} peers` : '';
+  document.getElementById('finNote').innerHTML =
+    `Cumulative goals vs expected (xG) across ${f.timeline.length} domestic appearances. ` +
+    (f.diff >= 0.5 ? `Scoring <b>${sign}${f.diff.toFixed(1)}</b> above what his chances were worth`
+      : f.diff <= -0.5 ? `Scoring <b>${f.diff.toFixed(1)}</b> below what his chances were worth`
+        : 'Converting his chances almost exactly as expected') +
+    (f.percentile == null ? '' : ` — ${f.percentile}th percentile${cohort}.`);
+  drawFinishing(f.timeline);
+}
+
+function drawFinishing(tl) {
+  if (finChart) finChart.destroy();
+  const short = (d) => { const t = new Date(d); return isNaN(t) ? '' : t.toLocaleDateString([], { month: 'short', day: 'numeric' }); };
+  finChart = new Chart(document.getElementById('finChart'), {
+    type: 'line',
+    data: {
+      labels: tl.map((m) => short(m.date)),
+      datasets: [
+        { label: 'Goals', data: tl.map((m) => m.cum_goals), borderColor: '#34c46a',
+          backgroundColor: 'rgba(52,196,106,.14)', fill: true, tension: .2, pointRadius: 2, borderWidth: 2.5 },
+        { label: 'Expected (xG)', data: tl.map((m) => m.cum_xg), borderColor: '#9aa4ba',
+          borderDash: [5, 4], fill: false, tension: .2, pointRadius: 0, borderWidth: 2 },
+      ],
+    },
+    options: {
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'top', labels: { boxWidth: 12, usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            title: (items) => { const m = tl[items[0].dataIndex]; return `${m.home ? 'vs' : '@'} ${m.opp}`; },
+            afterBody: (items) => { const m = tl[items[0].dataIndex]; return `Match: ${m.goals} G · ${m.xg.toFixed(2)} xG`; },
+          },
+        },
+      },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12, autoSkip: true } },
+        y: { grid: { color: 'rgba(150,158,178,.22)' }, beginAtZero: true } },
+    },
+  });
+}
+
+// Fair Value model: actual (Transfermarkt) vs the model's estimate + verdict, then
+// the explainable value-drivers (each feature's € impact on the estimate).
+function renderValue(v) {
+  const eurM = (e) => '€' + (e / 1e6).toFixed(e >= 1e8 ? 0 : 1) + 'm';
+  document.getElementById('valueBody').innerHTML = (() => {
+    const badge = `<span class="fin-badge ${v.verdict_class}">${v.verdict}</span>`;
+    const gap = Math.round((v.ratio - 1) * 100);
+    const gapTxt = gap === 0 ? 'in line with' : `${Math.abs(gap)}% ${gap > 0 ? 'above' : 'below'}`;
+    const scale = Math.max(v.actual_eur, v.predicted_eur) || 1;
+    const bar = (val, cls, lbl) => `<div class="val-row">
+      <label>${lbl}<b>${eurM(val)}</b></label>
+      <div class="val-bar"><i class="${cls}" style="width:${Math.max(3, val / scale * 100)}%"></i></div></div>`;
+    const drivers = (v.drivers || []).map((d) => {
+      const pos = d.impact_m >= 0;
+      const mag = Math.min(100, Math.abs(d.impact_m) / 60 * 100);
+      return `<div class="val-drv">
+        <span class="val-dl">${d.label}</span>
+        <span class="val-dbar"><i class="${pos ? 'good' : 'bad'}" style="width:${mag}%"></i></span>
+        <b class="${pos ? 'good' : 'bad'}">${pos ? '+' : '−'}€${Math.abs(d.impact_m).toFixed(1)}m</b>
+      </div>`;
+    }).join('');
+    const m = v.model;
+    const note = m ? `Gradient-boosting model · R²≈${m.r2.toFixed(2)}, avg error ≈€${Math.round(m.mae_m)}m over ${m.n} valued players. `
+      : '';
+    return `<div class="val-head">${badge}
+        <span class="val-sum">Model estimate <b>${gapTxt}</b> the market value</span></div>
+      <div class="val-cmp">
+        ${bar(v.actual_eur, 'act', 'Market value (Transfermarkt)')}
+        ${bar(v.predicted_eur, 'pred', 'Model estimate')}
+      </div>
+      <h5 class="val-dh">What drives the estimate</h5>
+      <div class="val-drivers">${drivers || '<span class="muted">—</span>'}</div>
+      <div class="muted" style="font-size:11.5px;margin-top:10px">${note}Estimated from age, rating,
+        per-90 output and league — it does not see contract length, hype or reputation, so
+        highly-priced prospects often read "overvalued".</div>`;
+  })();
 }
 
 // ---- boot ----

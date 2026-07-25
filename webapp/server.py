@@ -176,6 +176,44 @@ def _tac_squad(d, team):
     return sq
 
 
+_TAC_PLAYER: dict = {}                                   # cache: player-name -> engine dict
+
+
+def _tac_player(d, name):
+    """Resolve ONE player (from any team) into a full engine dict — for user-added
+    'what-if' transfers (e.g. dropping Rodri into Real Madrid). Applies the same breakout
+    boost the squad path uses and tags the player's best position family for auto-slotting."""
+    if not name:
+        return None
+    key = name.lower()
+    if key in _TAC_PLAYER:
+        return _TAC_PLAYER[key]
+    p = d.tactics_player(name) if hasattr(d, "tactics_player") else None
+    if not p:
+        return None
+    from analytics.queries import _fold
+    f = p.get("fifa")
+    if f:                                                # breakout boost (mirror _tac_squad)
+        atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
+        nm = _fold(p.get("player") or "")
+        t = nm.split()
+        ar = atlas.get(nm)
+        if ar is None and len(t) >= 2:
+            ar = atlas.get(t[0][0] + "|" + t[-1])
+        base = f.get("o", p.get("rating") or 70)
+        if ar is not None and ar > base + 2:
+            boost = min(6.0, (ar - base - 2) * 0.55)
+            p["breakout"] = round(boost, 1)
+            p["rating"] = min(99, int(round(base + boost)))
+            f["o"] = p["rating"]
+            for k in ("pac", "sho", "pas", "dri", "def", "phy", "hea"):
+                if k in f and f[k]:
+                    f[k] = min(99, int(round(f[k] + boost)))
+    p["family"] = tactics.family_for_position(p.get("position"))
+    _TAC_PLAYER[key] = p
+    return p
+
+
 def _xi_wire(xi):
     """Serialize XI slots for the client — display fields + role, no heavy stats."""
     out = []
@@ -214,7 +252,9 @@ def _tac_rebuild(d, team, slots):
     for s in (slots or []):
         pl = s.get("player")
         name = pl.get("player") if isinstance(pl, dict) else pl
-        full = by_name.get(name)
+        # squad first; if the player isn't on this team (a user-added what-if transfer),
+        # resolve them independently so their real stats still drive the sim.
+        full = by_name.get(name) or (_tac_player(d, name) if name else None)
         xi.append({"id": s.get("id"), "family": s.get("family"), "line": s.get("line"),
                    "x": s.get("x", 50), "y": s.get("y", 50),
                    "role": s.get("role") or tactics.DEFAULT_ROLE.get(s.get("family"), ""),
@@ -233,8 +273,10 @@ def _tactics_advisor(b):
     m, u = b.get("metrics") or {}, b.get("units") or {}
     tac = b.get("tactics") or {}
     weak = [w.get("title") for w in (b.get("weaknesses") or [])]
+    chem = b.get("chemistry") or {}
+    chem_links = [f"{l.get('kind')}: {l.get('title')}" for l in (chem.get("links") or [])]
     opp = b.get("opponent_name")
-    key = hashlib.md5(jdumps([team, m, u, tac, weak, opp]).encode()).hexdigest()
+    key = hashlib.md5(jdumps([team, m, u, tac, weak, chem.get("score"), opp]).encode()).hexdigest()
     if key in _TAC_ADVISOR:
         return {"available": True, "text": _TAC_ADVISOR[key], "cached": True}
     if not gemini.available():
@@ -245,7 +287,9 @@ def _tactics_advisor(b):
         f"Unit strengths (0-99): {u}\n"
         f"Projected metrics: {m}\n"
         f"Tactical settings (0-100, 50=neutral): {tac}\n"
-        f"Flagged weaknesses: {weak or 'none'}\n\n"
+        f"Flagged weaknesses: {weak or 'none'}\n"
+        f"Playstyle chemistry: {chem.get('score', '?')}/99 ({chem.get('label', 'n/a')}); "
+        f"role interactions: {chem_links or 'none'}\n\n"
         "Write 3 tight paragraphs, no headers, ~120 words total: (1) the team's tactical "
         "identity in this setup; (2) the single biggest risk and why; (3) ONE concrete change "
         "with its likely effect. Reference the actual numbers. Confident, specific, no fluff.")
@@ -538,6 +582,16 @@ def api(path: str, q: dict) -> dict | list:
                     "formations": list(tactics.FORMATIONS.keys()),
                     "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,
                     "tactic_keys": tactics.TACTIC_KEYS, "tactic_defaults": tactics.DEFAULT_TACTICS}
+        if path == "/api/tactics/find":        # search any player to add to a squad (what-if)
+            return {"results": d.tactics_search(q.get("q", [""])[0])}
+        if path == "/api/tactics/player":      # resolve one added player into a wire card
+            p = _tac_player(d, q.get("name", [""])[0])
+            if not p:
+                return {"available": False}
+            return {"available": True, "player": {
+                "player": p["player"], "rating": p["rating"], "position": p.get("position"),
+                "photo": p.get("photo"), "breakout": p.get("breakout"),
+                "family": p.get("family")}}
         if path == "/api/overview":
             return d.web_overview()
         if path == "/api/rankings":
@@ -634,6 +688,12 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_big_game_board()
         if path == "/api/big_game":
             return d.web_big_game_player(q.get("name", ["Pedri"])[0])
+        if path == "/api/finishing":              # Goals vs xG finishing profile
+            return d.web_finishing(q.get("name", ["Pedri"])[0])
+        if path == "/api/value_model":            # fair-value model verdict for one player
+            return d.web_value_model(q.get("name", ["Pedri"])[0])
+        if path == "/api/value_board":            # most under/over-valued leaderboard
+            return d.web_value_board(limit=int(q.get("limit", ["15"])[0]))
         if path == "/api/dna_map":
             return d.web_dna_map(int(q.get("min_minutes", ["900"])[0]))
         if path == "/api/archetypes":

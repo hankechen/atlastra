@@ -132,6 +132,24 @@
         <div id="bigGame"></div></section>
     </div>
 
+    <!-- Finishing vs Expected (Goals − xG) — shown only for players who shoot enough -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card" id="finishingCard" style="display:none">
+        <div class="card-h"><h3>Finishing vs Expected ⓘ</h3><span class="see" id="finVerdict"></span></div>
+        <div id="finHead"></div>
+        <div class="fin-chart"><canvas id="finChart" height="200"></canvas></div>
+        <div class="muted" id="finNote" style="font-size:12px;margin-top:8px"></div>
+      </section>
+    </div>
+
+    <!-- Fair Value (ML model) — shown only for players with a modelled market value -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card" id="valueCard" style="display:none">
+        <div class="card-h"><h3>Fair Value Model ⓘ</h3><a class="see" href="/value.html">Value Finder →</a></div>
+        <div id="valueBody"></div>
+      </section>
+    </div>
+
     <!-- highlights video + AI signature-skills (Gemini reads the reel) — shown when found -->
     <div class="grid" style="grid-template-columns:1fr 1fr; margin-top:18px">
       <section class="card" id="hlVidCard" style="display:none">
@@ -152,6 +170,6 @@
 </div>
 <script src="/js/api.js?v=29"></script>
 <script src="/js/comments.js?v=1"></script>
-<script src="/js/player.js?v=31"></script>
+<script src="/js/player.js?v=33"></script>
 </body>
 </html>

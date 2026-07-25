@@ -7,7 +7,7 @@ const S = {
   active: 'A',
   sides: { A: blankSide('Real Madrid'), B: blankSide('') },
   roles: {}, roleDefaults: {}, formations: [],
-  lastMetrics: { A: null, B: null }, sim: null,
+  lastMetrics: { A: null, B: null }, lastChem: { A: null, B: null }, sim: null,
 };
 function blankSide(team) { return { team, formation: '4-3-3', xi: [], squad: [], tactics: {} }; }
 const cur = () => S.sides[S.active];
@@ -116,7 +116,8 @@ function render() {
     ${sideToggle()}
     <div class="tl-grid">
       <section class="card tl-pitchwrap">
-        <div class="tl-pitchhead"><b>${esc(a.team)}</b><span class="muted">${esc(a.formation)} · drag to reposition · drop on a player to swap · tap to change role</span></div>
+        <div class="tl-pitchhead"><b>${esc(a.team)}</b><span class="muted">${esc(a.formation)} · drag to reposition · drop on a player to swap · tap to change role</span>
+          <button class="tl-addbtn" id="tlAddBtn" title="Add any player to this squad (what-if transfer)">＋ Add player</button></div>
         <div class="tl-pitch">${fieldSVG()}${chips}</div></section>
       <section class="card tl-tactics"><div class="card-h"><h3>Tactical Instructions</h3></div>${groups}</section>
     </div>
@@ -124,6 +125,72 @@ function render() {
   document.querySelectorAll('input[data-tac]').forEach((el) => { el.oninput = () => { cur().tactics[el.dataset.tac] = +el.value; document.getElementById('tv-' + el.dataset.tac).textContent = el.value; debouncedSim(); }; });
   document.querySelectorAll('.tl-chip').forEach((el) => { el.addEventListener('pointerdown', (e) => chipDown(e, el)); });
   document.querySelectorAll('.tl-sidebtn').forEach((el) => { el.onclick = () => { S.active = el.dataset.side; render(); runSim(); }; });
+  const addBtn = document.getElementById('tlAddBtn'); if (addBtn) addBtn.onclick = openAddPlayer;
+}
+
+// ---- add any player to the squad (what-if transfer, e.g. "put Rodri on Real Madrid") ----
+let _addT;
+function openAddPlayer() {
+  closePop();
+  const pop = document.createElement('div'); pop.className = 'tl-pop'; pop.id = 'tlPop';
+  pop.innerHTML = `<div class="tl-pop-bd tl-addbd">
+      <div class="tl-pop-h"><b>Add a player to ${esc(cur().team)}</b><button class="tl-pop-x">✕</button></div>
+      <div class="tl-addhint">Drop any player into this squad — their real ratings drive the sim. They'll slot into their position; swap or drag them anywhere after.</div>
+      <input class="tl-addsearch" id="addSearch" type="text" placeholder="Search a player (e.g. Rodri)…" autocomplete="off">
+      <div class="tl-addresults" id="addResults"></div></div>`;
+  document.body.appendChild(pop);
+  pop.querySelector('.tl-pop-x').onclick = closePop;
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  const inp = document.getElementById('addSearch'); inp.focus();
+  inp.oninput = () => { clearTimeout(_addT); _addT = setTimeout(() => runAddSearch(inp.value), 250); };
+  document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', esc); } });
+}
+async function runAddSearch(qv) {
+  const box = document.getElementById('addResults'); if (!box) return;
+  if (!qv || qv.trim().length < 2) { box.innerHTML = ''; return; }
+  let r; try { r = await api('/api/tactics/find?q=' + encodeURIComponent(qv.trim())); } catch { r = null; }
+  if (!document.getElementById('addResults')) return;              // popover closed meanwhile
+  const rows = (r && r.results) || [];
+  if (!rows.length) { box.innerHTML = '<div class="tl-addempty">No players found.</div>'; return; }
+  const inSquad = new Set(cur().squad.map((p) => p.player));
+  box.innerHTML = rows.map((p) => `<button class="tl-addrow" data-name="${esc(p.player)}"${inSquad.has(p.player) ? ' disabled' : ''}>
+      <span class="tl-addph">${p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy">` : ''}</span>
+      <span class="tl-addnm"><b>${esc(p.player)}</b><span>${esc(p.position || '')}${p.team ? ' · ' + esc(p.team) : ''}</span></span>
+      <span class="tl-addrt">${p.rating}</span>${inSquad.has(p.player) ? '<span class="tl-addin">in squad</span>' : '<span class="tl-addplus">＋</span>'}</button>`).join('');
+  box.querySelectorAll('.tl-addrow').forEach((el) => { if (!el.disabled) el.onclick = () => addPlayerToSquad(el.dataset.name); });
+}
+// Compatible families to fall back to when no exact-position slot is free.
+const _FAM_COMPAT = { DM: ['CM'], CM: ['DM', 'AM'], AM: ['CM', 'W'], W: ['AM'], ST: ['W'], FB: [], CB: [], GK: [] };
+async function addPlayerToSquad(name) {
+  let r; try { r = await api('/api/tactics/player?name=' + encodeURIComponent(name)); } catch { r = null; }
+  if (!r || !r.available || !r.player) { toast('Could not add that player.'); return; }
+  const p = r.player, a = cur();
+  if (!a.squad.some((x) => x.player === p.player)) a.squad.push(p);
+  // auto-slot into a matching-family position: prefer an empty slot, else the weakest starter
+  const fams = [p.family, ...(_FAM_COMPAT[p.family] || [])].filter(Boolean);
+  let target = null;
+  for (const fam of fams) {
+    const slots = a.xi.filter((s) => s.family === fam);
+    target = slots.find((s) => !s.player)
+      || slots.reduce((lo, s) => (!lo || (s.player ? s.player.rating : 0) < (lo.player ? lo.player.rating : 0)) ? s : lo, null);
+    if (target) break;
+  }
+  closePop();
+  if (target) {
+    const replaced = target.player ? target.player.player : null;
+    target.player = p; render(); runSim();
+    toast(`${p.player} added${replaced ? ` — replaced ${replaced} (still in squad)` : ''}. Tap any player to swap or change role.`);
+  } else {
+    render();
+    toast(`${p.player} added to the squad — tap a player chip to swap him into the XI.`);
+  }
+}
+let _toastT;
+function toast(msg) {
+  let el = document.getElementById('tlToast');
+  if (!el) { el = document.createElement('div'); el.id = 'tlToast'; el.className = 'tl-toast'; document.body.appendChild(el); }
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(_toastT); _toastT = setTimeout(() => el.classList.remove('show'), 4200);
 }
 
 // ---- slot editor ----
@@ -265,6 +332,31 @@ function formCard(r, oppName) {
   return `<div class="tl-form"><div class="tl-fhdr">Recent form <span class="muted">last 6 · league + UCL</span></div>${line(f.home, cur().team)}${line(f.away, oppName)}${tilt}</div>`;
 }
 
+// Playstyle chemistry: cohesion score + the named role synergies/clashes behind it.
+function chemCard(c) {
+  if (!c) return '';
+  const links = (c.links || []).map((l) => {
+    const icon = l.kind === 'synergy' ? '🔗' : '⚡';
+    const players = (l.players || []).length
+      ? `<div class="tl-chplayers">${l.players.map((p) => esc(p)).join(' · ')}</div>` : '';
+    return `<div class="tl-chlink ${l.kind} sev-${esc(l.sev)}"><div class="tl-cht">${icon} ${esc(l.title)}</div>
+        <div class="tl-chr">${esc(l.detail)}</div>${players}</div>`;
+  }).join('');
+  const body = links || '<div class="tl-noweak">Neutral, balanced set of roles — no notable playstyle interactions either way.</div>';
+  const prev = S.lastChem[S.active];
+  let delta = '';
+  if (prev != null && prev !== c.score) {
+    const up = c.score > prev;
+    delta = `<span class="tl-delta ${up ? 'good' : 'bad'}">${up ? '▲' : '▼'} ${Math.abs(c.score - prev)}</span>`;
+  }
+  return `<section class="card tl-card tl-chem"><div class="card-h"><h3>Playstyle Chemistry</h3><span class="muted">how the roles fit together</span></div>
+    <div class="tl-chscore"><span class="tl-chnum" style="color:${barColor(c.score)}">${c.score}</span>
+      <div class="tl-chmeta"><b>${esc(c.label)}</b>${delta}
+        <span class="tl-utrack"><i style="width:${c.score}%;background:${barColor(c.score)}"></i></span></div></div>
+    <div class="tl-chlinks">${body}</div>
+    <div class="tl-foot">Roles are playstyles — some reinforce each other, some fight for the same space. Chemistry nudges finishing (xG) up to ±10%; change a player's role to move it.</div></section>`;
+}
+
 function renderResults(r) {
   if (!r || !r.units) return;
   const units = UNIT_META.map(([k, lbl]) => `<div class="tl-ubar"><span class="tl-ul">${lbl}</span>
@@ -303,6 +395,7 @@ function renderResults(r) {
       <section class="card tl-card"><div class="card-h"><h3>Projected Metrics</h3>${prev ? '<span class="muted">Δ vs last run</span>' : ''}</div><div class="tl-metrics">${metrics}</div></section>
       <section class="card tl-card"><div class="card-h"><h3>Unit Strengths</h3></div>${units}<div class="tl-foot">Ratings &amp; attributes are EA FC / FIFA 26 player cards (stable, ability-based) — pace, shooting, passing &amp; defending are real card values, not season stats.</div></section>
     </div>
+    ${chemCard(r.chemistry)}
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Tactical Weaknesses</h3></div>${weak}</section>
       <section class="card tl-card"><div class="card-h"><h3>Style Match</h3><span class="muted">closest famous sides</span></div>${style}
@@ -310,6 +403,7 @@ function renderResults(r) {
           <div id="advOut">${_lastAdvText || '<div class="tl-loading sm">Reading your setup…</div>'}</div></div></section>
     </div>`;
   S.lastMetrics[S.active] = { ...r.metrics };
+  if (r.chemistry) S.lastChem[S.active] = r.chemistry.score;
   scheduleAdvisor();
 }
 
@@ -374,10 +468,10 @@ let _advT, _lastAdvKey = '', _lastAdvText = '';
 function scheduleAdvisor() { clearTimeout(_advT); _advT = setTimeout(loadAdvisor, 1400); }
 async function loadAdvisor() {
   const r = S.sim; if (!r || !r.units) return;
-  const key = JSON.stringify([cur().team, r.metrics, r.units, cur().tactics, hasB() ? other().team : null]);
+  const key = JSON.stringify([cur().team, r.metrics, r.units, cur().tactics, r.chemistry && r.chemistry.score, hasB() ? other().team : null]);
   if (key === _lastAdvKey && _lastAdvText) return;         // setup unchanged → keep current read
   const out = document.getElementById('advOut'); if (out && !_lastAdvText) out.innerHTML = '<div class="tl-loading sm">Reading your setup…</div>';
-  const payload = { team: cur().team, metrics: r.metrics, units: r.units, tactics: cur().tactics, weaknesses: r.weaknesses, opponent_name: hasB() ? other().team : null };
+  const payload = { team: cur().team, metrics: r.metrics, units: r.units, tactics: cur().tactics, weaknesses: r.weaknesses, chemistry: r.chemistry, opponent_name: hasB() ? other().team : null };
   let a; try { a = await fetch('/api/tactics/advisor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { a = null; }
   const el = document.getElementById('advOut'); if (!el) return;
   if (!a || !a.available) { if (!_lastAdvText) el.innerHTML = '<div class="tl-advtext muted">AI analyst is unavailable right now.</div>'; return; }

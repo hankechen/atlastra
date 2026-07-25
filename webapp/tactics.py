@@ -80,6 +80,23 @@ FAMILY_POS = {
     "ST": {"ST", "CF", "FW", "F"},
 }
 
+# Canonical position-code -> role family (the reverse of FAMILY_POS, which overlaps for
+# eligibility). Used to auto-slot a user-added "what-if" player into the right position.
+_POS_FAMILY = {
+    "GK": "GK", "G": "GK",
+    "CB": "CB", "LCB": "CB", "RCB": "CB", "D": "CB",
+    "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "WB": "FB",
+    "CDM": "DM", "DM": "DM",
+    "CM": "CM", "LCM": "CM", "RCM": "CM", "M": "CM",
+    "CAM": "AM", "AM": "AM",
+    "LM": "W", "RM": "W", "LW": "W", "RW": "W", "W": "W", "F": "W",
+    "ST": "ST", "CF": "ST", "FW": "ST",
+}
+
+
+def family_for_position(pos: str) -> str:
+    return _POS_FAMILY.get((pos or "").upper(), "CM")
+
 # ------------------------------------------------------------------- roles ---- #
 # Each role nudges how a player's quality feeds the team's units, plus side-effects
 # (flank_risk raises transition exposure; buildup helps play out; press adds
@@ -513,6 +530,191 @@ def _battles(uA, tA, uB, tB) -> list[dict]:
     return b
 
 
+# ------------------------------------------------- playstyle chemistry ------- #
+# Roles ARE playstyles, and playstyles interact: some pairings reinforce each other,
+# others fight for the same space or leave a job undone. This is a transparent synergy
+# layer — every +/- is a NAMED tactical relationship the UI can show, never a hidden
+# number. It yields a 0-99 cohesion score that gently nudges the attack (a disjointed
+# front line finishes fewer chances; a well-linked one, more).
+_CHEM_BASE = 76
+_CHEM_W = {("synergy", "high"): 6, ("synergy", "med"): 4, ("synergy", "low"): 2,
+           ("clash", "high"): -9, ("clash", "med"): -6, ("clash", "low"): -3}
+
+
+def _chem_label(score):
+    if score >= 86:
+        return "Excellent cohesion"
+    if score >= 77:
+        return "Well balanced"
+    if score >= 67:
+        return "Workable"
+    if score >= 56:
+        return "Some friction"
+    return "Disjointed"
+
+
+def _side(x):
+    return "L" if x < 45 else ("R" if x > 55 else "C")
+
+
+def _chemistry(xi, t):
+    """Named, explainable synergies and clashes between the roles (playstyles) in the XI.
+    Returns {score, label, links[]} where each link is a concrete tactical relationship
+    (an overlapping wing-back behind an inside forward; two poachers who never link up).
+    Nothing is hidden — the score is exactly the sum of the listed relationships."""
+    slots = [s for s in xi if s.get("player")]
+
+    def fam(*f):
+        return [s for s in slots if s["family"] in f]
+
+    def role(s):
+        return s.get("role") or ""
+
+    def nm(s):
+        return s["player"]["player"]
+
+    sts, ws, ams = fam("ST"), fam("W"), fam("AM")
+    cms, dms, fbs, cbs = fam("CM"), fam("DM"), fam("FB"), fam("CB")
+    gk = next((s for s in slots if s["family"] == "GK"), None)
+
+    CREATE = {"Advanced Playmaker", "Playmaker", "Deep-Lying Playmaker",
+              "Inverted Winger", "Inverted Fullback", "Mezzala"}
+    WIDE = {"Winger (Wide)", "Attacking Wing-Back"}         # natural width / crosses
+    RUN = {"Advanced Forward", "Poacher", "Shadow Striker", "Inside Forward",
+           "Winger (Wide)", "Complete Forward"}             # attack the space in behind
+    creators = [s for s in (ams + ws + cms + dms) if role(s) in CREATE]
+    widemen = [s for s in (ws + fbs) if role(s) in WIDE]
+
+    links = []
+
+    def add(kind, sev, title, detail, players):
+        links.append({"kind": kind, "sev": sev, "title": title,
+                      "detail": detail, "players": players})
+
+    # ---------------- clashes ----------------
+    poachers = [s for s in sts if role(s) == "Poacher"]
+    if len(poachers) >= 2:
+        add("clash", "high", "Two poachers, no link play",
+            "Both strikers only play off the shoulder and sit in the box — with neither "
+            "dropping to link, the front line gets cut off from midfield.",
+            [nm(s) for s in poachers])
+
+    f9 = [s for s in sts if role(s) == "False 9"]
+    others = ws + ams + [s for s in sts if s not in f9]
+    if f9 and not any(role(s) in RUN for s in others):
+        add("clash", "high", "False 9 with no runners beyond",
+            f"{nm(f9[0])} drops in to overload midfield, but no forward attacks the space "
+            "he vacates — the movement cancels itself out and there's no threat in behind.",
+            [nm(f9[0])])
+
+    if poachers and not creators and not widemen:
+        add("clash", "med", "Poacher starved of supply",
+            f"{nm(poachers[0])} lives on the last line, but no creator or wide outlet feeds "
+            "the box — a pure finisher with no service goes quiet.", [nm(poachers[0])])
+
+    tms = [s for s in sts if role(s) == "Target Man"]
+    if tms and not widemen and t.get("width", 50) < 46:
+        add("clash", "med", "Target man with no width",
+            f"{nm(tms[0])} wants crosses to attack, but no wide player holds the touchline "
+            "and your width is set narrow — his aerial threat is wasted.", [nm(tms[0])])
+
+    inv_fb = [s for s in fbs if role(s) == "Inverted Fullback"]
+    if len(inv_fb) >= 2:
+        add("clash", "med", "Both fullbacks invert — no natural width",
+            "Two inverted fullbacks tuck into midfield, so unless the wingers stay wide the "
+            "team has nobody stretching the pitch and attacks turn predictable and central.",
+            [nm(s) for s in inv_fb])
+
+    for w in ws:                                            # winger + FB both cut inside
+        if role(w) not in ("Inverted Winger", "Inside Forward") or _side(w["x"]) == "C":
+            continue
+        same = [f for f in inv_fb if _side(f["x"]) == _side(w["x"])]
+        if same:
+            sd = "Left" if _side(w["x"]) == "L" else "Right"
+            add("clash", "high", f"{sd} flank vacated",
+                f"{nm(w)} cuts inside and {nm(same[0])} tucks in behind him, so nobody holds "
+                f"the {sd.lower()} touchline — the whole side gets congested and easy to defend.",
+                [nm(w), nm(same[0])])
+
+    awb = [s for s in fbs if role(s) == "Attacking Wing-Back"]
+    holding = [s for s in dms if role(s) in ("Anchor", "Ball-Winner")]
+    if len(awb) >= 2 and not holding:
+        add("clash", "med", "Both wing-backs bomb on, no screen",
+            "Two attacking wing-backs push high while no anchoring midfielder protects the "
+            "space they leave — you're open to a fast transition through the middle.",
+            [nm(s) for s in awb])
+
+    deep_pm = [s for s in (dms + cms + ams) if role(s) in
+               ("Deep-Lying Playmaker", "Playmaker", "Advanced Playmaker")]
+    if len(deep_pm) >= 3:
+        add("clash", "low", "Too many playmakers, one ball",
+            "Three ball-dominant playmakers occupy similar central zones and end up "
+            "competing for the same touches instead of stretching the opposition.",
+            [nm(s) for s in deep_pm])
+
+    # ---------------- synergies ----------------
+    for w in ws:                                            # overlap: IF cuts in, AWB overlaps
+        if role(w) not in ("Inside Forward", "Inverted Winger") or _side(w["x"]) == "C":
+            continue
+        mate = [f for f in awb if _side(f["x"]) == _side(w["x"])]
+        if mate:
+            add("synergy", "high", "Overlap down the flank",
+                f"{nm(w)} cuts inside while {nm(mate[0])} overlaps outside — the classic "
+                "give-the-defender-two-problems combination.", [nm(w), nm(mate[0])])
+
+    for w in ws:                                            # width + control on one side
+        if role(w) != "Winger (Wide)" or _side(w["x"]) == "C":
+            continue
+        mate = [f for f in inv_fb if _side(f["x"]) == _side(w["x"])]
+        if mate:
+            add("synergy", "med", "Balanced flank: winger wide, fullback inside",
+                f"{nm(mate[0])} steps into midfield to control the ball while {nm(w)} holds "
+                "the touchline — width and control on the same side.", [nm(w), nm(mate[0])])
+
+    if tms and widemen:
+        add("synergy", "high", "Target man with real service",
+            f"{nm(tms[0])} attacks crosses and {nm(widemen[0])} delivers them — finisher and "
+            "supply line fit together.", [nm(tms[0]), nm(widemen[0])])
+
+    if poachers and creators:
+        add("synergy", "med", "Poacher with a supplier",
+            f"{nm(creators[0])} creates and {nm(poachers[0])} finishes — a natural "
+            "creator-to-poacher link.", [nm(poachers[0]), nm(creators[0])])
+
+    if f9:
+        runners = [s for s in (ws + ams) if role(s) in RUN]
+        if runners:
+            add("synergy", "high", "False 9 with runners beyond",
+                f"{nm(f9[0])} drops to overload midfield and {nm(runners[0])} attacks the "
+                "space it opens — drop-and-run in tandem.", [nm(f9[0]), nm(runners[0])])
+
+    dlp = [s for s in dms if role(s) == "Deep-Lying Playmaker"]
+    bw = [s for s in dms if role(s) == "Ball-Winner"]
+    if dlp and bw:
+        add("synergy", "med", "Creator + destroyer in midfield",
+            f"{nm(bw[0])} wins it back and {nm(dlp[0])} dictates once you have it — the "
+            "complementary double pivot.", [nm(dlp[0]), nm(bw[0])])
+
+    bpcb = [s for s in cbs if role(s) == "Ball-Playing"]
+    if gk and role(gk) == "Sweeper Keeper" and len(bpcb) >= 2:
+        add("synergy", "low", "Coherent build-out from the back",
+            "A sweeper-keeper behind ball-playing centre-backs gives a settled numerical "
+            "base to play out under pressure.", [nm(gk), nm(bpcb[0])])
+
+    b2b = [s for s in cms if role(s) == "Box-to-Box"]
+    orch = [s for s in (cms + dms) if role(s) in ("Playmaker", "Deep-Lying Playmaker")]
+    if b2b and orch:
+        add("synergy", "low", "Runner alongside an orchestrator",
+            f"{nm(orch[0])} sets the tempo while {nm(b2b[0])} provides the box-to-box legs "
+            "around him — a balanced central pairing.", [nm(b2b[0]), nm(orch[0])])
+
+    score = round(_clamp_f(
+        _CHEM_BASE + sum(_CHEM_W.get((l["kind"], l["sev"]), 0) for l in links), 35, 99))
+    order = {"high": 0, "med": 1, "low": 2}
+    links.sort(key=lambda l: (0 if l["kind"] == "clash" else 1, order.get(l["sev"], 3)))
+    return {"score": score, "label": _chem_label(score), "links": links}
+
+
 # -------------------------------------------------------- shape + network ---- #
 def _positions(xi, t):
     """Average positions after tactics/roles reshape the base formation — the spec's
@@ -637,13 +839,14 @@ def _run(S, stages, div=5.5):
     return out, labels[exits.index(max(exits))], round(reach[-1])
 
 
-def _project(u, t, team):
+def _project(u, t, team, chem_mult=1.0):
     """League points/position + a Champions League run for clubs; a WC/Euro run for nations.
     Strength = squad quality (avg XI rating) nudged by how effective the chosen tactics are
-    (the model's xG/xGA → expected points vs an average opponent). div=7 gives knockout
-    football realistic variance, so even the best side is only ~20% to win a trophy."""
+    (the model's xG/xGA → expected points vs an average opponent) and by playstyle chemistry
+    (chem_mult). div=7 gives knockout football realistic variance, so even the best side is
+    only ~20% to win a trophy."""
     m = _metrics(u, t, _BASE_OPP, DEFAULT_TACTICS)         # season-representative form
-    xpts = _xpts(m["xg"], m["xga"])
+    xpts = _xpts(round(m["xg"] * chem_mult, 2), m["xga"])
     # FIFA overall scale is narrow (~74-88 for these sides) but reflects big quality gaps,
     # so amplify it into the strength range, then nudge by tactic effectiveness.
     S = _clamp_f(round((u.get("avg_rating", 74) - 74) * 2.5 + 55 + (xpts - 1.4) * 4), 1, 90)
@@ -676,11 +879,17 @@ def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=No
     else:
         ou, ot = _BASE_OPP, DEFAULT_TACTICS
     m = _metrics(u, t, ou, ot)
-    res = {"units": {k: round(v) for k, v in u.items()}, "metrics": m,
+    # playstyle chemistry: a cohesive set of roles finishes chances a little better, a
+    # disjointed one a little worse. Gentle (±10% on xG) so it colours the setup without
+    # overriding squad quality — and every point of it is itemised in res["chemistry"].
+    chem = _chemistry(xi, t)
+    chem_mult = _clamp_f(1 + 0.006 * (chem["score"] - _CHEM_BASE), 0.90, 1.10)
+    m["xg"] = round(m["xg"] * chem_mult, 2)
+    res = {"units": {k: round(v) for k, v in u.items()}, "metrics": m, "chemistry": chem,
            "weaknesses": _weaknesses(xi, u, t, m), "style": _style_match(t, m),
            "viz": _viz(xi, t, m)}
     if team:
-        res["projection"] = _project(u, t, team)
+        res["projection"] = _project(u, t, team, chem_mult)
     if opponent and opponent.get("units"):
         om = _metrics(ou, ot, u, t)
         # recent-form nudge: tilt expected goals toward whichever side has the stronger
