@@ -9,7 +9,7 @@ const S = {
   roles: {}, roleDefaults: {}, formations: [],
   lastMetrics: { A: null, B: null }, lastChem: { A: null, B: null }, sim: null,
 };
-function blankSide(team) { return { team, formation: '4-3-3', xi: [], squad: [], tactics: {} }; }
+function blankSide(team) { return { team, formation: '4-3-3', xi: [], squad: [], tactics: {}, subs: [] }; }
 const cur = () => S.sides[S.active];
 const other = () => S.sides[S.active === 'A' ? 'B' : 'A'];
 const hasB = () => !!S.sides.B.team && S.sides.B.xi.length;
@@ -357,6 +357,129 @@ function chemCard(c) {
     <div class="tl-foot">Roles are playstyles — some reinforce each other, some fight for the same space. Chemistry nudges finishing (xG) up to ±10%; change a player's role to move it.</div></section>`;
 }
 
+// ---- substitution planner: design your changes, see how they shift the side ----
+const surname = (n) => (n || '').split(' ').slice(-1)[0];
+function xiPlayers(side) { return side.xi.filter((s) => s.player); }
+function benchOf(side) {                                   // squad players not in the XI, best first
+  const inXI = new Set(side.xi.map((s) => s.player && s.player.player).filter(Boolean));
+  return (side.squad || []).filter((p) => !inXI.has(p.player)).sort((a, b) => b.rating - a.rating);
+}
+function firstFreeOut(side) {
+  const used = new Set(side.subs.map((s) => s.out));
+  const c = xiPlayers(side).filter((x) => !used.has(x.id) && x.family !== 'GK')
+    .sort((a, b) => a.player.rating - b.player.rating);            // weakest outfielder = natural sub
+  return c.length ? c[0].id : '';
+}
+function firstFreeIn(side) {
+  const used = new Set(side.subs.map((s) => s.in));
+  const p = benchOf(side).find((x) => !used.has(x.player));        // best available sub
+  return p ? p.player : '';
+}
+function subRow(sub, i) {
+  const side = cur();
+  const otherOut = new Set(side.subs.filter((_, j) => j !== i).map((s) => s.out));
+  const otherIn = new Set(side.subs.filter((_, j) => j !== i).map((s) => s.in));
+  const outOpts = xiPlayers(side).filter((s) => !otherOut.has(s.id)).map((s) =>
+    `<option value="${esc(s.id)}"${s.id === sub.out ? ' selected' : ''}>${esc(surname(s.player.player))} · ${esc(s.id)}</option>`).join('');
+  const inOpts = benchOf(side).filter((p) => !otherIn.has(p.player)).map((p) =>
+    `<option value="${esc(p.player)}"${p.player === sub.in ? ' selected' : ''}>${esc(p.player)} · ${esc(p.position || '')} ${p.rating}</option>`).join('');
+  return `<div class="tl-subrow" data-i="${i}">
+      <span class="tl-submin"><input type="number" min="1" max="120" value="${sub.minute || 65}" data-subfield="minute" aria-label="minute">'</span>
+      <select class="tl-subsel out" data-subfield="out" aria-label="player off">${outOpts}</select>
+      <span class="tl-subarrow">→</span>
+      <select class="tl-subsel in" data-subfield="in" aria-label="player on">${inOpts}</select>
+      <button class="tl-subx" title="Remove substitution">✕</button></div>`;
+}
+function subsInner() {
+  const side = cur();
+  side.subs = side.subs || [];
+  const bench = benchOf(side);
+  const rows = side.subs.map((s, i) => subRow(s, i)).join('');
+  const list = side.subs.length
+    ? `<div class="tl-sublist">${rows}</div>`
+    : `<div class="tl-subempty">No substitutions planned. Add one to see how it reshapes your side.</div>`;
+  let foot = '';
+  if (side.subs.length >= 5) foot = '<div class="tl-subnote">Max 5 substitutions.</div>';
+  else if (!bench.length) foot = '<div class="tl-subnote">No bench players — add players to the squad first.</div>';
+  else foot = '<button class="tl-subadd" id="subAdd">＋ Add substitution</button>';
+  return `${list}${foot}<div id="subImpact" class="tl-subimpact"></div>`;
+}
+function subsCard() {
+  return `<section class="card tl-card tl-subs" id="subsCard">
+    <div class="card-h"><h3>Substitutions</h3><span class="muted">plan changes &amp; see the projected impact</span></div>
+    <div id="subsInner">${subsInner()}</div></section>`;
+}
+function rerenderSubs() {
+  const inner = document.getElementById('subsInner');
+  if (inner) { inner.innerHTML = subsInner(); wireSubs(); }
+}
+function wireSubs() {
+  const add = document.getElementById('subAdd');
+  if (add) add.onclick = () => {
+    const side = cur();
+    const out = firstFreeOut(side), inP = firstFreeIn(side);
+    if (!out || !inP) return;
+    side.subs.push({ out, in: inP, minute: 60 + side.subs.length * 5 });
+    rerenderSubs();
+  };
+  document.querySelectorAll('#subsCard .tl-subrow').forEach((row) => {
+    const i = +row.dataset.i;
+    row.querySelectorAll('[data-subfield]').forEach((el) => {
+      el.onchange = () => {
+        cur().subs[i][el.dataset.subfield] = el.dataset.subfield === 'minute' ? +el.value : el.value;
+        if (el.dataset.subfield !== 'minute') rerenderSubs();   // re-filter dropdowns + re-project
+      };
+    });
+    row.querySelector('.tl-subx').onclick = () => { cur().subs.splice(i, 1); rerenderSubs(); };
+  });
+  updateSubImpact();
+}
+// Compute the post-substitution XI and project it against the same opponent/tactics, then
+// show how each key metric shifts vs the starting XI. Reuses the normal sim endpoint.
+async function updateSubImpact() {
+  const box = document.getElementById('subImpact'); if (!box) return;
+  const side = cur();
+  const subs = (side.subs || []).filter((s) => s.out && s.in);
+  if (!subs.length || !S.sim || !S.sim.metrics) { box.innerHTML = ''; return; }
+  const xi = side.xi.map((s) => ({ ...s }));                 // clone slots; swap in the subs
+  subs.forEach((sub) => {
+    const slot = xi.find((s) => s.id === sub.out);
+    const p = (side.squad || []).find((x) => x.player === sub.in);
+    if (slot && p) slot.player = p;
+  });
+  const payload = { team: side.team, xi, tactics: side.tactics };
+  const b = other();
+  if (b.team && b.xi.length) payload.opponent = { team: b.team, xi: b.xi, tactics: b.tactics };
+  box.innerHTML = '<div class="tl-loading sm">Projecting impact…</div>';
+  let after; try { after = await fetch('/api/tactics/sim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { after = null; }
+  if (!after || !after.metrics || !document.getElementById('subImpact')) { if (box) box.innerHTML = ''; return; }
+  box.innerHTML = subImpactHTML(S.sim, after, subs);
+}
+function subImpactHTML(before, after, subs) {
+  const specs = [
+    ['xG', after.metrics.xg, before.metrics.xg, 2, 1],
+    ['xGA', after.metrics.xga, before.metrics.xga, 2, -1],
+    ['Possession %', after.metrics.possession, before.metrics.possession, 0, 1],
+    ['Chemistry', after.chemistry && after.chemistry.score, before.chemistry && before.chemistry.score, 0, 1],
+  ];
+  const cells = specs.map(([lbl, a, b, dp, good]) => {
+    if (a == null || b == null) return '';
+    const d = a - b, flat = Math.abs(d) < (dp ? 0.01 : 0.5);
+    const cls = flat ? 'flat' : ((d > 0) === (good > 0) ? 'good' : 'bad');
+    const ds = flat ? '±0' : (d > 0 ? '+' : '') + (dp ? d.toFixed(dp) : Math.round(d));
+    return `<div class="tl-simp"><span class="tl-simpl">${lbl}</span><b>${dp ? a.toFixed(dp) : Math.round(a)}</b><span class="tl-simpd ${cls}">${ds}</span></div>`;
+  }).join('');
+  const dxg = after.metrics.xg - before.metrics.xg, dxga = after.metrics.xga - before.metrics.xga;
+  const dch = (after.chemistry ? after.chemistry.score : 0) - (before.chemistry ? before.chemistry.score : 0);
+  const bits = [];
+  if (dxg >= 0.1) bits.push('more of an attacking threat'); else if (dxg <= -0.1) bits.push('less of an attacking threat');
+  if (dxga <= -0.1) bits.push('tighter at the back'); else if (dxga >= 0.1) bits.push('more open defensively');
+  if (dch >= 3) bits.push('better balanced'); else if (dch <= -3) bits.push('a bit less cohesive');
+  const line = bits.length ? 'These changes make your side ' + bits.join(', ') + '.' : 'A marginal, like-for-like refresh — little tactical change.';
+  return `<div class="tl-subhdr">Projected impact after your ${subs.length} sub${subs.length > 1 ? 's' : ''} <span class="muted">vs the starting XI</span></div>
+    <div class="tl-simps">${cells}</div><div class="tl-subline">${esc(line)}</div>`;
+}
+
 function renderResults(r) {
   if (!r || !r.units) return;
   const units = UNIT_META.map(([k, lbl]) => `<div class="tl-ubar"><span class="tl-ul">${lbl}</span>
@@ -396,6 +519,7 @@ function renderResults(r) {
       <section class="card tl-card"><div class="card-h"><h3>Unit Strengths</h3></div>${units}<div class="tl-foot">Ratings &amp; attributes are EA FC / FIFA 26 player cards (stable, ability-based) — pace, shooting, passing &amp; defending are real card values, not season stats.</div></section>
     </div>
     ${chemCard(r.chemistry)}
+    ${subsCard()}
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Tactical Weaknesses</h3></div>${weak}</section>
       <section class="card tl-card"><div class="card-h"><h3>Style Match</h3><span class="muted">closest famous sides</span></div>${style}
@@ -404,6 +528,7 @@ function renderResults(r) {
     </div>`;
   S.lastMetrics[S.active] = { ...r.metrics };
   if (r.chemistry) S.lastChem[S.active] = r.chemistry.score;
+  wireSubs();
   scheduleAdvisor();
 }
 
