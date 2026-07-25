@@ -482,19 +482,11 @@ async function loadAdvisor() {
 // ---- init ----
 fillTeams();
 const teamSel = document.getElementById('teamInput'), oppSel = document.getElementById('oppInput');
-document.getElementById('loadBtn').onclick = () => {
-  S.sides.A.team = teamSel.value || 'Real Madrid';
-  S.sides.A.formation = document.getElementById('formSel').value || '4-3-3';
-  S.sides.B.team = oppSel.value;
-  S.active = 'A'; loadAll();
-};
-// team / opponent selects auto-load on change (like the formation dropdown)
-teamSel.onchange = () => { S.sides.A.team = teamSel.value; S.active = 'A'; loadAll(); };
-// Changing the opponent must KEEP the team you've been building (side A) — its custom
-// positions, roles, swaps and tactics. Only (re)load the opponent side.
-oppSel.onchange = async () => {
-  S.sides.B.team = oppSel.value;
-  if (!S.sides.A.xi.length) { S.active = 'A'; loadAll(); return; }   // A not loaded yet → full load
+// (Re)load ONLY the opponent side, KEEPING the team you've been building (side A) — its
+// custom positions, roles, swaps, added players and tactics. Shared by the opponent
+// dropdown AND the Load button, so neither wipes your work when you set an opponent.
+async function applyOpponent() {
+  if (!S.sides.A.xi.length) { S.active = 'A'; return loadAll(); }   // A not built yet → full load
   if (S.sides.B.team) {
     if (S.sides.B.formation === 'Custom') S.sides.B.formation = '4-3-3';  // fresh opponent → stock shape
     await loadSide('B');
@@ -505,7 +497,22 @@ oppSel.onchange = async () => {
   if (!hasB() && S.active === 'B') S.active = 'A';   // opponent cleared while viewing it
   S.lastMetrics.B = null;
   render(); runSim();
+}
+document.getElementById('loadBtn').onclick = () => {
+  const newA = teamSel.value || 'Real Madrid';
+  const aChanged = newA !== S.sides.A.team || !S.sides.A.xi.length;
+  S.sides.A.team = newA;
+  S.sides.B.team = oppSel.value;
+  if (aChanged) {                                    // switching team A → full (re)load
+    S.sides.A.formation = document.getElementById('formSel').value || '4-3-3';
+    S.active = 'A'; loadAll();
+  } else {                                           // same team A → keep its build, just load the opponent
+    applyOpponent();
+  }
 };
+// team select reloads side A (you're explicitly switching it); opponent select keeps A.
+teamSel.onchange = () => { S.sides.A.team = teamSel.value; S.active = 'A'; loadAll(); };
+oppSel.onchange = () => { S.sides.B.team = oppSel.value; applyOpponent(); };
 document.getElementById('formSel').onchange = () => {
   const v = document.getElementById('formSel').value;
   if (v === 'Custom') return;                 // custom layout already applied; picking a preset re-loads it
