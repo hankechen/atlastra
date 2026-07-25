@@ -118,6 +118,48 @@ def _build_club_squad(team, tid):
     return out
 
 
+_BREAKOUT_ATTRS = ("pac", "sho", "pas", "dri", "def", "phy", "hea")
+
+
+def _breakout_boost(base, ar):
+    """Rating boost when a player's current-season combined Atlastra rating (best of their
+    league & UCL rating — see atlas_rating_index) beats their EA FC overall.
+      • gap >= 10  -> flat +10  (a big league+UCL over-performer the EA FC card underrates)
+      • gap  > 2   -> gentle scaled bump, capped at +6
+    FIFA stays the base (Atlas is season-dependent); the boost just lets the sim reward form."""
+    if ar is None:
+        return 0.0
+    gap = ar - base
+    if gap >= 10:
+        return 10.0
+    if gap > 2:
+        return min(6.0, (gap - 2) * 0.55)
+    return 0.0
+
+
+def _apply_breakout(p, atlas):
+    """Apply the breakout boost to a player dict in place (effective rating + FIFA attrs)."""
+    from analytics.queries import _fold
+    f = p.get("fifa")
+    if not f or not atlas:
+        return
+    nm = _fold(p.get("player") or "")
+    t = nm.split()
+    ar = atlas.get(nm)
+    if ar is None and len(t) >= 2:
+        ar = atlas.get(t[0][0] + "|" + t[-1])
+    base = f.get("o", p.get("rating") or 70)
+    boost = _breakout_boost(base, ar)
+    if boost <= 0:
+        return
+    p["breakout"] = round(boost, 1)
+    p["rating"] = min(99, int(round(base + boost)))
+    f["o"] = p["rating"]
+    for k in _BREAKOUT_ATTRS:
+        if k in f and f[k]:
+            f[k] = min(99, int(round(f[k] + boost)))
+
+
 def _tac_squad(d, team):
     import time as _t
     import re as _re
@@ -149,29 +191,9 @@ def _tac_squad(d, team):
     # Breakout boost: if a player's current-season Atlas league/UCL rating clears their FIFA
     # overall, they over-performed the market's assessment — nudge their effective rating and
     # attributes up so the sim rewards it. FIFA remains the base (Atlas is season-dependent).
-    from analytics.queries import _fold
     atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
-    if atlas:
-        for p in sq:
-            f = p.get("fifa")
-            if not f:
-                continue
-            nm = _fold(p.get("player") or "")
-            t = nm.split()
-            ar = atlas.get(nm)
-            if ar is None and len(t) >= 2:
-                ar = atlas.get(t[0][0] + "|" + t[-1])
-            if ar is None:
-                continue
-            base = f.get("o", p.get("rating") or 70)
-            if ar > base + 2:
-                boost = min(6.0, (ar - base - 2) * 0.55)
-                p["breakout"] = round(boost, 1)
-                p["rating"] = min(99, int(round(base + boost)))
-                f["o"] = p["rating"]
-                for k in ("pac", "sho", "pas", "dri", "def", "phy", "hea"):
-                    if k in f and f[k]:
-                        f[k] = min(99, int(round(f[k] + boost)))
+    for p in sq:
+        _apply_breakout(p, atlas)
     _TAC_SQUAD[team.lower()] = (_t.time() + 600, sq)
     return sq
 
@@ -191,24 +213,8 @@ def _tac_player(d, name):
     p = d.tactics_player(name) if hasattr(d, "tactics_player") else None
     if not p:
         return None
-    from analytics.queries import _fold
-    f = p.get("fifa")
-    if f:                                                # breakout boost (mirror _tac_squad)
-        atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
-        nm = _fold(p.get("player") or "")
-        t = nm.split()
-        ar = atlas.get(nm)
-        if ar is None and len(t) >= 2:
-            ar = atlas.get(t[0][0] + "|" + t[-1])
-        base = f.get("o", p.get("rating") or 70)
-        if ar is not None and ar > base + 2:
-            boost = min(6.0, (ar - base - 2) * 0.55)
-            p["breakout"] = round(boost, 1)
-            p["rating"] = min(99, int(round(base + boost)))
-            f["o"] = p["rating"]
-            for k in ("pac", "sho", "pas", "dri", "def", "phy", "hea"):
-                if k in f and f[k]:
-                    f[k] = min(99, int(round(f[k] + boost)))
+    atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
+    _apply_breakout(p, atlas)                            # league+UCL over-performer boost
     p["family"] = tactics.family_for_position(p.get("position"))
     _TAC_PLAYER[key] = p
     return p
