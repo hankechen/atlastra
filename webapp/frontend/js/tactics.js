@@ -549,15 +549,18 @@ function cupOutcome(p) {
 }
 function projCard(p) {
   if (!p) return '';
+  const stages = (p.run || []).map((s) => `<div class="tl-pstage"><span class="tl-psl">${esc(s.stage)}</span>
+      <span class="tl-utrack sm"><i style="width:${s.reach}%;background:${barColor(s.reach)}"></i></span><b>${s.reach}%</b></div>`).join('');
   const league = p.kind === 'club'
     ? `<div class="tl-projrow"><span class="tl-pbadge">🏆 ${esc(p.league)}</span><b>${ordinal(p.position)}</b>
         <span class="muted">projected · ${p.points} pts</span></div>` : '';
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
-      <b>${esc(cupOutcome(p))}</b></div>`;
+      <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
   return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
       <button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button></div>
     ${league}${cup}
-    <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). The cup result is the deepest round the side is more likely than not to reach.</div></section>`;
+    <div class="tl-pstages">${stages}</div>
+    <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). Knockout ties carry realistic variance.</div></section>`;
 }
 
 // ---- full season simulation modal: standings table + cup run + team stat leaders ----
