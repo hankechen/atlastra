@@ -1837,6 +1837,84 @@ class SoccerDB:
                         "team": team, "photo": self.player_photo(fpid)})
         return out
 
+    def tactics_league_table(self, team: str, proj_points, games: int) -> dict | None:
+        """Real current league table with the user's team's points replaced by the Tactics-Lab
+        full-season projection; every OTHER team's current pace is extrapolated to the same number
+        of games, then re-sorted. Reads as 'if the season plays out at current form, but YOUR side
+        performs as the model projects.'"""
+        tid = self.find_team_id(team)
+        if tid is None:
+            return None
+        row = self.con.execute("SELECT team_name, league_key FROM teams WHERE team_id = ?", [tid]).fetchone()
+        if not row:
+            return None
+        canon, lk = row
+        df = self.league_standings(lk, FOCUS_SEASON)
+        if df.empty:
+            return None
+        recs = []
+        for r in df.itertuples():
+            mp = r.mp or 1
+            is_user = (r.team == canon)
+            full = int(proj_points) if (is_user and proj_points is not None) else round((r.pts or 0) / mp * games)
+            recs.append({"team": r.team, "pts": int(full), "is_user": bool(is_user),
+                         "played": int(r.mp or 0), "logo": self.team_logo(r.team)})
+        recs.sort(key=lambda x: -x["pts"])
+        for i, rec in enumerate(recs):
+            rec["pos"] = i + 1
+        return {"league_key": lk, "games": games, "team": canon, "table": recs}
+
+    def tactics_stat_leaders(self, names: list[str], games: int = 38, avail: float = 0.85) -> list[dict]:
+        """Projected full-season stat leaders among the given players (the XI): each player's real
+        current-season per-90 output extrapolated over `games` at ~`avail` of the minutes, top 5 per
+        category. Real data only — players with <200' this season are excluded (too small to project)."""
+        ids = {}
+        for n in names:
+            pid = self.find_player_id(n)
+            if pid and pid not in ids:
+                ids[pid] = n
+        if not ids:
+            return []
+        ph = ",".join("?" * len(ids))
+        q = f"""
+          SELECT a.player_id, sum(a.minutes) mins, sum(a.goals) g, sum(a.assists) a2,
+                 sum(a.xg) xg, sum(a.chances_created) cc, sum(a.big_chances_created) bcc,
+                 sum(a.dribbles_completed) drb, max(pe.fpid) fpid
+          FROM v_stats_combined_player a
+          LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                     WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe ON pe.player_id = a.player_id
+          WHERE a.season = ? AND a.player_id IN ({ph}) GROUP BY a.player_id
+        """
+        df = self.con.execute(q, [FOCUS_SEASON, *ids.keys()]).df()
+        factor = games * avail
+        players = []
+        for r in df.itertuples():
+            mins = r.mins or 0
+            if mins < 200:                       # too small a sample to project a season
+                continue
+
+            def pj(v):
+                return (v or 0) / mins * 90 * factor
+            g, a = pj(r.g), pj(r.a2)
+            players.append({
+                "player": ids[r.player_id],
+                "photo": self.player_photo(int(r.fpid)) if pd.notna(r.fpid) else None,
+                "goals": g, "assists": a, "ga": g + a, "chances": pj(r.cc),
+                "big_chances": pj(r.bcc), "dribbles": pj(r.drb), "xg": pj(r.xg),
+            })
+        cats = [("goals", "Goals", 0), ("assists", "Assists", 0), ("ga", "Goals + Assists", 0),
+                ("chances", "Chances Created", 0), ("big_chances", "Big Chances Created", 0),
+                ("dribbles", "Dribbles", 0), ("xg", "xG", 1)]
+        out = []
+        for key, label, dp in cats:
+            top = sorted(players, key=lambda p: -p[key])[:5]
+            rows = [{"player": p["player"], "photo": p["photo"],
+                     "value": round(p[key], dp) if dp else int(round(p[key]))}
+                    for p in top if p[key] > 0.5]
+            if rows:
+                out.append({"key": key, "label": label, "top": rows})
+        return out
+
     def _tactics_squad_db(self, team: str, season: str = FOCUS_SEASON) -> list[dict]:
         """Legacy DB-derived squad (Understat/FotMob season stats). Kept as a reference; the
         live path now uses FIFA rosters for clubs."""

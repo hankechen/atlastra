@@ -529,6 +529,7 @@ function renderResults(r) {
   S.lastMetrics[S.active] = { ...r.metrics };
   if (r.chemistry) S.lastChem[S.active] = r.chemistry.score;
   wireSubs();
+  const ssb = document.getElementById('simSeasonBtn'); if (ssb) ssb.onclick = openSeasonModal;
   scheduleAdvisor();
 }
 
@@ -544,10 +545,60 @@ function projCard(p) {
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
       <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
   return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
-      <span class="muted">from this setup${p.kind === 'club' ? '' : ' · WC/Euro'}</span></div>
+      <button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button></div>
     ${league}${cup}
     <div class="tl-pstages">${stages}</div>
     <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). Knockout ties carry realistic variance.</div></section>`;
+}
+
+// ---- full season simulation modal: standings table + cup run + team stat leaders ----
+async function openSeasonModal() {
+  const side = cur();
+  closePop();
+  const pop = document.createElement('div'); pop.className = 'tl-pop'; pop.id = 'tlPop';
+  pop.innerHTML = `<div class="tl-pop-bd tl-seasonbd">
+      <div class="tl-pop-h"><b>Season Simulation — ${esc(side.team)}</b><button class="tl-pop-x">✕</button></div>
+      <div id="seasonBody"><div class="tl-loading">Simulating the season…</div></div></div>`;
+  document.body.appendChild(pop);
+  pop.querySelector('.tl-pop-x').onclick = closePop;
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  document.addEventListener('keydown', function esc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', esc); } });
+  const payload = { team: side.team, xi: side.xi, tactics: side.tactics };
+  let r; try { r = await fetch('/api/tactics/season', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { r = null; }
+  const body = document.getElementById('seasonBody'); if (!body) return;
+  if (!r || !r.available) { body.innerHTML = '<div class="empty-state">Could not simulate — load a team first.</div>'; return; }
+  body.innerHTML = seasonHTML(r);
+}
+function seasonHTML(r) {
+  const p = r.projection || {}, st = r.standings;
+  let league = '';
+  if (st && st.table && st.table.length) {
+    const you = st.table.find((x) => x.is_user);
+    const rows = st.table.map((t) => `<tr class="${t.is_user ? 'you' : ''}">
+        <td class="tl-stpos">${t.pos}</td>
+        <td class="tl-stteam">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span>${esc(t.team)}</span></td>
+        <td class="tl-stpts">${t.pts}</td></tr>`).join('');
+    league = `<div class="tl-sechdr">🏆 ${esc(p.league || 'League')} — projected finish</div>
+      <div class="tl-sefin"><span class="tl-sepos">${ordinal(you ? you.pos : p.position)}</span>
+        <span class="tl-semeta"><b>${you ? you.pts : p.points} pts</b><span class="muted">over ${st.games} games</span></span></div>
+      <div class="tl-sttblwrap"><table class="tl-sttbl"><thead><tr><th></th><th>Team</th><th>Pts</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  } else if (p.kind === 'club' && p.position) {
+    league = `<div class="tl-sechdr">🏆 ${esc(p.league || 'League')} — projected finish</div>
+      <div class="tl-sefin"><span class="tl-sepos">${ordinal(p.position)}</span><span class="tl-semeta"><b>${p.points} pts</b></span></div>`;
+  }
+  const run = (p.run || []).map((s) => `<div class="tl-pstage"><span class="tl-psl">${esc(s.stage)}</span>
+      <span class="tl-utrack sm"><i style="width:${s.reach}%;background:${barColor(s.reach)}"></i></span><b>${s.reach}%</b></div>`).join('');
+  const cup = p.comp ? `<div class="tl-sechdr">${p.kind === 'club' ? '⭐' : '🌍'} ${esc(p.comp)}</div>
+      <div class="tl-serow"><b>${esc(p.likely)}</b> <span class="muted">most likely finish · ${p.win_pct}% to win it</span></div>
+      <div class="tl-pstages">${run}</div>` : '';
+  const leaders = (r.leaders || []).map((cat) => `<div class="tl-lcat"><div class="tl-lcath">${esc(cat.label)}</div>
+      ${cat.top.map((x, i) => `<div class="tl-lrow"><span class="tl-lrank">${i + 1}</span>
+          <span class="tl-lph">${x.photo ? `<img src="${esc(x.photo)}" alt="" loading="lazy">` : ''}</span>
+          <span class="tl-lnm">${esc(x.player)}</span><b class="tl-lval">${x.value}</b></div>`).join('')}</div>`).join('');
+  const leadersBlock = leaders ? `<div class="tl-sechdr">📊 Projected stat leaders <span class="muted">full season · top 5 per category</span></div>
+      <div class="tl-lgrid">${leaders}</div>` : '';
+  return `<div class="tl-season">${league}${cup}${leadersBlock}
+    <div class="tl-foot">League: rivals extrapolated at their current pace, your side from the model. Player totals project each starter's real current per-90 output over ~85% of a full season. Knockout runs carry realistic variance.</div></div>`;
 }
 
 // ---- visualization: shape + passing network + territory heat ----

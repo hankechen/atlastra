@@ -918,6 +918,20 @@ class Handler(BaseHTTPRequestHandler):
                     res["form"] = {"home": fh_info, "away": fa_info}
             self._json(res)
             return
+        if u.path == "/api/tactics/season":            # Tactics Lab: full-season simulation
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                team = b.get("team", "")
+                xi, _ = _tac_rebuild(d, team, b.get("xi"))
+                res = tactics.simulate(xi, b.get("tactics"), team=team)
+                proj = res.get("projection") or {}
+                names = [s["player"]["player"] for s in xi if s.get("player")]
+                games = proj.get("games") or (7 if proj.get("kind") == "national" else 38)
+                out = {"available": bool(proj), "team": team, "projection": proj,
+                       "leaders": d.tactics_stat_leaders(names, games)}
+                if proj.get("kind") == "club":
+                    out["standings"] = d.tactics_league_table(team, proj.get("points"), games)
+            self._json(out)
+            return
         if u.path == "/api/tactics/advisor":           # AI analyst writeup (Gemini free tier)
             self._json(_tactics_advisor(b))
             return
