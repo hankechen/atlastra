@@ -535,20 +535,29 @@ function renderResults(r) {
 
 // ---- season & cup projection ----
 function ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+// A single cup result instead of odds: the deepest round the side is more likely than not
+// to reach (reach >= 50%). If that's the trophy stage → they won it.
+function cupOutcome(p) {
+  const run = p.run || [];
+  if (!run.length) return p.likely || '—';
+  let deepest = run[0];
+  run.forEach((s) => { if (s.reach >= 50) deepest = s; });
+  const trophy = run[run.length - 1].stage;
+  if (deepest.stage === trophy) return `🏆 Won the ${p.comp}`;
+  if (deepest === run[0]) return `Eliminated in the ${deepest.stage}`;
+  return `Reached the ${deepest.stage}`;
+}
 function projCard(p) {
   if (!p) return '';
-  const stages = (p.run || []).map((s) => `<div class="tl-pstage"><span class="tl-psl">${esc(s.stage)}</span>
-      <span class="tl-utrack sm"><i style="width:${s.reach}%;background:${barColor(s.reach)}"></i></span><b>${s.reach}%</b></div>`).join('');
   const league = p.kind === 'club'
     ? `<div class="tl-projrow"><span class="tl-pbadge">🏆 ${esc(p.league)}</span><b>${ordinal(p.position)}</b>
         <span class="muted">projected · ${p.points} pts</span></div>` : '';
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
-      <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
+      <b>${esc(cupOutcome(p))}</b></div>`;
   return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
       <button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button></div>
     ${league}${cup}
-    <div class="tl-pstages">${stages}</div>
-    <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). Knockout ties carry realistic variance.</div></section>`;
+    <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). The cup result is the deepest round the side is more likely than not to reach.</div></section>`;
 }
 
 // ---- full season simulation modal: standings table + cup run + team stat leaders ----
@@ -586,11 +595,8 @@ function seasonHTML(r) {
     league = `<div class="tl-sechdr">🏆 ${esc(p.league || 'League')} — projected finish</div>
       <div class="tl-sefin"><span class="tl-sepos">${ordinal(p.position)}</span><span class="tl-semeta"><b>${p.points} pts</b></span></div>`;
   }
-  const run = (p.run || []).map((s) => `<div class="tl-pstage"><span class="tl-psl">${esc(s.stage)}</span>
-      <span class="tl-utrack sm"><i style="width:${s.reach}%;background:${barColor(s.reach)}"></i></span><b>${s.reach}%</b></div>`).join('');
   const cup = p.comp ? `<div class="tl-sechdr">${p.kind === 'club' ? '⭐' : '🌍'} ${esc(p.comp)}</div>
-      <div class="tl-serow"><b>${esc(p.likely)}</b> <span class="muted">most likely finish · ${p.win_pct}% to win it</span></div>
-      <div class="tl-pstages">${run}</div>` : '';
+      <div class="tl-serow tl-cupres"><b>${esc(cupOutcome(p))}</b></div>` : '';
   const leaders = (r.leaders || []).map((cat) => `<div class="tl-lcat"><div class="tl-lcath">${esc(cat.label)}</div>
       ${cat.top.map((x, i) => `<div class="tl-lrow"><span class="tl-lrank">${i + 1}</span>
           <span class="tl-lph">${x.photo ? `<img src="${esc(x.photo)}" alt="" loading="lazy">` : ''}</span>
@@ -598,7 +604,7 @@ function seasonHTML(r) {
   const leadersBlock = leaders ? `<div class="tl-sechdr">📊 Projected stat leaders <span class="muted">full season · top 5 per category</span></div>
       <div class="tl-lgrid">${leaders}</div>` : '';
   return `<div class="tl-season">${league}${cup}${leadersBlock}
-    <div class="tl-foot">League: rivals extrapolated at their current pace, your side from the model. Player totals project each starter's real current per-90 output over ~85% of a full season. Knockout runs carry realistic variance.</div></div>`;
+    <div class="tl-foot">League: rivals extrapolated at their current pace, your side from the model. Player totals project each starter's real current per-90 output over ~85% of a full season. The cup result is the deepest round the side is more likely than not to reach.</div></div>`;
 }
 
 // ---- visualization: shape + passing network + territory heat ----
