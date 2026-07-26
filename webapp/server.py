@@ -372,8 +372,14 @@ _UCL_LEAGUE_ID = 42                                       # FotMob's Champions L
 _UCL_SEASON = "2025%2F2026"                               # most recent completed edition
 
 
+# Clubs held out of the simulated field by choice. Everything downstream keys off rank, so
+# the remaining sides are renumbered to close the gap — the qualification bands (top 8
+# straight through, 9th-24th to the playoff) then still mean what they say.
+_UCL_EXCLUDE = {"tottenham hotspur", "tottenham"}
+
+
 def _ucl_field():
-    """The real Champions League league-phase table: 36 clubs with rank, points, goal
+    """The real Champions League league-phase table: the clubs with rank, points, goal
     difference, crest and FotMob team id. Cached 6h (it is a completed season)."""
     import time as _t
     hit = _UCL_FIELD.get("rows")
@@ -385,10 +391,10 @@ def _ucl_field():
         raw = auth.get(f"/api/data/leagues?id={_UCL_LEAGUE_ID}&season={_UCL_SEASON}") if auth else {}
         tbl = (((raw or {}).get("table") or [{}])[0].get("data") or {}).get("table") or {}
         for r in (tbl.get("all") or []):
-            if not r.get("id"):
+            if not r.get("id") or (r.get("name") or "").strip().lower() in _UCL_EXCLUDE:
                 continue
             rows.append({
-                "name": r.get("name"), "id": r["id"], "rank": r.get("idx") or (len(rows) + 1),
+                "name": r.get("name"), "id": r["id"], "rank": len(rows) + 1,
                 "pts": r.get("pts") or 0, "gd": r.get("goalConDiff") or 0,
                 "scores": r.get("scoresStr"),
                 "logo": f"https://images.fotmob.com/image_resources/logo/teamlogo/{r['id']}.png",
