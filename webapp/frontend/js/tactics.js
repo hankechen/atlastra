@@ -62,6 +62,12 @@ async function loadSide(key) {
   sd.custom = !!r.custom;
   if (r.custom) sd.team = key === 'B' ? 'Their XI' : 'Your XI';
   sd.xi = r.xi; sd.squad = r.squad; sd.tactics = { ...(r.tactic_defaults || {}) }; sd.error = false;
+  // what the server handed us, kept so a share link can encode only what you CHANGED —
+  // an untouched Real Madrid is then five characters, not a wall of base64
+  sd.base = { tactics: { ...(r.tactic_defaults || {}) },
+              xi: (r.xi || []).map((s) => ({ id: s.id, role: s.role, family: s.family,
+                                             x: s.x, y: s.y, line: s.line,
+                                             name: s.player ? s.player.player : null })) };
   S.roles = r.roles; S.roleDefaults = r.role_defaults; S.formations = r.formations;
 }
 async function loadAll() {
@@ -1077,6 +1083,119 @@ async function loadAdvisor() {
   el.innerHTML = _lastAdvText;
 }
 
+// ---- sharing a setup ----
+// A link carries the whole build, not just the team names: formation, every tactic slider,
+// each slot's player, role and position on the pitch — including players you added, past
+// seasons and an XI built from scratch. It stores only what DIFFERS from what the server
+// would hand you for that team, so an untouched side costs a handful of characters and only
+// the parts you actually changed travel. No server state, so a link keeps working.
+function sideShare(sd) {
+  if (!sd || !sd.team || !sd.xi.length) return null;
+  const o = { t: sd.custom ? '__custom__' : sd.team, f: sd.formation };
+  const base = sd.base || { tactics: {}, xi: [] };
+  const tdiff = {};
+  Object.keys(sd.tactics || {}).forEach((k) => {
+    if (sd.tactics[k] !== (base.tactics[k] === undefined ? 50 : base.tactics[k])) tdiff[k] = sd.tactics[k];
+  });
+  if (Object.keys(tdiff).length) o.s = tdiff;
+  const byId = {}; (base.xi || []).forEach((b) => { byId[b.id] = b; });
+  const slots = [];
+  sd.xi.forEach((s) => {
+    const b = byId[s.id], nm = s.player ? s.player.player : null;
+    const moved = !b || Math.round(s.x) !== Math.round(b.x) || Math.round(s.y) !== Math.round(b.y)
+      || s.family !== b.family || s.line !== b.line;
+    if (!b || nm !== b.name || s.role !== b.role || moved) {
+      slots.push([s.id, nm, s.role, s.family, Math.round(s.x), Math.round(s.y), s.line]);
+    }
+  });
+  if (slots.length) o.x = slots;
+  return o;
+}
+function encodeShare(obj) {
+  const json = JSON.stringify(obj);
+  return btoa(unescape(encodeURIComponent(json))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function decodeShare(str) {
+  try {
+    const b = str.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(decodeURIComponent(escape(atob(b))));
+  } catch { return null; }
+}
+function shareURL() {
+  const payload = { v: 1, a: sideShare(S.sides.A) };
+  const b = sideShare(S.sides.B);
+  if (b) payload.b = b;
+  const u = new URL(location.href);
+  u.search = '?s=' + encodeShare(payload);
+  return u.toString();
+}
+async function copyShare() {
+  const url = shareURL();
+  let copied = false;
+  try { await navigator.clipboard.writeText(url); copied = true; } catch { copied = false; }
+  closePop();
+  const pop = document.createElement('div'); pop.className = 'tl-pop'; pop.id = 'tlPop';
+  pop.innerHTML = `<div class="tl-pop-bd tl-sharebd">
+      <div class="tl-pop-h"><b>${copied ? 'Link copied' : 'Share this setup'}</b><button class="tl-pop-x">✕</button></div>
+      <div class="tl-sharenote">Opens with this exact build — formation, roles, sliders, swaps,
+        added players and past seasons included.</div>
+      <input class="tl-shareurl" id="shareUrl" readonly value="${esc(url)}">
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="shareCopy">${copied ? '✅ Copied' : '📋 Copy link'}</button>
+        <span class="tl-mtally">${url.length} characters</span></div></div>`;
+  document.body.appendChild(pop);
+  pop.querySelector('.tl-pop-x').onclick = closePop;
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  const inp = document.getElementById('shareUrl'); inp.focus(); inp.select();
+  document.getElementById('shareCopy').onclick = async () => {
+    inp.select();
+    try { await navigator.clipboard.writeText(url); } catch { document.execCommand('copy'); }
+    document.getElementById('shareCopy').textContent = '✅ Copied';
+  };
+}
+// Rebuild a side from a shared link: load the team normally, then lay the differences back
+// over it. Players who aren't in that squad (added, or a past season of someone) resolve
+// through the same endpoint the add box uses.
+async function applySide(key, o) {
+  const sd = S.sides[key];
+  if (!o || !o.t) { sd.team = ''; return; }
+  sd.team = o.t; sd.formation = o.f || '4-3-3';
+  await loadSide(key);
+  if (sd.error) return;
+  if (o.s) sd.tactics = { ...sd.tactics, ...o.s };
+  if (!o.x) return;
+  const known = {}; (sd.squad || []).forEach((p) => { known[p.player] = p; });
+  const needed = o.x.map((e) => e[1]).filter((n) => n && !known[n]);
+  const fetched = await Promise.all(needed.map((n) => api('/api/tactics/player?name=' + encodeURIComponent(n))
+    .then((r) => (r && r.available ? r.player : null)).catch(() => null)));
+  needed.forEach((n, i) => { if (fetched[i]) { known[n] = fetched[i]; sd.squad.push(fetched[i]); } });
+  o.x.forEach(([id, name, role, family, x, y, line]) => {
+    let slot = sd.xi.find((s) => s.id === id);
+    if (!slot) { slot = { id, family, line, x, y, role, player: null }; sd.xi.push(slot); }
+    slot.role = role || slot.role;
+    if (family) slot.family = family;
+    if (line) slot.line = line;
+    if (typeof x === 'number') slot.x = x;
+    if (typeof y === 'number') slot.y = y;
+    slot.player = name ? (known[name] || null) : null;
+  });
+  if (o.f === 'Custom') sd.formation = 'Custom';
+}
+async function loadShared(payload) {
+  document.getElementById('tlBody').innerHTML = '<div class="tl-loading">Opening a shared setup…</div>';
+  await applySide('A', payload.a);
+  if (payload.b) await applySide('B', payload.b); else S.sides.B.team = '';
+  if (S.sides.A.error) {
+    document.getElementById('tlBody').innerHTML = '<div class="empty-state">That shared setup could not be loaded.</div>';
+    return;
+  }
+  const fs = document.getElementById('formSel');
+  if (fs && S.formations) fs.innerHTML = S.formations.map((f) => `<option${f === cur().formation ? ' selected' : ''}>${f}</option>`).join('');
+  ensureOption(document.getElementById('teamInput'), S.sides.A.custom ? '__custom__' : S.sides.A.team);
+  ensureOption(document.getElementById('oppInput'), S.sides.B.custom ? '__custom__' : S.sides.B.team);
+  render(); runSim();
+  toast('Shared setup loaded — every change the sender made is in place.');
+}
+
 // ---- init ----
 fillTeams();
 const teamSel = document.getElementById('teamInput'), oppSel = document.getElementById('oppInput');
@@ -1116,10 +1235,17 @@ document.getElementById('formSel').onchange = () => {
   if (v === 'Custom') return;                 // custom layout already applied; picking a preset re-loads it
   cur().formation = v; loadSide(S.active).then(() => { render(); runSim(); });
 };
-// deep-link a matchup: /tactics.html?a=Real Madrid&b=Manchester City
+document.getElementById('shareBtn').onclick = copyShare;
+// A shared setup (?s=...) carries the whole build; ?a=/?b= remain as the simple
+// name-only deep link they always were.
 const _qp = new URLSearchParams(location.search);
-if (_qp.get('a')) S.sides.A.team = _qp.get('a');
-if (_qp.get('b')) S.sides.B.team = _qp.get('b');
-ensureOption(teamSel, S.sides.A.team);
-ensureOption(oppSel, S.sides.B.team);
-loadAll();
+const _shared = _qp.get('s') ? decodeShare(_qp.get('s')) : null;
+if (_shared && _shared.a) {
+  loadShared(_shared);
+} else {
+  if (_qp.get('a')) S.sides.A.team = _qp.get('a');
+  if (_qp.get('b')) S.sides.B.team = _qp.get('b');
+  ensureOption(teamSel, S.sides.A.team);
+  ensureOption(oppSel, S.sides.B.team);
+  loadAll();
+}
