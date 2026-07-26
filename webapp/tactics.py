@@ -941,9 +941,17 @@ def _pois_draw(rng, lam):
     return k - 1
 
 
-def _minute(rng, used):
+def _minute(rng, used, et=False):
     """A match minute for an event, shaped like real goal timing, avoiding collisions.
-    Returns (sort_minute, display_label) — a 90th-minute event may land in stoppage."""
+    Returns (sort_minute, display_label) — a 90th-minute event may land in stoppage.
+    et=True draws from the extra-time half-hour instead (91-120)."""
+    if et:
+        for _ in range(10):
+            m = rng.randint(91, 120)
+            if m not in used:
+                break
+        used.add(m)
+        return float(m), f"{m}'"
     tot = sum(b[2] for b in _MIN_BLOCKS)
     m = 45
     for _ in range(10):
@@ -1017,7 +1025,7 @@ def _photo(s):
     return (s["player"].get("photo") if s and s.get("player") else None)
 
 
-def _goal_events(rng, xi, n, side, used):
+def _goal_events(rng, xi, n, side, used, et=False):
     """Play out n goals for one side: who, when, and how (open play / header / penalty)."""
     gw, aw = _goal_weights(xi), _assist_weights(xi)
     pen_taker = max(gw, key=lambda z: player_attrs(z[0]["player"], z[0]["family"])["shooting"],
@@ -1033,7 +1041,7 @@ def _goal_events(rng, xi, n, side, used):
         asst = None
         if not pen and rng.random() < (0.86 if header else 0.70):
             asst = _pick_w(rng, aw, exclude=sc)
-        mn, lbl = _minute(rng, used)
+        mn, lbl = _minute(rng, used, et=et)
         evs.append({"minute": mn, "label": lbl, "side": side, "type": "goal",
                     "player": _nm(sc), "photo": _photo(sc),
                     "assist": _nm(asst) if asst else None,
@@ -1179,4 +1187,394 @@ def simulate_match(xi, tactics, opp_xi, opponent, team=None, opp_name="Opponent"
         "motm": _motm(xi, opp_xi, evs, gh, ga),
         "story": _match_story(home_name, opp_name, gh, ga, xgh, xga, evs),
         "seed": seed,
+    }
+
+
+# --------------------------------------------- Champions League campaign ----- #
+# The projection card gives the ODDS of a European run; this plays the run OUT, match by
+# match, from the same model. It is dropped into the REAL Champions League field: the
+# actual 36-team league phase (the completed 2025/26 table, with the real clubs, their
+# real points and the real qualification bands), so the campaign is anchored to reality
+# rather than to invented opposition:
+#   • league phase — 8 matches, two drawn from each seeding pot, 4 home and 4 away
+#   • the points those 8 games earn REPLACE the side's row in the real table, which is
+#     then re-sorted → the finishing rank, and with it the real path:
+#     top 8 straight to the last 16, 9th-24th into the knockout playoff, 25th+ out
+#   • every knockout tie is two legs (the final is one, on neutral ground), level
+#     aggregates go to extra time and then penalties — no away goals, as in the real thing
+# Opponents are the real clubs with their real squads, so the scorers are real too, and
+# each leg's goals come from the same Poisson (xG) the matchup odds are built on.
+_UCL_HOME_XG = 1.10          # home sides in Europe score ~10% more...
+_UCL_AWAY_XG = 0.93          # ...and their visitors ~7% less. A neutral final gets neither.
+_UCL_ET_RATE = 0.30          # extra time: 30 cagier minutes, so well under a third of the 90
+_UCL_GAP_K = 0.035           # squad-quality amplifier: a 15-point rating gulf ~1.7x the xG
+_UCL_TOP8 = 8                # rank 1-8  -> straight to the Round of 16
+_UCL_PLAYOFF_LAST = 24       # rank 9-24 -> knockout playoff; 25th and below are out
+# Our team names vs the names the European field is published under.
+_UCL_NAME_ALIAS = {"psg": "paris saint germain", "internazionale": "inter",
+                   "tottenham": "tottenham hotspur", "atletico madrid": "atletico madrid",
+                   "bayern munich": "bayern munchen", "inter milan": "inter",
+                   "sporting lisbon": "sporting cp"}
+
+
+def _ucl_fold(s: str) -> str:
+    """Fold a club name for matching: accents stripped, punctuation dropped, aliased."""
+    import unicodedata
+    f = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower()
+    f = " ".join(f.replace(".", " ").replace("-", " ").replace("/", " ").split())
+    return _UCL_NAME_ALIAS.get(f, f)
+
+
+def _ucl_same(a: str, b: str) -> bool:
+    return _ucl_fold(a) == _ucl_fold(b)
+
+
+def _ucl_pots(rows, exclude):
+    """The field split into four seeding pots by league-phase rank — pot 1 the strongest
+    nine, pot 4 the weakest. The user's own club never appears in a pot."""
+    field = [r for r in rows if not _ucl_same(r["name"], exclude)]
+    size = max(1, len(field) // 4)
+    return [field[i * size:(i + 1) * size] if i < 3 else field[3 * size:] for i in range(4)]
+
+
+def _ucl_fixtures(rng, rows, team, build):
+    """The league-phase draw: two opponents out of each pot, one at home and one away —
+    the real format's shape, so the eight games span the whole quality range of the field.
+    A club whose squad can't be resolved is passed over and the next name out of the same
+    pot takes its place, so the side always plays a full eight."""
+    fx = []
+    for pot in _ucl_pots(rows, team):
+        cands = list(pot)
+        rng.shuffle(cands)
+        drawn = []
+        for row in cands:
+            if build(row):
+                drawn.append(row)
+            if len(drawn) == 2:
+                break
+        if len(drawn) < 2:
+            continue
+        home_first = rng.random() < 0.5
+        fx.append((drawn[0], "H" if home_first else "A"))
+        fx.append((drawn[1], "A" if home_first else "H"))
+    rng.shuffle(fx)                                        # matchday order
+    return fx
+
+
+def _ucl_xg(A, B, venue):
+    """The expected-goals pair for one match — the same metrics the matchup odds use,
+    with squad-quality gap, playstyle chemistry, recent form and home advantage on top."""
+    m = _metrics(A["units"], A["tactics"], B["units"], B["tactics"])
+    om = _metrics(B["units"], B["tactics"], A["units"], A["tactics"])
+    xg, oxg = m["xg"] * A.get("chem_mult", 1.0), om["xg"]
+    # The matchup model is centred on top-5-league opposition, where two sides are rarely
+    # far apart. The European field is not: it runs from Arsenal to Kairat Almaty, and the
+    # FIFA overall scale compresses that range into a dozen points. So the campaign
+    # amplifies the squad-quality gap — the same move the season projection makes — which
+    # is what turns a 15-point rating gulf into the 4-0 those ties actually tend to be.
+    gap = _clamp_f(A["units"].get("avg_rating", 74) - B["units"].get("avg_rating", 74), -15, 15)
+    edge = math.exp(_UCL_GAP_K * gap)
+    xg, oxg = xg * edge, oxg / edge
+    diff = (A.get("form") or 0.0) - (B.get("form") or 0.0)
+    if diff:
+        xg *= _clamp_f(1 + 0.16 * diff, 0.85, 1.15)
+        oxg *= _clamp_f(1 - 0.16 * diff, 0.85, 1.15)
+    if venue == "H":
+        xg, oxg = xg * _UCL_HOME_XG, oxg * _UCL_AWAY_XG
+    elif venue == "A":
+        xg, oxg = xg * _UCL_AWAY_XG, oxg * _UCL_HOME_XG
+    return round(_clamp_f(xg, 0.2, 3.8), 2), round(_clamp_f(oxg, 0.2, 3.8), 2), m["possession"]
+
+
+def _ucl_match(rng, A, B, venue, rnd, label=None):
+    """One match of the campaign: goals drawn from that xG pair, then who scored, who
+    laid it on and when — the same weighting the single-match simulator uses."""
+    xg, oxg, poss = _ucl_xg(A, B, venue)
+    gf, ga = _pois_draw(rng, xg), _pois_draw(rng, oxg)
+    used: set = set()
+    evs = (_goal_events(rng, A["xi"], gf, "us", used)
+           + _goal_events(rng, B["xi"], ga, "them", used))
+    evs.sort(key=lambda e: e["minute"])
+    return {"round": rnd, "label": label, "opponent": B["name"], "logo": B.get("logo"),
+            "venue": venue, "score": {"us": gf, "them": ga},
+            "xg": {"us": xg, "them": oxg}, "possession": poss,
+            "result": "W" if gf > ga else ("D" if gf == ga else "L"), "goals": evs}
+
+
+def _ucl_extra_time(rng, A, B, venue, used):
+    """Thirty more minutes when a tie is level — played at a fraction of the 90's rate,
+    because sides that reach extra time are usually the ones afraid to lose it."""
+    xg, oxg, _ = _ucl_xg(A, B, venue)
+    gf = _pois_draw(rng, xg * _UCL_ET_RATE)
+    ga = _pois_draw(rng, oxg * _UCL_ET_RATE)
+    evs = (_goal_events(rng, A["xi"], gf, "us", used, et=True)
+           + _goal_events(rng, B["xi"], ga, "them", used, et=True))
+    evs.sort(key=lambda e: e["minute"])
+    return gf, ga, evs
+
+
+def _pen_odds(xi):
+    """Shootout conversion rate for a side, from its five best finishers' shooting."""
+    sh = sorted((player_attrs(s["player"], s["family"])["shooting"]
+                 for s in xi if s.get("player") and s.get("family") != "GK"), reverse=True)[:5]
+    avg = sum(sh) / len(sh) if sh else 70
+    return _clamp_f(0.62 + (avg - 74) / 220.0, 0.55, 0.88)
+
+
+def _shootout(rng, xi_a, xi_b):
+    """Penalties: five kicks each at the sides' conversion rates, then sudden death.
+    Scored kick-by-kick rather than as a coin flip, so the better takers really do
+    have an edge — a small one, as they do in reality."""
+    pa, pb = _pen_odds(xi_a), _pen_odds(xi_b)
+    a = b = 0
+    for _ in range(5):
+        a += rng.random() < pa
+        b += rng.random() < pb
+    while a == b:                                          # sudden death
+        ka, kb = rng.random() < pa, rng.random() < pb
+        a, b = a + ka, b + kb
+        if ka != kb:
+            break
+    return int(a), int(b)
+
+
+def _ucl_tie(rng, A, B, rnd, second_leg_home, one_off=False):
+    """A knockout tie. Two legs, aggregate scores, no away goals (as UEFA has scored it
+    since 2021); level after 180 minutes → extra time in the second leg → penalties.
+    The final (one_off) is a single match on neutral ground."""
+    if one_off:
+        leg = _ucl_match(rng, A, B, "N", rnd, "Final")
+        legs, gf, ga = [leg], leg["score"]["us"], leg["score"]["them"]
+    else:
+        v1 = "H" if not second_leg_home else "A"
+        l1 = _ucl_match(rng, A, B, v1, rnd, "1st leg")
+        l2 = _ucl_match(rng, A, B, "H" if second_leg_home else "A", rnd, "2nd leg")
+        legs = [l1, l2]
+        gf = l1["score"]["us"] + l2["score"]["us"]
+        ga = l1["score"]["them"] + l2["score"]["them"]
+    et = pens = None
+    if gf == ga:
+        last = legs[-1]
+        used = {int(e["minute"]) for e in last["goals"]}
+        efa, efb, evs = _ucl_extra_time(rng, A, B, "N" if one_off else
+                                        ("H" if second_leg_home else "A"), used)
+        last["goals"] += evs
+        last["goals"].sort(key=lambda e: e["minute"])
+        last["score"]["us"] += efa
+        last["score"]["them"] += efb
+        su, st = last["score"]["us"], last["score"]["them"]
+        last["result"] = "W" if su > st else ("D" if su == st else "L")
+        last["extra_time"] = True
+        gf, ga, et = gf + efa, ga + efb, True
+        if gf == ga:
+            pa, pb = _shootout(rng, A["xi"], B["xi"])
+            pens = {"us": pa, "them": pb}
+    won = (pens["us"] > pens["them"]) if pens else (gf > ga)
+    if pens:
+        line = (f"{'Won' if won else 'Lost'} {pens['us']}-{pens['them']} on penalties "
+                f"after {gf}-{ga} on aggregate")
+    elif one_off:
+        line = "after extra time" if et else ""
+    else:
+        line = f"{'Won' if won else 'Lost'} {gf}-{ga} on aggregate" + (" after extra time" if et else "")
+    return {"round": rnd, "opponent": B["name"], "logo": B.get("logo"), "legs": legs,
+            "agg": {"us": gf, "them": ga}, "extra_time": bool(et), "pens": pens,
+            "won": bool(won), "line": line, "one_off": one_off}
+
+
+def _ucl_pick(rng, rows, taken, lo, hi, sharpness, build):
+    """Draw the next knockout opponent from the band of the field that would still be in
+    it — weighted toward the higher seeds, sharply so in the later rounds, because that is
+    who actually survives that deep. A club whose squad can't be resolved is dropped and
+    the draw is made again."""
+    for _ in range(6):
+        band = [r for r in rows if lo <= r["rank"] <= hi
+                and not any(_ucl_same(r["name"], t) for t in taken)]
+        if not band:
+            band = [r for r in rows if not any(_ucl_same(r["name"], t) for t in taken)]
+        if not band:
+            return None
+        pairs = [(r, math.exp(-r["rank"] / sharpness)) for r in band]
+        tot = sum(w for _, w in pairs)
+        x, pick = rng.random() * tot, band[-1]
+        for r, w in pairs:
+            x -= w
+            if x <= 0:
+                pick = r
+                break
+        if build(pick):
+            return pick
+        taken.append(pick["name"])                         # unresolvable → out of the draw
+    return None
+
+
+def _ord(n):
+    """1st, 2nd, 3rd, 4th … — finishing positions read badly without it."""
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _ucl_scorers(matches):
+    """Campaign goals and assists for the user's own players, best first."""
+    tally: dict = {}
+    for mt in matches:
+        for e in mt.get("goals", []):
+            if e["side"] != "us":
+                continue
+            g = tally.setdefault(e["player"], {"player": e["player"], "photo": e.get("photo"),
+                                               "goals": 0, "assists": 0})
+            g["goals"] += 1
+            g["photo"] = g["photo"] or e.get("photo")      # an assist-first entry has none yet
+            if e.get("assist"):
+                a = tally.setdefault(e["assist"], {"player": e["assist"], "photo": None,
+                                                   "goals": 0, "assists": 0})
+                a["assists"] += 1
+    out = sorted(tally.values(), key=lambda x: (-x["goals"], -x["assists"], x["player"]))
+    return out[:8]
+
+
+def _ucl_story(team, outcome, rank, ties):
+    """One line on how the campaign went."""
+    short = team.split(" ")[0]
+    if outcome["stage"] == "Champions":
+        beaten = ties[-1]["opponent"] if ties else "the field"
+        return f"{short} are champions of Europe — {beaten} beaten in the final."
+    if outcome["stage"] == "League phase":
+        return f"{short} finished {_ord(rank)} of 36 and went out in the league phase."
+    last = ties[-1] if ties else None
+    who = last["opponent"] if last else "the opposition"
+    if outcome["stage"] == "Final":
+        return f"{short} got all the way to the final and lost it to {who}."
+    return (f"{short} went out in the {outcome['stage'].lower()} to {who}"
+            + (f" — {last['line'].lower()}." if last and last["line"] else "."))
+
+
+def simulate_ucl(xi, tactics, team, table, build_opp, form_home=None, seed=None,
+                 team_logo=None) -> dict:
+    """Play a full Champions League campaign for this XI.
+
+    table:     the real league-phase table — [{'name','id','rank','pts','gd','logo'}], 36 rows.
+    build_opp: (row) -> {'name','xi','units','tactics','form','logo'} — materialises one
+               club's real squad. Called lazily, so only the clubs actually drawn are built.
+    seed:      re-seed to replay the campaign differently; everything else is unchanged.
+    team_logo: crest for the side, used when it isn't in the real field and has to be
+               written into it.
+    """
+    if not table:
+        return {"available": False, "error": "No Champions League field available."}
+    rng = random.Random(seed)
+    t = {**DEFAULT_TACTICS, **(tactics or {})}
+    u = _units(xi)
+    chem = _chemistry(xi, t)
+    A = {"name": team, "xi": xi, "tactics": t, "units": u, "form": form_home or 0.0,
+         "chem_mult": _clamp_f(1 + 0.006 * (chem["score"] - _CHEM_BASE), 0.90, 1.10)}
+    rows = sorted(({**r} for r in table), key=lambda r: r["rank"])
+
+    # Where the side sits in the real field. A club that did not qualify for it takes the
+    # last-placed side's slot, so the campaign is still played against the real 36.
+    mine = next((r for r in rows if _ucl_same(r["name"], team)), None)
+    substituted = None
+    if mine is None:
+        substituted = rows[-1]["name"]
+        mine = rows[-1]
+        mine.update({"name": team, "logo": team_logo, "id": None})
+
+    # ---- league phase: 8 matches, two from each pot, 4 home and 4 away ----
+    built: dict = {}
+
+    def opp(row):
+        key = _ucl_fold(row["name"])
+        if key not in built:
+            o = build_opp(row) or {}
+            o.setdefault("name", row["name"])
+            o.setdefault("logo", row.get("logo"))
+            o.setdefault("tactics", DEFAULT_TACTICS)
+            built[key] = o if o.get("xi") else None
+        return built[key]
+
+    lp = []
+    for row, venue in _ucl_fixtures(rng, rows, team, opp):
+        B = opp(row)
+        if not B:
+            continue
+        lp.append(_ucl_match(rng, A, B, venue, "League phase", f"Matchday {len(lp) + 1}"))
+    rec = {"w": sum(1 for m in lp if m["result"] == "W"), "d": sum(1 for m in lp if m["result"] == "D"),
+           "l": sum(1 for m in lp if m["result"] == "L"),
+           "gf": sum(m["score"]["us"] for m in lp), "ga": sum(m["score"]["them"] for m in lp)}
+    rec["pts"] = rec["w"] * 3 + rec["d"]
+    rec["played"] = len(lp)
+
+    # The simulated points replace this club's row in the real table; every other club keeps
+    # what it actually did, and the table is re-sorted on points then goal difference.
+    for r in rows:
+        r["is_user"] = bool(_ucl_same(r["name"], team))
+        if r["is_user"]:
+            r["pts"], r["gd"] = rec["pts"], rec["gf"] - rec["ga"]
+    rows.sort(key=lambda r: (-r["pts"], -(r.get("gd") or 0), r["name"]))
+    for i, r in enumerate(rows):
+        r["rank"] = i + 1
+    rank = next(r["rank"] for r in rows if r["is_user"])
+    if rank <= _UCL_TOP8:
+        path = "Straight to the Round of 16"
+    elif rank <= _UCL_PLAYOFF_LAST:
+        path = "Into the knockout playoff"
+    else:
+        path = "Eliminated in the league phase"
+
+    # ---- knockout rounds, one tie at a time until they lose one ----
+    ties, taken, stage = [], [team], "League phase"
+    if rank <= _UCL_PLAYOFF_LAST:
+        seq = []
+        if rank > _UCL_TOP8:
+            # The playoff pairs seeds 9-16 with 17-24; the better seed hosts the 2nd leg.
+            band = (17, 24) if rank <= 16 else (9, 16)
+            seq.append(("Knockout playoff", band, 9.0, rank <= 16))
+        # In the last 16 the eight league-phase seeds meet the playoff winners.
+        seq.append(("Round of 16", (9, 24) if rank <= _UCL_TOP8 else (1, 8), 8.0,
+                    rank <= _UCL_TOP8))
+        seq.append(("Quarter-final", (1, 24), 7.0, None))
+        seq.append(("Semi-final", (1, 24), 5.5, None))
+        seq.append(("Final", (1, 24), 4.5, None))
+        for rnd, (lo, hi), sharp, home2 in seq:
+            row = _ucl_pick(rng, rows, taken, lo, hi, sharp, opp)
+            B = opp(row) if row else None
+            if not B:
+                break
+            taken.append(B["name"])
+            if home2 is None:                              # no seeding left this deep
+                home2 = rng.random() < 0.5
+            tie = _ucl_tie(rng, A, B, rnd, home2, one_off=(rnd == "Final"))
+            ties.append(tie)
+            if not tie["won"]:
+                stage = rnd
+                break
+            stage = "Champions" if rnd == "Final" else rnd
+
+    won_it = stage == "Champions"
+    if won_it:
+        outcome = {"stage": "Champions", "won_it": True, "title": "🏆 Champions of Europe"}
+    elif stage == "League phase":
+        outcome = {"stage": "League phase", "won_it": False,
+                   "title": f"Out in the league phase — {_ord(rank)} of {len(rows)}"}
+    elif stage == "Final":
+        outcome = {"stage": "Final", "won_it": False, "title": "🥈 Runners-up"}
+    else:
+        outcome = {"stage": stage, "won_it": False, "title": f"Eliminated in the {stage}"}
+
+    all_matches = lp + [lg for tie in ties for lg in tie["legs"]]
+    summary = {"played": len(all_matches),
+               "w": sum(1 for m in all_matches if m["result"] == "W"),
+               "d": sum(1 for m in all_matches if m["result"] == "D"),
+               "l": sum(1 for m in all_matches if m["result"] == "L"),
+               "gf": sum(m["score"]["us"] for m in all_matches),
+               "ga": sum(m["score"]["them"] for m in all_matches)}
+    outcome["line"] = _ucl_story(team, outcome, rank, ties)
+    return {
+        "available": True, "team": team, "seed": seed, "chemistry": chem["score"],
+        "league_phase": {"matches": lp, "record": rec, "rank": rank, "n": len(rows),
+                         "path": path, "top8": rank <= _UCL_TOP8,
+                         "substituted_for": substituted},
+        "table": rows, "ties": ties, "outcome": outcome,
+        "scorers": _ucl_scorers(all_matches), "summary": summary,
     }

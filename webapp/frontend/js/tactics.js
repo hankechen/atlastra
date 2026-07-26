@@ -532,6 +532,7 @@ function renderResults(r) {
   wireSubs();
   const ssb = document.getElementById('simSeasonBtn'); if (ssb) ssb.onclick = openSeasonModal;
   const smb = document.getElementById('simMatchBtn'); if (smb) smb.onclick = openMatchModal;
+  const ucb = document.getElementById('simUclBtn'); if (ucb) ucb.onclick = openUclModal;
   scheduleAdvisor();
 }
 
@@ -558,8 +559,10 @@ function projCard(p) {
         <span class="muted">projected · ${p.points} pts</span></div>` : '';
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
       <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
+  const uclBtn = p.kind === 'club'
+    ? '<button class="tl-seasonbtn" id="simUclBtn">🏆 Simulate UCL run</button>' : '';
   return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
-      <button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button></div>
+      <span class="tl-projbtns"><button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button>${uclBtn}</span></div>
     ${league}${cup}
     <div class="tl-pstages">${stages}</div>
     <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). Knockout ties carry realistic variance.</div></section>`;
@@ -696,6 +699,116 @@ function matchHTML(r) {
       <div class="tl-mfoot"><button class="tl-seasonbtn" id="resimBtn">🔄 Re-simulate</button>${tally}</div>
       <div class="tl-foot">Goals are drawn from the same Poisson (xG) the odds come from; scorers, assists
         and bookings are weighted by the same player attributes, roles and tactics. Every re-sim is a fresh draw.</div></div>`;
+}
+
+// ---- Champions League campaign: the whole run, played match by match ----
+// The projection card gives the ODDS of a European run; this plays one out. The side is
+// dropped into the REAL 36-team league phase — the actual clubs, their actual points — so
+// the eight matchdays decide a real finishing rank, and with it the real path: top 8 to the
+// last 16, 9th-24th through the playoff, 25th and below out. Every tie after that is two
+// legs, extra time and penalties included. Re-running redraws the whole campaign.
+const UCL_ORDER = ['League phase', 'Knockout playoff', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final', 'Champions'];
+const UC = { key: '', n: 0, titles: 0, best: -1, stages: {} };
+function resetUclTally() { Object.assign(UC, { key: cur().team, n: 0, titles: 0, best: -1, stages: {} }); }
+
+async function openUclModal() {
+  closePop();
+  const pop = document.createElement('div'); pop.className = 'tl-pop'; pop.id = 'tlPop';
+  pop.innerHTML = `<div class="tl-pop-bd tl-uclbd">
+      <div class="tl-pop-h"><b>Champions League — ${esc(cur().team)}</b><button class="tl-pop-x">✕</button></div>
+      <div id="uclBody"><div class="tl-loading">Entering the draw…</div></div></div>`;
+  document.body.appendChild(pop);
+  pop.querySelector('.tl-pop-x').onclick = closePop;
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  document.addEventListener('keydown', function onEsc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', onEsc); } });
+  if (UC.key !== cur().team) resetUclTally();       // new side → fresh campaign record
+  runUclSim();
+}
+async function runUclSim() {
+  const box = document.getElementById('uclBody'); if (!box) return;
+  box.innerHTML = '<div class="tl-loading">Playing the campaign — eight matchdays, then the bracket…</div>';
+  const a = cur();
+  const payload = { team: a.team, xi: a.xi, tactics: a.tactics, seed: Math.floor(Math.random() * 1e9) };
+  let r; try { r = await fetch('/api/tactics/ucl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { r = null; }
+  const el = document.getElementById('uclBody'); if (!el) return;
+  if (!r || !r.available) {
+    el.innerHTML = `<div class="empty-state">${esc((r && r.error) || 'Could not simulate the campaign.')}</div>`;
+    return;
+  }
+  UC.n++;
+  const si = UCL_ORDER.indexOf(r.outcome.stage);
+  if (r.outcome.won_it) UC.titles++;
+  if (si > UC.best) UC.best = si;
+  UC.stages[r.outcome.stage] = (UC.stages[r.outcome.stage] || 0) + 1;
+  el.innerHTML = uclHTML(r);
+  const bd = el.closest('.tl-uclbd'); if (bd) bd.scrollTop = 0;
+  const rb = document.getElementById('reuclBtn'); if (rb) rb.onclick = runUclSim;
+}
+// scorers under a result: yours in accent, theirs muted — the story of the 90 in one line
+function uclGoals(m) {
+  const one = (e) => `<span class="tl-ug ${e.side === 'us' ? 'you' : 'opp'}">${esc(e.label)} ${esc(surname(e.player))}${e.how === 'penalty' ? ' (p)' : ''}</span>`;
+  return (m.goals || []).length ? `<div class="tl-ugs">${m.goals.map(one).join('')}</div>` : '';
+}
+function uclMatchRow(m) {
+  const res = m.result === 'W' ? 'w' : (m.result === 'D' ? 'd' : 'l');
+  return `<div class="tl-umrow ${res}">
+      <span class="tl-umlbl">${esc((m.label || '').replace('Matchday ', 'MD'))}</span>
+      <span class="tl-umven ${m.venue === 'H' ? 'h' : (m.venue === 'A' ? 'a' : 'n')}">${m.venue}</span>
+      <span class="tl-umopp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}<span>${esc(m.opponent)}</span></span>
+      <span class="tl-umsc">${m.score.us}<i>–</i>${m.score.them}${m.extra_time ? '<em>aet</em>' : ''}</span>
+      ${uclGoals(m)}</div>`;
+}
+function uclTieCard(t) {
+  const legs = (t.legs || []).map((lg) => `<div class="tl-uleg">
+      <span class="tl-umlbl">${esc(lg.label || '')}</span>
+      <span class="tl-umven ${lg.venue === 'H' ? 'h' : (lg.venue === 'A' ? 'a' : 'n')}">${lg.venue}</span>
+      <span class="tl-umsc">${lg.score.us}<i>–</i>${lg.score.them}${lg.extra_time ? '<em>aet</em>' : ''}</span>
+      ${uclGoals(lg)}</div>`).join('');
+  return `<div class="tl-utie ${t.won ? 'won' : 'lost'}">
+      <div class="tl-utieh"><span class="tl-utier">${esc(t.round)}</span>
+        <span class="tl-umopp">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<b>${esc(t.opponent)}</b></span>
+        <span class="tl-utiebadge">${t.won ? 'Through' : 'Out'}</span></div>
+      ${legs}
+      ${t.line ? `<div class="tl-utiel">${esc(t.line)}</div>` : ''}</div>`;
+}
+function uclHTML(r) {
+  const lp = r.league_phase, rec = lp.record, o = r.outcome;
+  const fixtures = lp.matches.map(uclMatchRow).join('');
+  const band = lp.rank <= 8 ? 'top8' : (lp.rank <= 24 ? 'po' : 'out');
+  const table = (r.table || []).map((t) => `<tr class="${t.is_user ? 'you' : ''} ${t.rank <= 8 ? 'q8' : (t.rank <= 24 ? 'q16' : '')}">
+      <td class="tl-stpos">${t.rank}</td>
+      <td class="tl-stteam">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span>${esc(t.name)}</span></td>
+      <td class="tl-stpts">${t.pts}</td></tr>`).join('');
+  const ties = (r.ties || []).map(uclTieCard).join('');
+  const scorers = (r.scorers || []).filter((s) => s.goals).slice(0, 5).map((s) => `<div class="tl-lrow">
+      <span class="tl-lph">${s.photo ? `<img src="${esc(s.photo)}" alt="" loading="lazy">` : ''}</span>
+      <span class="tl-lnm">${esc(s.player)}</span>
+      <b class="tl-lval">${s.goals}${s.assists ? ` <i>+${s.assists}a</i>` : ''}</b></div>`).join('');
+  const sm = r.summary;
+  const tally = UC.n > 1
+    ? `<span class="tl-mtally">${UC.n} campaigns · <b>${UC.titles} title${UC.titles === 1 ? '' : 's'}</b> · best: ${esc(UCL_ORDER[UC.best] || '—')}</span>` : '';
+  const sub = lp.substituted_for
+    ? `<div class="tl-usub">${esc(r.team)} weren't in the real 25/26 field — they take ${esc(lp.substituted_for)}'s place in it.</div>` : '';
+  return `<div class="tl-ucl">
+      <div class="tl-uhero ${o.won_it ? 'win' : band}">
+        <div class="tl-uhtitle">${esc(o.title)}</div>
+        <div class="tl-uhline">${esc(o.line)}</div>
+        <div class="tl-uhstats"><span><b>${sm.played}</b> played</span><span><b>${sm.w}W ${sm.d}D ${sm.l}L</b></span>
+          <span>goals <b>${sm.gf}–${sm.ga}</b></span></div></div>
+      ${sub}
+      <div class="tl-sechdr">⚽ League phase <span class="muted">8 matches · two out of each pot</span></div>
+      <div class="tl-umatches">${fixtures}</div>
+      <div class="tl-ufin ${band}"><b>${rec.w}W ${rec.d}D ${rec.l}L · ${rec.pts} pts</b>
+        <span>${ordinal(lp.rank)} of ${lp.n}</span><span class="tl-upath">${esc(lp.path)}</span></div>
+      <div class="tl-sechdr">📋 Final league-phase table <span class="muted">your points in the real 25/26 table</span></div>
+      <div class="tl-sttblwrap tl-utbl"><table class="tl-sttbl"><thead><tr><th></th><th>Team</th><th>Pts</th></tr></thead><tbody>${table}</tbody></table></div>
+      ${ties ? `<div class="tl-sechdr">🗝 Knockout rounds <span class="muted">two legs · extra time · penalties</span></div><div class="tl-uties">${ties}</div>` : ''}
+      ${scorers ? `<div class="tl-sechdr">👟 Campaign scorers</div><div class="tl-uscorers">${scorers}</div>` : ''}
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="reuclBtn">🔄 Run it again</button>${tally}</div>
+      <div class="tl-foot">The field, its points and the qualification bands are the real 2025/26 Champions League;
+        your eight matchdays replace your own row in it. Each match's goals are drawn from the same Poisson (xG) the
+        matchup odds use — scaled by the squad-quality gap, home advantage and recent form — and the scorers are
+        weighted by the same attributes, roles and tactics. Level ties go to extra time, then penalties.</div></div>`;
 }
 
 // ---- visualization: shape + passing network + territory heat ----

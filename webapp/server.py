@@ -95,11 +95,20 @@ _SQUAD_ADD = {
 }
 
 
+def _fotmob_mod():
+    """The FotMob feed module. In production `live_feed` already IS it (ATLASTRA_FOTMOB=1);
+    fall back to importing it directly so squads and the European field work either way."""
+    if hasattr(live_feed, "fotmob_squad"):
+        return live_feed
+    from webapp import live_feed_fotmob
+    return live_feed_fotmob
+
+
 def _build_club_squad(team, tid):
     """Current squad from FotMob's team page (roster + correct player-photo ids), with FIFA/
     EA FC ratings + attributes matched in by name. `_SQUAD_ADD` force-includes extra players."""
     from webapp import fifa
-    members = list(getattr(live_feed, "fotmob_squad", lambda _i: [])(tid) or [])
+    members = list(getattr(_fotmob_mod(), "fotmob_squad", lambda _i: [])(tid) or [])
     have = {m["name"].lower() for m in members}
     for nm, pid in _SQUAD_ADD.get(team, []):
         if nm.lower() not in have:
@@ -160,14 +169,16 @@ def _apply_breakout(p, atlas):
             f[k] = min(99, int(round(f[k] + boost)))
 
 
-def _tac_squad(d, team):
+def _tac_squad(d, team, tid=None):
+    """Squad for the Tactics Lab. `tid` forces a FotMob team id, so any club in Europe
+    (e.g. a Champions League opponent outside our own dropdown) can be built too."""
     import time as _t
     import re as _re
     hit = _TAC_SQUAD.get(team.lower())
     if hit and hit[0] > _t.time():
         return hit[1]
     from webapp import fifa
-    tid = _FOTMOB_TEAM_ID.get(team)
+    tid = tid or _FOTMOB_TEAM_ID.get(team)
     if tid:                                              # club → FotMob roster + FIFA ratings
         sq = _build_club_squad(team, tid)
     else:                                                # national → World Cup squad + FIFA
@@ -266,6 +277,60 @@ def _tac_rebuild(d, team, slots):
                    "role": s.get("role") or tactics.DEFAULT_ROLE.get(s.get("family"), ""),
                    "player": full})
     return xi, squad
+
+
+# ---- Champions League campaign: the REAL European field --------------------------- #
+# The campaign simulator drops the user's side into the actual Champions League league
+# phase rather than an invented one: FotMob's league-phase table gives all 36 clubs, the
+# points they really took, and the team id that unlocks each of their real squads — so the
+# opponents, and the players who score against them, are the genuine article.
+_UCL_FIELD: dict = {}                                     # cache: {"rows": (expiry, rows)}
+_UCL_LEAGUE_ID = 42                                       # FotMob's Champions League id
+_UCL_SEASON = "2025%2F2026"                               # most recent completed edition
+
+
+def _ucl_field():
+    """The real Champions League league-phase table: 36 clubs with rank, points, goal
+    difference, crest and FotMob team id. Cached 6h (it is a completed season)."""
+    import time as _t
+    hit = _UCL_FIELD.get("rows")
+    if hit and hit[0] > _t.time():
+        return hit[1]
+    rows = []
+    try:
+        auth = getattr(_fotmob_mod(), "_auth", None)
+        raw = auth.get(f"/api/data/leagues?id={_UCL_LEAGUE_ID}&season={_UCL_SEASON}") if auth else {}
+        tbl = (((raw or {}).get("table") or [{}])[0].get("data") or {}).get("table") or {}
+        for r in (tbl.get("all") or []):
+            if not r.get("id"):
+                continue
+            rows.append({
+                "name": r.get("name"), "id": r["id"], "rank": r.get("idx") or (len(rows) + 1),
+                "pts": r.get("pts") or 0, "gd": r.get("goalConDiff") or 0,
+                "scores": r.get("scoresStr"),
+                "logo": f"https://images.fotmob.com/image_resources/logo/teamlogo/{r['id']}.png",
+            })
+    except Exception:                                     # noqa: BLE001
+        rows = []
+    if rows:
+        _UCL_FIELD["rows"] = (_t.time() + 6 * 3600, rows)
+    return rows
+
+
+def _ucl_opponent(d, row):
+    """Materialise one club from the field — its real current squad, an auto XI in a stock
+    shape, unit strengths and recent form. Only the clubs actually drawn are ever built
+    (and `_tac_squad` caches them), so a campaign costs a handful of roster fetches."""
+    squad = _tac_squad(d, row["name"], tid=row.get("id"))
+    if not squad:
+        return None
+    xi = tactics.build_xi(squad, "4-3-3")
+    if not any(s.get("player") for s in xi):
+        return None
+    return {"name": row["name"], "logo": row.get("logo"), "xi": xi,
+            "units": tactics.team_units(xi, tactics.DEFAULT_TACTICS),
+            "tactics": tactics.DEFAULT_TACTICS,
+            "form": (_team_form(d, row["name"]) or {}).get("form") or 0.0}
 
 
 _TAC_ADVISOR: dict = {}                                   # cache: prompt-hash -> text
@@ -934,6 +999,26 @@ class Handler(BaseHTTPRequestHandler):
                 res = tactics.simulate_match(xi, b.get("tactics"), oxi, opp, team=team,
                                              opp_name=ob["team"], form_home=fh, form_away=fa,
                                              seed=_int(b.get("seed")) or None)
+            self._json(res)
+            return
+        if u.path == "/api/tactics/ucl":               # Tactics Lab: play a Champions League run
+            field = _ucl_field()
+            if not field:
+                self._json({"available": False, "error": "Champions League field unavailable."})
+                return
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                team = b.get("team", "")
+                xi, _ = _tac_rebuild(d, team, b.get("xi"))
+                if not any(s.get("player") for s in xi):
+                    self._json({"available": False, "error": "Load a squad first."})
+                    return
+                own = _FOTMOB_TEAM_ID.get(team)
+                res = tactics.simulate_ucl(
+                    xi, b.get("tactics"), team, field, lambda row: _ucl_opponent(d, row),
+                    form_home=_team_form(d, team).get("form"),
+                    seed=_int(b.get("seed")) or None,
+                    team_logo=(f"https://images.fotmob.com/image_resources/logo/teamlogo/{own}.png"
+                               if own else None))
             self._json(res)
             return
         if u.path == "/api/tactics/season":            # Tactics Lab: full-season simulation
