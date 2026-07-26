@@ -36,7 +36,11 @@ const NATIONS = ['Argentina', 'France', 'Brazil', 'England', 'Spain', 'Germany',
 function teamOptions(withNone) {
   const opt = (t) => { const v = Array.isArray(t) ? t[0] : t, l = Array.isArray(t) ? t[1] : t; return `<option value="${esc(v)}">${esc(l)}</option>`; };
   const grp = (lbl, arr) => `<optgroup label="${lbl}">${arr.map(opt).join('')}</optgroup>`;
-  return (withNone ? '<option value="">none — profile mode</option>' : '') + grp('Clubs', CLUBS) + grp('National teams', NATIONS);
+  // An empty shape you fill yourself — available for your side AND the opposition, so a
+  // made-up XI can be played against a real club, or against another made-up one.
+  const custom = '<optgroup label="Your own team"><option value="__custom__">⚙ Build your own XI</option></optgroup>';
+  return (withNone ? '<option value="">none — profile mode</option>' : '') + custom
+    + grp('Clubs', CLUBS) + grp('National teams', NATIONS);
 }
 function ensureOption(sel, val) {   // keep a deep-linked/custom team selectable
   if (val && !Array.from(sel.options).some((o) => o.value === val)) sel.insertBefore(new Option(val, val), sel.firstChild);
@@ -53,6 +57,9 @@ async function loadSide(key) {
   if (!sd.team) { sd.xi = []; sd.squad = []; return; }
   let r; try { r = await api(`/api/tactics/squad?team=${encodeURIComponent(sd.team)}&formation=${encodeURIComponent(sd.formation)}`); } catch { r = null; }
   if (!r || !r.available) { sd.xi = []; sd.squad = []; sd.error = true; return; }
+  // '__custom__' -> a readable name, and a different one per side so a made-up XI against
+  // another made-up XI doesn't read "Custom XI vs Custom XI"
+  if (r.custom) sd.team = key === 'B' ? 'Their XI' : 'Your XI';
   sd.xi = r.xi; sd.squad = r.squad; sd.tactics = { ...(r.tactic_defaults || {}) }; sd.error = false;
   S.roles = r.roles; S.roleDefaults = r.role_defaults; S.formations = r.formations;
 }
@@ -75,9 +82,17 @@ async function runSim() {
 }
 let _simT; const debouncedSim = () => { clearTimeout(_simT); _simT = setTimeout(runSim, 260); };
 
+// A past-season player carries his year in his name ("Cristiano Ronaldo (2014/15)") — that
+// IS his identity everywhere, so the display layer splits it back off rather than the data
+// layer keeping two fields in sync.
+const _SEASON_TAG = /\s*\((\d{4}\/\d{2})\)\s*$/;
+const stripSeason = (n) => (n || '').replace(_SEASON_TAG, '');
+const seasonOf = (n) => { const m = (n || '').match(_SEASON_TAG); return m ? m[1] : ''; };
+
 // ---- render pitch + tactics ----
 function chipHTML(s) {
-  const p = s.player, nm = p ? p.player.split(' ').slice(-1)[0] : '—';
+  const p = s.player, nm = p ? surname(p.player) : '—';
+  const yr = p ? seasonOf(p.player) : '';
   const ph = p && p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" draggable="false">` : '';
   // Form badge, both ways: ⚡ a breakout season the EA FC card underrates, ↓ a season
   // running below what the card promises (capped at half the upside — see _breakout_boost).
@@ -88,7 +103,8 @@ function chipHTML(s) {
     : '';
   return `<button class="tl-chip" style="left:${s.x}%;bottom:${s.y}%" data-slot="${s.id}">
       <span class="tl-phwrap"><span class="tl-ph">${ph}</span><i class="tl-rt">${p ? p.rating : '-'}</i>${brk}</span>
-      <span class="tl-nm">${esc(nm)}</span><span class="tl-role">${esc(s.role)}</span></button>`;
+      <span class="tl-nm">${esc(nm)}${yr ? `<i class="tl-yr">${esc(yr.replace('20', ''))}</i>` : ''}</span>
+      <span class="tl-role">${esc(s.role)}</span></button>`;
 }
 // Pitch markings drawn behind the chips (halfway line, circle, penalty boxes, goals).
 function fieldSVG() {
@@ -159,27 +175,67 @@ async function runAddSearch(qv) {
   const rows = (r && r.results) || [];
   if (!rows.length) { box.innerHTML = '<div class="tl-addempty">No players found.</div>'; return; }
   const inSquad = new Set(cur().squad.map((p) => p.player));
-  box.innerHTML = rows.map((p) => `<button class="tl-addrow" data-name="${esc(p.player)}"${inSquad.has(p.player) ? ' disabled' : ''}>
-      <span class="tl-addph">${p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy">` : ''}</span>
-      <span class="tl-addnm"><b>${esc(p.player)}</b><span>${esc(p.position || '')}${p.team ? ' · ' + esc(p.team) : ''}</span></span>
-      <span class="tl-addrt">${p.rating}</span>${inSquad.has(p.player) ? '<span class="tl-addin">in squad</span>' : '<span class="tl-addplus">＋</span>'}</button>`).join('');
+  box.innerHTML = rows.map((p) => `<div class="tl-addrowwrap">
+      <button class="tl-addrow" data-name="${esc(p.player)}"${inSquad.has(p.player) ? ' disabled' : ''}>
+        <span class="tl-addph">${p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy">` : ''}</span>
+        <span class="tl-addnm"><b>${esc(p.player)}</b><span>${esc(p.position || '')}${p.team ? ' · ' + esc(p.team) : ''}</span></span>
+        <span class="tl-addrt">${p.rating}</span>${inSquad.has(p.player) ? '<span class="tl-addin">in squad</span>' : '<span class="tl-addplus">＋</span>'}</button>
+      <button class="tl-addyears" data-name="${esc(p.player)}" title="Field an earlier season of this player">past seasons</button>
+    </div>`).join('');
   box.querySelectorAll('.tl-addrow').forEach((el) => { if (!el.disabled) el.onclick = () => addPlayerToSquad(el.dataset.name); });
+  box.querySelectorAll('.tl-addyears').forEach((el) => { el.onclick = () => showSeasons(el.dataset.name); });
+}
+// Any season back to 2014/15 can be fielded as its own player — 2014/15 Ronaldo is a
+// different footballer from the 2021/22 one, and the warehouse knows both.
+async function showSeasons(name) {
+  const box = document.getElementById('addResults'); if (!box) return;
+  box.innerHTML = '<div class="tl-addempty">Reading his career…</div>';
+  let r; try { r = await api('/api/tactics/seasons?name=' + encodeURIComponent(name)); } catch { r = null; }
+  if (!document.getElementById('addResults')) return;
+  const ss = (r && r.seasons) || [];
+  const back = '<button class="tl-addback" id="addBack">← back to search</button>';
+  if (!ss.length) {
+    box.innerHTML = back + `<div class="tl-addempty">No earlier seasons on record for ${esc(name)} — our data starts in 2014/15.</div>`;
+  } else {
+    box.innerHTML = back + ss.map((s) => `<button class="tl-addrow" data-season="${esc(s.season)}" data-name="${esc(name)}">
+        <span class="tl-addph tl-addyr">${esc((s.label || '').replace('20', ''))}</span>
+        <span class="tl-addnm"><b>${esc(name)} <i>${esc(s.label)}</i></b>
+          <span>${esc(s.team || '')} · ${s.goals}g ${s.assists}a · ${s.minutes}′</span></span>
+        <span class="tl-addrt">${s.rating || '—'}</span><span class="tl-addplus">＋</span></button>`).join('');
+    box.querySelectorAll('.tl-addrow').forEach((el) => {
+      el.onclick = () => addPlayerToSquad(el.dataset.name, el.dataset.season);
+    });
+  }
+  const b = document.getElementById('addBack');
+  if (b) b.onclick = () => runAddSearch(document.getElementById('addSearch').value);
 }
 // Compatible families to fall back to when no exact-position slot is free.
 const _FAM_COMPAT = { DM: ['CM'], CM: ['DM', 'AM', 'WM'], AM: ['CM', 'W', 'WM'], WM: ['W', 'CM', 'AM'], W: ['WM', 'AM'], ST: ['W', 'WM'], FB: [], CB: [], GK: [] };
-async function addPlayerToSquad(name) {
-  let r; try { r = await api('/api/tactics/player?name=' + encodeURIComponent(name)); } catch { r = null; }
+async function addPlayerToSquad(name, season) {
+  let r;
+  try {
+    r = await api('/api/tactics/player?name=' + encodeURIComponent(name)
+      + (season ? '&season=' + encodeURIComponent(season) : ''));
+  } catch { r = null; }
   if (!r || !r.available || !r.player) { toast('Could not add that player.'); return; }
   const p = r.player, a = cur();
   if (!a.squad.some((x) => x.player === p.player)) a.squad.push(p);
-  // auto-slot into a matching-family position: prefer an empty slot, else the weakest starter
+  // Auto-slot into a matching-family position. EMPTY slots first across every compatible
+  // family, and only then displace someone — otherwise building an XI from scratch has each
+  // new forward knocking out the last one while the wings stand empty.
   const fams = [p.family, ...(_FAM_COMPAT[p.family] || [])].filter(Boolean);
   let target = null;
   for (const fam of fams) {
-    const slots = a.xi.filter((s) => s.family === fam);
-    target = slots.find((s) => !s.player)
-      || slots.reduce((lo, s) => (!lo || (s.player ? s.player.rating : 0) < (lo.player ? lo.player.rating : 0)) ? s : lo, null);
+    target = a.xi.find((s) => s.family === fam && !s.player);
     if (target) break;
+  }
+  if (!target) {
+    for (const fam of fams) {
+      const slots = a.xi.filter((s) => s.family === fam);
+      if (!slots.length) continue;
+      target = slots.reduce((lo, s) => (!lo || (s.player ? s.player.rating : 0) < (lo.player ? lo.player.rating : 0)) ? s : lo, null);
+      if (target) break;
+    }
   }
   closePop();
   if (target) {
@@ -366,7 +422,7 @@ function chemCard(c) {
 }
 
 // ---- substitution planner: design your changes, see how they shift the side ----
-const surname = (n) => (n || '').split(' ').slice(-1)[0];
+const surname = (n) => stripSeason(n).split(' ').slice(-1)[0];
 function xiPlayers(side) { return side.xi.filter((s) => s.player); }
 function benchOf(side) {                                   // squad players not in the XI, best first
   const inXI = new Set(side.xi.map((s) => s.player && s.player.player).filter(Boolean));

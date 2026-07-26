@@ -279,20 +279,36 @@ def _tac_squad(d, team, tid=None):
 _TAC_PLAYER: dict = {}                                   # cache: player-name -> engine dict
 
 
-def _tac_player(d, name):
+def _split_season(name):
+    """('Cristiano Ronaldo (2014/15)') -> ('Cristiano Ronaldo', '1415'). A past-season player
+    carries his year in his display name, which is also his identity on the wire, so any
+    rebuild — the sim, a substitution, a Champions League campaign — resolves the same man
+    from the same season without the client having to track it separately."""
+    import re as _re
+    m = _re.match(r"^(.*)\s+\((\d{2})(\d{2})/(\d{2})\)$", (name or "").strip())
+    if not m:
+        return name, None
+    return m.group(1).strip(), m.group(3) + m.group(4)
+
+
+def _tac_player(d, name, season=None):
     """Resolve ONE player (from any team) into a full engine dict — for user-added
     'what-if' transfers (e.g. dropping Rodri into Real Madrid). Applies the same breakout
-    boost the squad path uses and tags the player's best position family for auto-slotting."""
+    boost the squad path uses and tags the player's best position family for auto-slotting.
+    With `season`, resolves the player as he was that year instead (2014/15 onward)."""
     if not name:
         return None
-    key = name.lower()
+    if not season:                                       # a past season travels in the name
+        name, season = _split_season(name)
+    key = f"{name.lower()}|{season or ''}"
     if key in _TAC_PLAYER:
         return _TAC_PLAYER[key]
-    p = d.tactics_player(name) if hasattr(d, "tactics_player") else None
+    p = d.tactics_player(name, season) if hasattr(d, "tactics_player") else None
     if not p:
         return None
     atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
-    _apply_breakout(p, atlas)                            # league+UCL over-performer boost
+    if not p.get("season"):                              # a past season is already priced
+        _apply_breakout(p, atlas)                        # league+UCL over-performer boost
     p["family"] = tactics.family_for_position(p.get("position"))
     _TAC_PLAYER[key] = p
     return p
@@ -758,23 +774,34 @@ def api(path: str, q: dict) -> dict | list:
             formation = q.get("formation", ["4-3-3"])[0]
             if formation not in tactics.FORMATIONS:
                 formation = "4-3-3"
-            squad = _tac_squad(d, team)
-            xi = tactics.build_xi(squad, formation) if squad else []
-            return {"available": bool(squad), "team": team, "formation": formation,
+            # "Build your own XI": an empty shape to fill from the whole player universe,
+            # past seasons included. Nothing is pre-picked, so every slot is yours.
+            blank = team in ("__custom__", "Custom XI")
+            squad = [] if blank else _tac_squad(d, team)
+            xi = tactics.build_xi(squad, formation) if squad else (
+                [{"id": s["id"], "family": s["family"], "line": s["line"], "x": s["x"],
+                  "y": s["y"], "role": tactics.DEFAULT_ROLE.get(s["family"], ""),
+                  "player": None} for s in tactics.FORMATIONS[formation]] if blank else [])
+            return {"available": bool(squad) or blank, "custom": blank,
+                    "team": "Custom XI" if blank else team, "formation": formation,
                     "squad": squad, "xi": _xi_wire(xi),
                     "formations": list(tactics.FORMATIONS.keys()),
                     "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,
                     "tactic_keys": tactics.TACTIC_KEYS, "tactic_defaults": tactics.DEFAULT_TACTICS}
         if path == "/api/tactics/find":        # search any player to add to a squad (what-if)
             return {"results": d.tactics_search(q.get("q", [""])[0])}
+        if path == "/api/tactics/seasons":     # which years of a player the Lab can field
+            nm = _split_season(q.get("name", [""])[0])[0]
+            return {"player": nm, "seasons": d.tactics_player_seasons(nm)}
         if path == "/api/tactics/player":      # resolve one added player into a wire card
-            p = _tac_player(d, q.get("name", [""])[0])
+            p = _tac_player(d, q.get("name", [""])[0], q.get("season", [""])[0] or None)
             if not p:
                 return {"available": False}
             return {"available": True, "player": {
                 "player": p["player"], "rating": p["rating"], "position": p.get("position"),
                 "photo": p.get("photo"), "breakout": p.get("breakout"),
-                "family": p.get("family")}}
+                "season": p.get("season"), "season_label": p.get("season_label"),
+                "team": p.get("team"), "family": p.get("family")}}
         if path == "/api/overview":
             return d.web_overview()
         if path == "/api/rankings":

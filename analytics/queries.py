@@ -43,6 +43,57 @@ def _split(s):
     return [x.strip() for x in s.split(",")] if s else []
 
 
+def _season_label(code):
+    """'1415' -> '2014/15' — season codes are stored as the two two-digit years."""
+    c = str(code or "")
+    return f"20{c[:2]}/{c[2:]}" if len(c) == 4 and c.isdigit() else c
+
+
+# A card of a given overall looks very different by position — these are the offsets from
+# the overall that an EA FC card of that position typically carries (a 90-rated striker is
+# not a 90 defender). Used to synthesise a card for a player we only have season stats for.
+_CARD_SHAPE = {
+    "ST": {"sho": 1, "pac": 0, "dri": -3, "pas": -12, "def": -38, "phy": -3, "hea": -3},
+    "W":  {"sho": -4, "pac": 4, "dri": 2, "pas": -8, "def": -30, "phy": -11, "hea": -13},
+    "AM": {"sho": -5, "pac": -3, "dri": 2, "pas": 1, "def": -25, "phy": -10, "hea": -12},
+    "CM": {"sho": -9, "pac": -6, "dri": -2, "pas": 2, "def": -8, "phy": -3, "hea": -8},
+    "WM": {"sho": -7, "pac": 2, "dri": 0, "pas": -3, "def": -18, "phy": -7, "hea": -10},
+    "DM": {"sho": -15, "pac": -8, "dri": -6, "pas": 0, "def": 2, "phy": 1, "hea": -3},
+    "FB": {"sho": -19, "pac": 3, "dri": -4, "pas": -3, "def": 1, "phy": -4, "hea": -8},
+    "CB": {"sho": -30, "pac": -6, "dri": -14, "pas": -8, "def": 3, "phy": 3, "hea": 3},
+    "GK": {"sho": -40, "pac": -20, "dri": -25, "pas": -12, "def": -20, "phy": -2, "hea": -10},
+}
+# which per-90 / percentile signal says a player was unusually good at each card attribute
+_CARD_SIGNAL = {"sho": ("xg", 0.55), "pas": ("passes", 60.0), "dri": ("dribbles", 2.4),
+                "def": ("tackles_int", 5.0)}
+
+
+def _synth_card(overall, family, p) -> dict:
+    """Build an EA FC-style card for a player the Lab only has season statistics for — a
+    historical season, or anyone without a current card.
+
+    The rating alone isn't enough (a 90 striker and a 90 centre-back are different cards)
+    and the raw per-90 percentiles alone are worse: they saturate, so 2014/15 Ronaldo comes
+    out with 99 shooting and 29 dribbling, which the engine would read as a one-trick
+    player. So the card is a positional template at his level, then nudged (at most ±7) by
+    what that season's output was actually exceptional at. Shape from the stats, level from
+    the rating."""
+    shape = _CARD_SHAPE.get(family) or _CARD_SHAPE["CM"]
+    n = p.get("per90") or {}
+    sig = dict(n)
+    sig["tackles_int"] = (n.get("tackles") or 0) + (n.get("interceptions") or 0)
+    card = {"o": int(overall)}
+    for k, off in shape.items():
+        base = overall + off
+        name_ref = _CARD_SIGNAL.get(k)
+        if name_ref:
+            key, ref = name_ref
+            got = sig.get(key) or 0
+            base += max(-7.0, min(7.0, (got / ref - 1.0) * 7.0))
+        card[k] = int(max(20, min(99, round(base))))
+    return card
+
+
 def _fmt_season(code):
     return season_label(code) if code else code
 
@@ -1751,12 +1802,136 @@ class SoccerDB:
                 return self.player_photo(fp)
         return None
 
-    def tactics_player(self, name: str) -> dict | None:
+    # ---- past seasons in the Lab -------------------------------------------------- #
+    # The warehouse holds twelve seasons (1415 onward), and the Atlas rating scale is stable
+    # across all of them (the median season rates ~53 and the best player ~92 in every one),
+    # so a 2014/15 player-season is directly comparable to a 2025/26 one. What ISN'T
+    # comparable is the EA FC scale the Lab runs on — Atlas sits ~21 points under it. This
+    # maps one to the other empirically: for the CURRENT season, where players have both
+    # numbers, take the median EA FC overall at each Atlas level and interpolate. So a
+    # historical season is priced at whatever a player rating that well is worth today.
+    _SEASON_RATINGS: dict = {}                               # season -> sorted Atlas ratings
+    _FIFA_SCALE = None                                       # sorted EA FC overalls, today
+
+    def atlas_to_fifa(self, atlas: float, season: str) -> int:
+        """A season rating expressed on today's EA FC overall scale, matched on RANK: where
+        that number placed among the season's regulars, read off at the same place in the
+        current EA FC distribution. Matching on value instead would flatten the icons —
+        Atlas and EA FC correlate loosely, so the median card at Atlas 90 is only an 83, and
+        prime Ronaldo would come out worse than a current squad player. Rank keeps the tail:
+        the best player of 2014/15 is priced like the best player of today."""
+        if season not in SoccerDB._SEASON_RATINGS:
+            rows = self.con.execute(
+                "SELECT max(rating) FROM player_ratings_combined WHERE season = ? "
+                "AND minutes >= 900 GROUP BY player_id", [season]).fetchall()
+            SoccerDB._SEASON_RATINGS[season] = sorted(float(r[0]) for r in rows if r[0])
+        if SoccerDB._FIFA_SCALE is None:
+            from webapp import fifa
+            names = self.con.execute("SELECT DISTINCT player_name FROM players").fetchall()
+            cards = [c["o"] for (n,) in names if (c := fifa.match(n)) and c.get("o")]
+            SoccerDB._FIFA_SCALE = sorted(float(o) for o in cards)
+        peers, scale = SoccerDB._SEASON_RATINGS.get(season) or [], SoccerDB._FIFA_SCALE
+        if not peers or not scale:
+            return int(round(float(atlas or 70)))
+        x = float(atlas or 0)
+        below = sum(1 for r in peers if r < x) + 0.5 * sum(1 for r in peers if r == x)
+        pct = below / len(peers)
+        idx = min(len(scale) - 1, max(0, int(round(pct * (len(scale) - 1)))))
+        return int(round(scale[idx]))
+
+    _SEASON_SQL = """
+        WITH agg AS (
+          SELECT s.player_id, any_value(s.team) team, sum(s.minutes) mins, sum(s.goals) g,
+                 sum(s.assists) a, sum(s.xg) xg, sum(s.xa) xa, sum(s.shots) sh,
+                 sum(s.chances_created) cc, sum(s.big_chances_created) bcc,
+                 sum(s.dribbles_completed) drb, sum(s.tackles) tkl, sum(s.interceptions) intc,
+                 sum(s.passes_completed) pc, sum(s.clearances) clr,
+                 sum(s.duels_won_pct*s.minutes)/nullif(sum(s.minutes),0) dwp,
+                 sum(s.pass_accuracy_pct*s.minutes)/nullif(sum(s.minutes),0) pap,
+                 sum(s.aerial_duels_won_pct*s.minutes)/nullif(sum(s.minutes),0) awp,
+                 sum(s.dribble_success_pct*s.minutes)/nullif(sum(s.minutes),0) dsp
+          FROM v_stats_combined_player s WHERE s.season = ? GROUP BY s.player_id)
+        SELECT p.player_name, p.primary_position, a.*, max(r.rating) rating,
+               any_value(r.position_group) pos_group, max(pe.fpid) fpid
+        FROM agg a JOIN players p ON p.player_id = a.player_id
+        LEFT JOIN player_ratings_combined r ON r.player_id = a.player_id AND r.season = ?
+        LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                   WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+               ON pe.player_id = a.player_id
+        WHERE strip_accents(lower(p.player_name)) = strip_accents(lower(?)) AND a.mins >= 300
+        GROUP BY ALL ORDER BY a.mins DESC LIMIT 1
+    """
+
+    def tactics_player_seasons(self, name: str, limit: int = 14) -> list[dict]:
+        """Every season this player has real minutes in, newest first — each one fieldable
+        in the Lab as the player he was that year."""
+        # NB: the ratings table carries one row per scope (league / UCL), so it has to be
+        # collapsed BEFORE the join — joining it raw fans the stats out and doubles the
+        # goal totals (2021/22 Ronaldo came back with 48).
+        rows = self.con.execute("""
+            WITH st AS (
+              SELECT s.player_id, s.season, any_value(s.team) team, sum(s.minutes) mins,
+                     sum(s.goals) g, sum(s.assists) a
+              FROM v_stats_combined_player s JOIN players p ON p.player_id = s.player_id
+              WHERE strip_accents(lower(p.player_name)) = strip_accents(lower(?))
+              GROUP BY s.player_id, s.season),
+            rt AS (SELECT player_id, season, max(rating) rating
+                   FROM player_ratings_combined GROUP BY player_id, season)
+            SELECT st.season, st.team, st.mins, st.g, st.a, rt.rating
+            FROM st LEFT JOIN rt ON rt.player_id = st.player_id AND rt.season = st.season
+            WHERE st.mins >= 600 ORDER BY st.season DESC LIMIT ?""", [name, limit]).fetchall()
+        out = []
+        for season, team, mins, g, a, rating in rows:
+            out.append({"season": season, "label": _season_label(season), "team": team,
+                        "minutes": _i(mins), "goals": _i(g), "assists": _i(a),
+                        "rating": self.atlas_to_fifa(rating, season) if rating else None})
+        return out
+
+    def tactics_player_season(self, name: str, season: str) -> dict | None:
+        """The player as he was in one specific season: that year's per-90 output driving the
+        attributes, and that year's rating converted to today's scale. Reads the `players`
+        dimension rather than the current-season profile view, so someone who has since left
+        the top five leagues — a 2014/15 Ronaldo, a 2016/17 Hazard — still resolves."""
+        df = self.con.execute(self._SEASON_SQL, [season, season, name]).df()
+        if df.empty:
+            return None
+        r = next(df.itertuples())
+        mins = r.mins or 1
+
+        def p90(v):
+            return round((v or 0) / mins * 90, 3)
+        # `players.primary_position` is only F/M/D/GK (plus a sub flag); the ratings table
+        # carries the fine family (ST/W/AM/CM/DM/FB/CB/GK) per season, which is what the
+        # engine's slots and roles are keyed on.
+        fam = (r.pos_group or {"FWD": "ST", "MID": "CM", "DEF": "CB", "GK": "GK"}.get(
+            (r.primary_position or "").split()[0].replace("F", "FWD").replace("M", "MID")
+            .replace("D", "DEF"), "CM")) or "CM"
+        overall = self.atlas_to_fifa(r.rating, season) if r.rating else 70
+        out = {
+            "player": f"{r.player_name} ({_season_label(season)})",
+            "position": fam, "rating": overall,
+            "minutes": _i(r.mins), "photo": self.player_photo(r.fpid),
+            "season": season, "season_label": _season_label(season), "team": r.team,
+            "per90": {"goals": p90(r.g), "assists": p90(r.a), "xg": p90(r.xg),
+                      "xa": p90(r.xa), "shots": p90(r.sh), "chances": p90(r.cc),
+                      "big_chances": p90(r.bcc), "dribbles": p90(r.drb),
+                      "tackles": p90(r.tkl), "interceptions": p90(r.intc),
+                      "passes": p90(r.pc), "clearances": p90(r.clr)},
+            "pct": {"duels": _r(r.dwp, 0), "passing": _r(r.pap, 0),
+                    "aerial": _r(r.awp, 0), "dribble": _r(r.dsp, 0)},
+        }
+        out["fifa"] = _synth_card(overall, fam, out)
+        return out
+
+    def tactics_player(self, name: str, season: str | None = None) -> dict | None:
         """Resolve ANY player by name into a Tactics-Lab engine player dict (FIFA attrs +
         photo + position), independent of team — so a user can drop e.g. Rodri into any
         squad as a 'what-if' transfer. Prefers the FIFA/EA FC card (same source the club
-        squads use); falls back to DB season stats when the player has no FIFA card."""
+        squads use); falls back to DB season stats when the player has no FIFA card.
+        With `season`, fields the player as he was that year instead (see above)."""
         from webapp import fifa
+        if season and season != FOCUS_SEASON:
+            return self.tactics_player_season(name, season)
         c = fifa.match(name)
         if c:
             return {
@@ -1826,16 +2001,54 @@ class SoccerDB:
             "LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment "
             "  WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe "
             "  ON pe.player_id = f.player_id "
-            "WHERE lower(f.player) LIKE ? AND f.rating IS NOT NULL "
+            "WHERE strip_accents(lower(f.player)) LIKE ? AND f.rating IS NOT NULL "
             "ORDER BY f.rating DESC NULLS LAST LIMIT ?",
-            ["%" + q.lower() + "%", limit]).fetchall()
-        out = []
+            ["%" + _fold(q) + "%", limit]).fetchall()
+        out, seen = [], set()
         for player, pos, rating, team, fpid in rows:
             c = fifa.match(player)
+            seen.add(player.lower())
             out.append({"player": player,
                         "position": (c.get("pos") if c else pos) or "CM",
                         "rating": (c["o"] if c else (_i(rating) or 70)),
                         "team": team, "photo": self.player_photo(fpid)})
+        # Players who have LEFT the top five leagues aren't in the current-season profile at
+        # all, so a search for Ronaldo or Hazard used to come back empty. Anyone with a real
+        # season in the warehouse is fieldable, so they belong in the box too — offered at
+        # their best season, with the rest a click away.
+        if len(out) < limit:
+            past = self.con.execute("""
+                WITH st AS (
+                  SELECT s.player_id, s.season, sum(s.minutes) mins
+                  FROM v_stats_combined_player s GROUP BY s.player_id, s.season),
+                rt AS (SELECT player_id, season, max(rating) rating
+                       FROM player_ratings_combined GROUP BY player_id, season),
+                best AS (
+                  SELECT st.player_id, st.season, st.mins, rt.rating,
+                         row_number() OVER (PARTITION BY st.player_id
+                                            ORDER BY rt.rating DESC NULLS LAST) rn
+                  FROM st LEFT JOIN rt ON rt.player_id = st.player_id AND rt.season = st.season
+                  WHERE st.mins >= 900 AND st.season <> ?)
+                SELECT p.player_name, b.season, b.rating, any_value(v.team) team,
+                       max(pe.fpid) fpid
+                FROM best b JOIN players p ON p.player_id = b.player_id
+                LEFT JOIN v_stats_combined_player v
+                       ON v.player_id = b.player_id AND v.season = b.season
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id = b.player_id
+                WHERE b.rn = 1 AND strip_accents(lower(p.player_name)) LIKE ?
+                GROUP BY p.player_name, b.season, b.rating
+                ORDER BY b.rating DESC NULLS LAST LIMIT ?""",
+                [FOCUS_SEASON, "%" + _fold(q) + "%", limit]).fetchall()
+            for player, season, rating, team, fpid in past:
+                if player.lower() in seen or len(out) >= limit:
+                    continue
+                seen.add(player.lower())
+                out.append({"player": player, "position": "CM", "season": season,
+                            "season_label": _season_label(season),
+                            "rating": self.atlas_to_fifa(rating, season) if rating else 70,
+                            "team": team, "photo": self.player_photo(fpid), "past": True})
         return out
 
     def tactics_league_table(self, team: str, proj_points, games: int) -> dict | None:
