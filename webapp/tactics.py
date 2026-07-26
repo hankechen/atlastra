@@ -1007,26 +1007,45 @@ def _run(S, stages, div=5.5):
     return out, labels[exits.index(max(exits))], round(reach[-1])
 
 
-def _project(u, t, team, chem_mult=1.0):
+def _project(u, t, team, chem_mult=1.0, ctx=None):
     """League points/position + a Champions League run for clubs; a WC/Euro run for nations.
     Strength = squad quality (avg XI rating) nudged by how effective the chosen tactics are
     (the model's xG/xGA → expected points vs an average opponent) and by playstyle chemistry
     (chem_mult). div=7 gives knockout football realistic variance, so even the best side is
-    only ~20% to win a trophy."""
+    only ~20% to win a trophy.
+
+    `ctx` (optional, supplied by the server from the real league table) carries how hard that
+    club's league actually is — see _league_ctx. Without it the old generic curve is used."""
     m = _metrics(u, t, _BASE_OPP, DEFAULT_TACTICS)         # season-representative form
     xpts = _xpts(round(m["xg"] * chem_mult, 2), m["xga"])
     # FIFA overall scale is narrow (~74-88 for these sides) but reflects big quality gaps,
     # so amplify it into the strength range, then nudge by tactic effectiveness.
     S = _clamp_f(round((u.get("avg_rating", 74) - 74) * 2.5 + 55 + (xpts - 1.4) * 4), 1, 90)
-    ppg = _clamp_f(0.5 + (S - 50) * 0.052, 0.4, 2.4)       # caps a title season ~90 pts
-    if team in LEAGUE_INFO:
-        lg, games, n = LEAGUE_INFO[team]
+    # The same side takes more points in a weaker league, because most of the fixture list
+    # is easier — Bayern really did take 2.62 a game last season and PSG 2.24, rates no side
+    # sustains in the Premier League. `difficulty` is the league's UEFA country coefficient
+    # normalised to England = 1.00, so this is 0 for the hardest league and ~+10% for Ligue 1.
+    league_mult = 1 + 0.25 * (1 - (ctx or {}).get("difficulty", 1.0))
+    # the base cap still holds a title season to ~91 points; the league multiplier lifts it
+    # only as far as a dominant side in a weak league really goes (Bayern's 89 from 34)
+    ppg = _clamp_f(_clamp_f(0.5 + (S - 50) * 0.052, 0.4, 2.4) * league_mult, 0.4, 2.62)
+    if team in LEAGUE_INFO or ctx:
+        c = ctx or {}
+        lg, games, n = LEAGUE_INFO.get(team, (c.get("league") or "League",
+                                              c.get("games", 38), c.get("n", 20)))
         pts = round(ppg * games)
         run, likely, win = _run(S, [("League phase", 58), ("Round of 16", 71),
                                      ("Quarter-final", 77), ("Semi-final", 82),
                                      ("Final", 85), ("Champions", 0)], div=7)
+        # Finishing position against the REAL league: every rival's current pace carried to
+        # a full season. A generic curve can't do this — it was built on 38 games, so 82
+        # points read as second place even in a 34-game league where it wins the title by
+        # nine, and it knew nothing about who you actually have to beat.
+        rivals = (ctx or {}).get("rivals")
+        pos = (1 + sum(1 for r in rivals if r > pts)) if rivals else _pos_for(pts, n)
         return {"kind": "club", "league": lg, "games": games, "n_teams": n,
-                "points": pts, "position": _pos_for(pts, n), "ppg": round(ppg, 2),
+                "points": pts, "position": min(pos, n), "ppg": round(ppg, 2),
+                "title_bar": (round(rivals[0]) if rivals else None),
                 "comp": "Champions League", "run": run, "likely": likely, "win_pct": win}
     run, likely, win = _run(S, [("Group stage", 54), ("Round of 16", 66), ("Quarter-final", 74),
                                 ("Semi-final", 80), ("Final", 85), ("Winners", 0)], div=7)
@@ -1035,11 +1054,14 @@ def _project(u, t, team, chem_mult=1.0):
 
 
 # ------------------------------------------------------------------ main ----- #
-def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=None) -> dict:
+def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=None,
+             league_ctx=None) -> dict:
     """xi: list of slots each {family,line,role,player}. tactics: slider dict.
     opponent (optional): {'units': {...}, 'tactics': {...}, 'name': str}.
     form_home/form_away (optional): signed recent-form ratings (~-1..+1, see
-    SoccerDB.team_form_rating) that nudge the matchup toward the in-form side."""
+    SoccerDB.team_form_rating) that nudge the matchup toward the in-form side.
+    league_ctx (optional): the club's real league context (difficulty + rivals' full-season
+    pace) so the projection knows how hard that particular title actually is."""
     t = {**DEFAULT_TACTICS, **(tactics or {})}
     u = _units(xi)
     if opponent and opponent.get("units"):
@@ -1057,7 +1079,7 @@ def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=No
            "weaknesses": _weaknesses(xi, u, t, m), "style": _style_match(t, m),
            "viz": _viz(xi, t, m)}
     if team:
-        res["projection"] = _project(u, t, team, chem_mult)
+        res["projection"] = _project(u, t, team, chem_mult, league_ctx)
     if opponent and opponent.get("units"):
         om = _metrics(ou, ot, u, t)
         # recent-form nudge: tilt expected goals toward whichever side has the stronger

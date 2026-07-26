@@ -562,9 +562,12 @@ function projCard(p) {
   if (!p) return '';
   const stages = (p.run || []).map((s) => `<div class="tl-pstage"><span class="tl-psl">${esc(s.stage)}</span>
       <span class="tl-utrack sm"><i style="width:${s.reach}%;background:${barColor(s.reach)}"></i></span><b>${s.reach}%</b></div>`).join('');
+  // the bar is what makes the finish explainable: 86 points wins the Bundesliga and
+  // finishes second in the Premier League, and the card should say so.
+  const bar = p.title_bar ? ` · title needs ~${Math.round(p.title_bar)}` : '';
   const league = p.kind === 'club'
     ? `<div class="tl-projrow"><span class="tl-pbadge">🏆 ${esc(p.league)}</span><b>${ordinal(p.position)}</b>
-        <span class="muted">projected · ${p.points} pts</span></div>` : '';
+        <span class="muted">projected · ${p.points} pts${bar}</span></div>` : '';
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
       <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
   const uclBtn = p.kind === 'club'

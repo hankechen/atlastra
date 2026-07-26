@@ -261,6 +261,7 @@ class SoccerDB:
     _TEAM_ALIASES = {
         "man city": "Manchester City", "man utd": "Manchester United",
         "man united": "Manchester United", "spurs": "Tottenham",
+        "tottenham hotspur": "Tottenham",                # the Tactics Lab's full club name
         "wolves": "Wolverhampton", "psg": "Saint Germain", "barca": "Barcelona",
         "atletico": "Atlético", "inter": "Internazionale", "gladbach": "Gladbach",
         "leverkusen": "Leverkusen", "dortmund": "Dortmund", "bayern": "Bayern",

@@ -400,6 +400,51 @@ def _ucl_opponent(d, row):
             "form": (_team_form(d, row["name"]) or {}).get("form") or 0.0}
 
 
+# ---- how hard is this club's league, really? ------------------------------------- #
+# Two clubs on identical squads don't have identical seasons: most of a Ligue 1 fixture list
+# is easier than most of a Premier League one, and the bar for winning it is lower. UEFA's
+# 5-year country coefficient is the standard measure of that gap; normalised to England =
+# 1.00 it gives roughly: Italy .89, Spain .82, Germany .80, France .71. The projection uses
+# it for the points a side takes, and the real table (below) for where those points finish.
+_LEAGUE_DIFFICULTY = {"ENG-Premier League": 1.00, "ITA-Serie A": 0.89, "ESP-La Liga": 0.82,
+                      "GER-Bundesliga": 0.80, "FRA-Ligue 1": 0.71}
+_LEAGUE_CTX: dict = {}                                    # cache: team.lower() -> (expiry, ctx)
+
+
+def _league_ctx(d, team):
+    """The club's real league context: its difficulty, and every RIVAL's current pace carried
+    to a full season (their own row excluded — you don't play yourself). The projection ranks
+    the side against those numbers, which is what the season modal's table already does, so
+    the card and the table finally agree. None for national sides. Cached 10 min."""
+    import time as _t
+    key = (team or "").lower()
+    hit = _LEAGUE_CTX.get(key)
+    if hit and hit[0] > _t.time():
+        return hit[1]
+    ctx = None
+    try:
+        from analytics.queries import FOCUS_SEASON
+        tid = d.find_team_id(team)
+        row = d.con.execute("SELECT team_name, league_key FROM teams WHERE team_id = ?",
+                            [tid]).fetchone() if tid else None
+        if row:
+            canon, lk = row
+            df = d.league_standings(lk, FOCUS_SEASON)
+            if not df.empty:
+                games = int(max(int(r.mp or 0) for r in df.itertuples()) or 38)
+                games = 34 if games <= 34 else 38          # 18-team leagues play 34
+                rivals = sorted(((r.pts or 0) / max(1, r.mp or 1) * games
+                                 for r in df.itertuples() if r.team != canon), reverse=True)
+                ctx = {"key": lk, "league": tactics.LEAGUE_INFO.get(team, (lk, 0, 0))[0],
+                       "games": games, "n": len(df),
+                       "difficulty": _LEAGUE_DIFFICULTY.get(lk, 1.0),
+                       "rivals": [round(x, 1) for x in rivals]}
+    except Exception:                                     # noqa: BLE001
+        ctx = None
+    _LEAGUE_CTX[key] = (_t.time() + 600, ctx)
+    return ctx
+
+
 _TAC_ADVISOR: dict = {}                                   # cache: prompt-hash -> text
 
 
@@ -1045,7 +1090,8 @@ class Handler(BaseHTTPRequestHandler):
                     fa_info = _team_form(d, ob["team"])
                     fh, fa = fh_info.get("form"), fa_info.get("form")
                 res = tactics.simulate(xi, b.get("tactics"), opponent=opp, team=team,
-                                       form_home=fh, form_away=fa)
+                                       form_home=fh, form_away=fa,
+                                       league_ctx=_league_ctx(d, team))
                 if opp:
                     res["form"] = {"home": fh_info, "away": fa_info}
             self._json(res)
@@ -1092,7 +1138,8 @@ class Handler(BaseHTTPRequestHandler):
             with SoccerDB(read_only=DB_READ_ONLY) as d:
                 team = b.get("team", "")
                 xi, _ = _tac_rebuild(d, team, b.get("xi"))
-                res = tactics.simulate(xi, b.get("tactics"), team=team)
+                res = tactics.simulate(xi, b.get("tactics"), team=team,
+                                       league_ctx=_league_ctx(d, team))
                 proj = res.get("projection") or {}
                 names = [s["player"]["player"] for s in xi if s.get("player")]
                 games = proj.get("games") or (7 if proj.get("kind") == "national" else 38)
