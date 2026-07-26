@@ -310,6 +310,15 @@ def _tac_player(d, name, season=None):
     if not p.get("season"):                              # a past season is already priced
         _apply_breakout(p, atlas)                        # league+UCL over-performer boost
     p["family"] = tactics.family_for_position(p.get("position"))
+    # The role that actually suits him. An auto-XI profiles every player this way; a slot
+    # you fill yourself kept whatever role the shape defaulted to, so a hand-built side had
+    # its centre-backs cast as Ball-Playing and its holder as a Deep-Lying Playmaker
+    # regardless of whether they could do it — and then took the miscast penalty for it.
+    # ...for every shape he might be put in, since the right role depends on where he
+    # plays: a fullback pushed into midfield wants a different job from the same man at
+    # right back. The client picks the entry matching the slot it drops him into.
+    p["best_role"] = tactics._best_role(p["family"], p)
+    p["best_roles"] = {fam: tactics._best_role(fam, p) for fam in tactics.ROLES}
     _TAC_PLAYER[key] = p
     return p
 
@@ -807,7 +816,8 @@ def api(path: str, q: dict) -> dict | list:
                 "player": p["player"], "rating": p["rating"], "position": p.get("position"),
                 "photo": p.get("photo"), "breakout": p.get("breakout"),
                 "season": p.get("season"), "season_label": p.get("season_label"),
-                "team": p.get("team"), "family": p.get("family")}}
+                "team": p.get("team"), "family": p.get("family"),
+                "best_role": p.get("best_role"), "best_roles": p.get("best_roles")}}
         if path == "/api/overview":
             return d.web_overview()
         if path == "/api/rankings":

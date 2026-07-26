@@ -1892,6 +1892,7 @@ class SoccerDB:
         attributes, and that year's rating converted to today's scale. Reads the `players`
         dimension rather than the current-season profile view, so someone who has since left
         the top five leagues — a 2014/15 Ronaldo, a 2016/17 Hazard — still resolves."""
+        from webapp import fifa
         df = self.con.execute(self._SEASON_SQL, [season, season, name]).df()
         if df.empty:
             return None
@@ -1907,6 +1908,15 @@ class SoccerDB:
             (r.primary_position or "").split()[0].replace("F", "FWD").replace("M", "MID")
             .replace("D", "DEF"), "CM")) or "CM"
         overall = self.atlas_to_fifa(r.rating, season) if r.rating else 70
+        # Keepers are the one position the season ratings can't price. The rating engine
+        # barely covers them historically — 3 to 8 per season against ~1500 outfielders —
+        # so ranking one against that handful put a 2014/15 Neuer on 71. Where the keeper
+        # has an EA FC card, use it: it's ability-based and stable, which is exactly what's
+        # missing. (Outfield positions are rated in the hundreds each, with near-identical
+        # medians, so they keep the season conversion.)
+        gk_card = fifa.match(r.player_name) if fam == "GK" else None
+        if gk_card and gk_card.get("o"):
+            overall = int(gk_card["o"])
         out = {
             "player": f"{r.player_name} ({_season_label(season)})",
             "position": fam, "rating": overall,
@@ -1920,7 +1930,8 @@ class SoccerDB:
             "pct": {"duels": _r(r.dwp, 0), "passing": _r(r.pap, 0),
                     "aerial": _r(r.awp, 0), "dribble": _r(r.dsp, 0)},
         }
-        out["fifa"] = _synth_card(overall, fam, out)
+        out["fifa"] = ({k: gk_card[k] for k in ("o", "pac", "sho", "pas", "dri", "def", "phy", "hea")}
+                       if gk_card else _synth_card(overall, fam, out))
         return out
 
     def tactics_player(self, name: str, season: str | None = None) -> dict | None:

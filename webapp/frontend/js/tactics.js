@@ -9,7 +9,7 @@ const S = {
   roles: {}, roleDefaults: {}, formations: [],
   lastMetrics: { A: null, B: null }, lastChem: { A: null, B: null }, sim: null,
 };
-function blankSide(team) { return { team, formation: '4-3-3', xi: [], squad: [], tactics: {}, subs: [] }; }
+function blankSide(team) { return { team, formation: '4-3-3', xi: [], squad: [], tactics: {}, subs: [], custom: false }; }
 const cur = () => S.sides[S.active];
 const other = () => S.sides[S.active === 'A' ? 'B' : 'A'];
 const hasB = () => !!S.sides.B.team && S.sides.B.xi.length;
@@ -59,6 +59,7 @@ async function loadSide(key) {
   if (!r || !r.available) { sd.xi = []; sd.squad = []; sd.error = true; return; }
   // '__custom__' -> a readable name, and a different one per side so a made-up XI against
   // another made-up XI doesn't read "Custom XI vs Custom XI"
+  sd.custom = !!r.custom;
   if (r.custom) sd.team = key === 'B' ? 'Their XI' : 'Your XI';
   sd.xi = r.xi; sd.squad = r.squad; sd.tactics = { ...(r.tactic_defaults || {}) }; sd.error = false;
   S.roles = r.roles; S.roleDefaults = r.role_defaults; S.formations = r.formations;
@@ -254,7 +255,10 @@ async function addPlayerToSquad(name, season) {
   closePop();
   if (target) {
     const replaced = target.player ? target.player.player : null;
-    target.player = p; render(); runSim();
+    target.player = p;
+    const fit = (p.best_roles || {})[target.family] || p.best_role;
+    if (fit) target.role = fit;                    // profile him like the auto-XI does
+    render(); runSim();
     toast(`${p.player} added${replaced ? ` — replaced ${replaced} (still in squad)` : ''}. Tap any player to swap or change role.`);
   } else {
     render();
@@ -640,7 +644,9 @@ function projCard(p) {
         <span class="muted">projected · ${p.points} pts${bar}</span></div>` : '';
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
       <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
-  const uclBtn = p.kind === 'club'
+  // an XI you built yourself gets the European campaign too — it takes the last-placed
+  // club's slot in the real field, the same way any club outside it does
+  const uclBtn = (p.kind === 'club' || cur().custom)
     ? '<button class="tl-seasonbtn" id="simUclBtn">🏆 Simulate UCL run</button>' : '';
   return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
       <span class="tl-projbtns"><button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button>${uclBtn}</span></div>

@@ -91,11 +91,11 @@ FAMILY_POS = {
 _POS_FAMILY = {
     "GK": "GK", "G": "GK",
     "CB": "CB", "LCB": "CB", "RCB": "CB", "D": "CB",
-    "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "WB": "FB",
+    "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "WB": "FB", "FB": "FB",
     "CDM": "DM", "DM": "DM",
     "CM": "CM", "LCM": "CM", "RCM": "CM", "M": "CM",
     "CAM": "AM", "AM": "AM",
-    "LM": "WM", "RM": "WM", "LMF": "WM", "RMF": "WM",
+    "LM": "WM", "RM": "WM", "LMF": "WM", "RMF": "WM", "WM": "WM",
     "LW": "W", "RW": "W", "W": "W", "F": "W",
     "ST": "ST", "CF": "ST", "FW": "ST",
 }
@@ -1385,9 +1385,16 @@ def _motm(xi_h, xi_a, evs, gh, ga):
     return best
 
 
+def _short_name(team):
+    """The name to use in prose. Clubs shorten to their first word (Bayern, Real), but a
+    short name is left whole — otherwise a side called "Your XI" reads as "Your"."""
+    t = (team or "").strip()
+    return t if len(t) <= 9 or " " not in t else t.split(" ")[0]
+
+
 def _match_story(home, away, gh, ga, xgh, xga, evs):
     """One line of context: what the scoreline says, and whether it flattered anyone."""
-    hn, an = home.split(" ")[0], away.split(" ")[0]
+    hn, an = _short_name(home), _short_name(away)
     if gh > ga:
         w, l, gw, gl, xw, xl = hn, an, gh, ga, xgh, xga
     elif ga > gh:
@@ -1800,7 +1807,7 @@ def _ucl_leaders(matches, photos):
 
 def _ucl_story(team, outcome, rank, ties):
     """One line on how the campaign went."""
-    short = team.split(" ")[0]
+    short = _short_name(team)
     if outcome["stage"] == "Champions":
         beaten = ties[-1]["opponent"] if ties else "the field"
         return f"{short} are champions of Europe — {beaten} beaten in the final."
