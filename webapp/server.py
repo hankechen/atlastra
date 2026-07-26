@@ -199,11 +199,12 @@ def _breakout_boost(base, ar, norm=None):
     return 0.0
 
 
-# Positions that can be boosted but never cut. A defender's season rating leans on how his
-# team defends and on output the rating scale measures poorly — a centre-back in a leaky
-# side rates low without being worse — so a below-card number is weak evidence against him.
-# Beating the card from back there still counts, so the upside stays.
-_NO_DOWNGRADE = {"CB", "FB"}
+# Positions that can be boosted but never cut. A defensive player's season rating leans on
+# how his whole team defends and on output the rating scale measures poorly — a centre-back
+# in a leaky side, or a keeper behind one, rates low without being a worse player — so a
+# below-card number is weak evidence against him. Beating the card from back there is still
+# a real signal, so the upside stays.
+_NO_DOWNGRADE = {"GK", "CB", "FB"}
 
 
 def _apply_breakout(p, atlas):
