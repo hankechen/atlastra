@@ -199,6 +199,13 @@ def _breakout_boost(base, ar, norm=None):
     return 0.0
 
 
+# Positions that can be boosted but never cut. A defender's season rating leans on how his
+# team defends and on output the rating scale measures poorly — a centre-back in a leaky
+# side rates low without being worse — so a below-card number is weak evidence against him.
+# Beating the card from back there still counts, so the upside stays.
+_NO_DOWNGRADE = {"CB", "FB"}
+
+
 def _apply_breakout(p, atlas):
     """Apply the signed form adjustment to a player dict in place (effective rating + FIFA
     attrs). `p["breakout"]` carries the signed number, so the UI can badge a boost and a
@@ -214,6 +221,9 @@ def _apply_breakout(p, atlas):
         ar = atlas.get(t[0][0] + "|" + t[-1])
     base = f.get("o", p.get("rating") or 70)
     boost = _breakout_boost(base, ar, _atlas_norms(atlas).get(_atlas_band(base)))
+    if boost < 0 and (p.get("family")
+                      or tactics.family_for_position(p.get("position") or "")) in _NO_DOWNGRADE:
+        return                                           # defenders and fullbacks keep their card
     if not boost:
         return
     clamp = (lambda v: max(1, min(99, int(round(v)))))    # noqa: E731
