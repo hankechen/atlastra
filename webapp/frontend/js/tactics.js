@@ -166,7 +166,7 @@ async function runAddSearch(qv) {
   box.querySelectorAll('.tl-addrow').forEach((el) => { if (!el.disabled) el.onclick = () => addPlayerToSquad(el.dataset.name); });
 }
 // Compatible families to fall back to when no exact-position slot is free.
-const _FAM_COMPAT = { DM: ['CM'], CM: ['DM', 'AM'], AM: ['CM', 'W'], W: ['AM'], ST: ['W'], FB: [], CB: [], GK: [] };
+const _FAM_COMPAT = { DM: ['CM'], CM: ['DM', 'AM', 'WM'], AM: ['CM', 'W', 'WM'], WM: ['W', 'CM', 'AM'], W: ['WM', 'AM'], ST: ['W', 'WM'], FB: [], CB: [], GK: [] };
 async function addPlayerToSquad(name) {
   let r; try { r = await api('/api/tactics/player?name=' + encodeURIComponent(name)); } catch { r = null; }
   if (!r || !r.available || !r.player) { toast('Could not add that player.'); return; }
@@ -260,7 +260,9 @@ function familyFromPos(x, y) {
   const wide = x <= 21 || x >= 79;
   if (y < 36) return { family: wide ? 'FB' : 'CB', line: 'DEF' };
   if (y < 64) {
-    if (wide) return y < 50 ? { family: 'FB', line: 'MID' } : { family: 'W', line: 'ATT' };
+    // wide + midfield band: a wing-back low, a wide MIDFIELDER (RMF/LMF) above him —
+    // only from the attacking third up is a flank player a winger.
+    if (wide) return y < 46 ? { family: 'FB', line: 'MID' } : { family: 'WM', line: 'MID' };
     if (y < 46) return { family: 'DM', line: 'MID' };
     if (y < 56) return { family: 'CM', line: 'MID' };
     return { family: 'AM', line: 'MID' };

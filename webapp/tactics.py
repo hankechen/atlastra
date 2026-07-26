@@ -46,8 +46,8 @@ FORMATIONS = {
         _slot("GK", "GK", 50, 6, "GK"),
         _slot("LB", "FB", 15, 26, "DEF"), _slot("LCB", "CB", 38, 17, "DEF"),
         _slot("RCB", "CB", 62, 17, "DEF"), _slot("RB", "FB", 85, 26, "DEF"),
-        _slot("LM", "W", 17, 52, "MID"), _slot("LCM", "CM", 40, 46, "MID"),
-        _slot("RCM", "CM", 60, 46, "MID"), _slot("RM", "W", 83, 52, "MID"),
+        _slot("LM", "WM", 17, 52, "MID"), _slot("LCM", "CM", 40, 46, "MID"),
+        _slot("RCM", "CM", 60, 46, "MID"), _slot("RM", "WM", 83, 52, "MID"),
         _slot("LST", "ST", 40, 82, "ATT"), _slot("RST", "ST", 60, 82, "ATT"),
     ],
     "3-5-2": [
@@ -79,6 +79,9 @@ FAMILY_POS = {
     "DM": {"DM", "CDM", "CM", "M"},
     "CM": {"CM", "LCM", "RCM", "DM", "AM", "CAM", "M"},
     "AM": {"AM", "CAM", "CM", "M"},
+    # WM = a wide MIDFIELDER (RMF/LMF): a flank player in the midfield line, not the front
+    # three. Wingers and central midfielders can fill in, but a natural LM/RM belongs here.
+    "WM": {"LM", "RM", "LW", "RW", "W", "CM", "LCM", "RCM", "AM", "CAM", "M"},
     "W": {"LW", "RW", "LM", "RM", "W", "AM", "CAM", "F", "M"},
     "ST": {"ST", "CF", "FW", "F"},
 }
@@ -92,7 +95,8 @@ _POS_FAMILY = {
     "CDM": "DM", "DM": "DM",
     "CM": "CM", "LCM": "CM", "RCM": "CM", "M": "CM",
     "CAM": "AM", "AM": "AM",
-    "LM": "W", "RM": "W", "LW": "W", "RW": "W", "W": "W", "F": "W",
+    "LM": "WM", "RM": "WM", "LMF": "WM", "RMF": "WM",
+    "LW": "W", "RW": "W", "W": "W", "F": "W",
     "ST": "ST", "CF": "ST", "FW": "ST",
 }
 
@@ -136,9 +140,36 @@ ROLES = {
         "Mezzala": _role(att=0.07, flank=0.10, note="drifts wide & high"),
         "Carrier": _role(att=0.04, mid=0.05, note="drives with the ball"),
     },
+    # The 10 is the position with the widest range of interpretations in the modern game —
+    # from a static classic playmaker to a second striker to the first man in the press.
     "AM": {
         "Advanced Playmaker": _role(mid=0.06, att=0.05, note="links play"),
         "Shadow Striker": _role(att=0.10, mid=-0.04, note="attacks the box"),
+        "Trequartista": _role(mid=0.12, att=0.04, press=-0.08,
+                              note="free role between the lines, no defensive duty"),
+        "Enganche": _role(mid=0.15, att=-0.04, buildup=0.08, press=-0.10,
+                          note="static classic 10 — everything goes through him"),
+        "Pressing Ten": _role(att=0.03, press=0.13, mid=0.02,
+                              note="triggers the press from the front"),
+        "Box Crasher": _role(att=0.09, aerial=0.05, mid=-0.02,
+                             note="late runs into the box, arrives on the cross"),
+        "Wide-Drifting Ten": _role(att=0.06, mid=0.04, flank=0.14,
+                                   note="drifts to the flank to overload it"),
+    },
+    # WM (RMF/LMF) — a wide midfielder is NOT a winger: he starts in the midfield line, so
+    # his roles trade attacking width against midfield bodies and flank protection.
+    "WM": {
+        "Wide Midfielder (Support)": _role(att=0.03, mid=0.05, dfn=0.03,
+                                           note="balanced — supports both boxes"),
+        "Touchline Winger": _role(att=0.08, flank=0.14, note="stays chalk on his boots, crosses"),
+        "Half-Space Midfielder": _role(mid=0.13, flank=-0.10, buildup=0.05,
+                                       note="tucks into the half-space, makes a box midfield"),
+        "Wide Playmaker": _role(mid=0.15, att=0.02, buildup=0.04,
+                                note="drifts inside to dictate from wide"),
+        "Defensive Winger": _role(dfn=0.11, press=0.07, flank=-0.26, att=-0.04,
+                                  note="doubles up on their fullback, kills the flank"),
+        "Raumdeuter": _role(att=0.13, mid=-0.06, flank=-0.18,
+                            note="gives up width entirely to poach in the box"),
     },
     "W": {
         "Inside Forward": _role(att=0.08, note="cuts inside to shoot"),
@@ -156,7 +187,8 @@ ROLES = {
 }
 DEFAULT_ROLE = {"GK": "Sweeper Keeper", "CB": "Ball-Playing", "FB": "Fullback (Support)",
                 "DM": "Deep-Lying Playmaker", "CM": "Box-to-Box", "AM": "Advanced Playmaker",
-                "W": "Inside Forward", "ST": "Advanced Forward"}
+                "WM": "Wide Midfielder (Support)", "W": "Inside Forward",
+                "ST": "Advanced Forward"}
 
 # Role suitability: each specialised role demands certain attributes at a level. A player
 # below the demand is miscast (contribution penalised); above it, a small boost. Roles not
@@ -181,6 +213,18 @@ ROLE_REQ = {
     "Inside Forward": [("shooting", 77, 0.4), ("dribbling", 80, 0.6)],
     "Winger (Wide)": [("pace", 80, 0.5), ("dribbling", 78, 0.5)],
     "Inverted Winger": [("creativity", 78, 0.5), ("dribbling", 78, 0.5)],
+    # the 10s
+    "Trequartista": [("creativity", 84, 0.6), ("dribbling", 78, 0.4)],
+    "Enganche": [("passing", 84, 0.6), ("creativity", 82, 0.4)],
+    "Pressing Ten": [("pressing", 74, 0.6), ("pace", 76, 0.4)],
+    "Box Crasher": [("shooting", 78, 0.6), ("progression", 74, 0.4)],
+    "Wide-Drifting Ten": [("dribbling", 78, 0.5), ("creativity", 78, 0.5)],
+    # the wide midfielders
+    "Touchline Winger": [("pace", 79, 0.5), ("dribbling", 77, 0.5)],
+    "Half-Space Midfielder": [("passing", 77, 0.5), ("progression", 76, 0.5)],
+    "Wide Playmaker": [("creativity", 81, 0.6), ("passing", 79, 0.4)],
+    "Defensive Winger": [("defending", 68, 0.5), ("pressing", 74, 0.5)],
+    "Raumdeuter": [("shooting", 77, 0.6), ("progression", 73, 0.4)],
     "Inverted Fullback": [("passing", 77, 1.0)],
     "Attacking Wing-Back": [("pace", 79, 0.5), ("dribbling", 74, 0.5)],
     "Ball-Playing": [("passing", 76, 1.0)],
@@ -254,7 +298,8 @@ def _sc(v, ref, floor=12, span=74):
     return _clamp(floor + span * ((v or 0) / ref)) if ref else floor
 
 
-_PACE_BASE = {"W": 74, "FB": 70, "ST": 70, "AM": 63, "CM": 60, "DM": 55, "CB": 50, "GK": 50}
+_PACE_BASE = {"W": 74, "WM": 71, "FB": 70, "ST": 70, "AM": 63, "CM": 60, "DM": 55,
+              "CB": 50, "GK": 50}
 
 
 def player_attrs(p: dict, family: str) -> dict:
@@ -325,7 +370,8 @@ def build_xi(squad: list[dict], formation: str) -> list[dict]:
 def _units(xi: list[dict]) -> dict:
     """Aggregate the XI into team unit strengths (0-99), applying each player's role."""
     A = {"attack": [], "midfield": [], "defense": [], "press_resist": [],
-         "def_pace": [], "aerial": [], "att_pace": [], "gk": 55}
+         "def_pace": [], "aerial": [], "att_pace": [], "gk": 55, "def_help": 0.0,
+         "press_roles": 0.0}
     for s in xi:
         p = s.get("player")
         if not p:
@@ -334,6 +380,10 @@ def _units(xi: list[dict]) -> dict:
         at = player_attrs(p, fam)
         r = ROLES.get(fam, {}).get(s.get("role")) or _role()
         fit = _role_fit(s.get("role"), at)               # profiling: right role = more value
+        # How hard the ROLES press, independent of the slider: a Ball-Winner and a Pressing
+        # Forward hunt the ball, a Trequartista is excused it. Summed here and spent on PPDA
+        # in _metrics, so choosing a free 10 really does cost the press a man.
+        A["press_roles"] += r["press"]
         if fam == "GK":
             A["gk"] = at["rating"]
             A["press_resist"].append(at["passing"] * (1 + r["buildup"]))
@@ -343,6 +393,19 @@ def _units(xi: list[dict]) -> dict:
             val = 0.50 * at["shooting"] + 0.34 * at["creativity"] + 0.16 * at["dribbling"]
             A["attack"].append(_clamp(val * (1 + r["att"]) * fit))
             A["att_pace"].append(at["pace"])
+        # A wide midfielder feeds BOTH units — he is the flank's attacking outlet and an
+        # extra body in the middle third — which is why he needs his own branch: before
+        # this, a 4-4-2's LM/RM sat in neither list and were invisible to the model.
+        if fam == "WM":
+            att = 0.42 * at["shooting"] + 0.34 * at["creativity"] + 0.24 * at["dribbling"]
+            A["attack"].append(_clamp(att * (1 + r["att"]) * fit * 0.86))
+            A["att_pace"].append(at["pace"])
+            mid = 0.38 * at["passing"] + 0.32 * at["progression"] + 0.30 * at["creativity"]
+            A["midfield"].append(_clamp(mid * (1 + r["mid"]) * fit * 0.92))
+            # A wide midfielder who tracks back protects a flank, but he is not a defender:
+            # dropping his (low) defending into the back-line average would DRAG the unit
+            # down for doing more work. It's a small bonus on top of the line instead.
+            A["def_help"] += max(0.0, r["def"]) * (12 + at["defending"] / 12.0)
         if fam in ("CM", "DM", "AM"):
             val = 0.40 * at["passing"] + 0.34 * at["progression"] + 0.26 * at["creativity"]
             A["midfield"].append(_clamp(val * (1 + r["mid"]) * fit))
@@ -364,9 +427,11 @@ def _units(xi: list[dict]) -> dict:
     rts = [s["player"]["rating"] for s in xi if s.get("player") and s["player"].get("rating")]
     return {
         "attack": mean(A["attack"]), "midfield": mean(A["midfield"]),
-        "defense": mean([*A["defense"], A["gk"] * 0.9]), "press_resist": mean(A["press_resist"]),
+        "defense": _clamp(mean([*A["defense"], A["gk"] * 0.9]) + min(4.0, A["def_help"])),
+        "press_resist": mean(A["press_resist"]),
         "def_pace": mean(A["def_pace"], 55), "aerial": mean(A["aerial"], 50),
         "att_pace": mean(A["att_pace"], 62), "gk": A["gk"],
+        "press_roles": round(A["press_roles"], 3),          # summed role pressing (see _metrics)
         "avg_rating": sum(rts) / len(rts) if rts else 62,   # team-quality signal for projections
     }
 
@@ -394,8 +459,12 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
     risk_line = 1 + 0.10 * d("line_height") * _clamp_f((73 - u["def_pace"]) / 30.0, -0.5, 1.0)
     risk_press = 1 + 0.05 * d("press") * _clamp_f((74 - u["press_resist"]) / 30.0, -0.4, 1.0)
     xga = round(_clamp_f(xga * risk_line * risk_press, 0.30, 3.2), 2)
+    # PPDA: the slider sets the intent, the ROLES supply the legs — a side full of
+    # ball-winners and pressing forwards gets after it harder than the same slider with a
+    # free 10 and a deep-lying playmaker standing off.
     ppda = round(_clamp_f(13.5 - (t.get("press", 50) - 50) / 7.0
-                          - (t.get("line_height", 50) - 50) / 15.0, 5, 20), 1)
+                          - (t.get("line_height", 50) - 50) / 15.0
+                          - 3.5 * u.get("press_roles", 0.0), 5, 20), 1)
     prog = round(_clamp(0.7 * u["midfield"] + 0.3 * u["press_resist"] + 8 * d("directness")))
     terr = round(_clamp(50 + (poss - 50) * 0.6 + 30 * d("line_height") * 0.5 - 10 * d("counter"), 12, 88))
     return {"possession": round(poss), "xg": xg, "xga": xga, "ppda": ppda,
@@ -466,6 +535,12 @@ def _weaknesses(xi, u, t, m) -> list[dict]:
         near_cb = min(cbs, key=lambda c: abs(c["x"] - fb["x"]), default=None) if cbs else None
         cb_pace = player_attrs(near_cb["player"], "CB")["pace"] if near_cb else 68
         exposure = role["flank"] + max(0, (t.get("line_height", 50) - 50) / 100.0)
+        # a wide midfielder on that side who tucks back covers the space the fullback leaves
+        cover = next((s for s in xi if s["family"] == "WM" and s.get("player")
+                      and (s["x"] < 50) == left
+                      and (ROLES.get("WM", {}).get(s.get("role")) or _role())["def"] >= 0.05), None)
+        if cover:
+            exposure -= 0.25
         if exposure > 0.45 and cb_pace < 66:
             out.append({"title": f"{side} flank exposed in transition", "severity": "high",
                         "reason": f"{fb['player']['player']} pushes high ({fb.get('role')}) while "
@@ -576,17 +651,20 @@ def _chemistry(xi, t):
     def nm(s):
         return s["player"]["player"]
 
-    sts, ws, ams = fam("ST"), fam("W"), fam("AM")
+    sts, ws, ams, wms = fam("ST"), fam("W"), fam("AM"), fam("WM")
     cms, dms, fbs, cbs = fam("CM"), fam("DM"), fam("FB"), fam("CB")
     gk = next((s for s in slots if s["family"] == "GK"), None)
 
     CREATE = {"Advanced Playmaker", "Playmaker", "Deep-Lying Playmaker",
-              "Inverted Winger", "Inverted Fullback", "Mezzala"}
-    WIDE = {"Winger (Wide)", "Attacking Wing-Back"}         # natural width / crosses
+              "Inverted Winger", "Inverted Fullback", "Mezzala",
+              "Trequartista", "Enganche", "Wide Playmaker", "Half-Space Midfielder"}
+    WIDE = {"Winger (Wide)", "Attacking Wing-Back", "Touchline Winger"}   # width / crosses
     RUN = {"Advanced Forward", "Poacher", "Shadow Striker", "Inside Forward",
-           "Winger (Wide)", "Complete Forward"}             # attack the space in behind
-    creators = [s for s in (ams + ws + cms + dms) if role(s) in CREATE]
-    widemen = [s for s in (ws + fbs) if role(s) in WIDE]
+           "Winger (Wide)", "Complete Forward", "Box Crasher", "Raumdeuter",
+           "Touchline Winger"}                              # attack the space in behind
+    NARROW = {"Raumdeuter", "Defensive Winger", "Half-Space Midfielder"}  # give up the touchline
+    creators = [s for s in (ams + ws + wms + cms + dms) if role(s) in CREATE]
+    widemen = [s for s in (ws + wms + fbs) if role(s) in WIDE]
 
     links = []
 
@@ -647,8 +725,23 @@ def _chemistry(xi, t):
             "space they leave — you're open to a fast transition through the middle.",
             [nm(s) for s in awb])
 
-    deep_pm = [s for s in (dms + cms + ams) if role(s) in
-               ("Deep-Lying Playmaker", "Playmaker", "Advanced Playmaker")]
+    narrow_wm = [s for s in wms if role(s) in NARROW]
+    if len(narrow_wm) >= 2 and not [f for f in fbs if role(f) == "Attacking Wing-Back"]:
+        add("clash", "high", "Both wide midfielders come inside — nobody holds the width",
+            "Neither flank midfielder stays on the touchline and no fullback overlaps past "
+            "them, so the whole side plays in a narrow column that a compact block can "
+            "simply squeeze.", [nm(s) for s in narrow_wm])
+
+    ten = [s for s in ams if role(s) in ("Enganche", "Trequartista")]
+    if ten and t.get("press", 50) > 66:
+        add("clash", "med", "A free 10 in a high press",
+            f"{nm(ten[0])} is given a free role with no pressing duty while the team presses "
+            "aggressively — the press goes a man short and gets played through his side.",
+            [nm(ten[0])])
+
+    deep_pm = [s for s in (dms + cms + ams + wms) if role(s) in
+               ("Deep-Lying Playmaker", "Playmaker", "Advanced Playmaker",
+                "Trequartista", "Enganche", "Wide Playmaker")]
     if len(deep_pm) >= 3:
         add("clash", "low", "Too many playmakers, one ball",
             "Three ball-dominant playmakers occupy similar central zones and end up "
@@ -673,6 +766,25 @@ def _chemistry(xi, t):
             add("synergy", "med", "Balanced flank: winger wide, fullback inside",
                 f"{nm(mate[0])} steps into midfield to control the ball while {nm(w)} holds "
                 "the touchline — width and control on the same side.", [nm(w), nm(mate[0])])
+
+    for w in wms:                                           # WM tucks in, fullback goes past
+        if role(w) not in ("Half-Space Midfielder", "Wide Playmaker", "Raumdeuter") \
+                or _side(w["x"]) == "C":
+            continue
+        mate = [f for f in awb if _side(f["x"]) == _side(w["x"])]
+        if mate:
+            add("synergy", "high", "Inside-out flank: midfielder tucks, fullback overlaps",
+                f"{nm(w)} comes into the half-space and {nm(mate[0])} takes the touchline "
+                "outside him — the flank still gets stretched and you gain a body in midfield.",
+                [nm(w), nm(mate[0])])
+
+    tw = [s for s in wms if role(s) == "Touchline Winger"]
+    dw = [s for s in wms if role(s) == "Defensive Winger"]
+    if tw and dw:
+        add("synergy", "med", "Lopsided flanks: width one side, cover the other",
+            f"{nm(tw[0])} holds the touchline to attack while {nm(dw[0])} doubles up on the "
+            "opposite flank — a deliberately unbalanced shape that stretches one side and "
+            "locks the other.", [nm(tw[0]), nm(dw[0])])
 
     if tms and widemen:
         add("synergy", "high", "Target man with real service",
@@ -733,14 +845,17 @@ def _positions(xi, t):
             y += 8 * d("line_height")                    # line pushes the block up/down
         if s["line"] == "ATT":
             y += 5 * d("directness")
-        if fam in ("FB", "W"):
+        if fam in ("FB", "W", "WM"):
             x += (1 if x > 50 else -1) * 8 * d("width")  # width spreads the flanks
         if fam == "FB":
             x += -(1 if x > 50 else -1) * 22 * max(0, r["mid"])   # inverted FB tucks in
             y += 10 * max(0, r["att"])                   # wing-back pushes up
+        if fam == "WM":                                  # narrow roles come off the touchline
+            x += -(1 if x > 50 else -1) * 26 * max(0.0, -r["flank"])
+            x += (1 if x > 50 else -1) * 6 * max(0.0, r["flank"])
         if fam == "ST":
             y += -13 * max(0, r["mid"])                  # False 9 drops
-        if fam in ("W", "AM", "CM"):
+        if fam in ("W", "AM", "CM", "WM"):
             y += 5 * r["att"]
         x, y = _clamp_f(x, 4, 96), _clamp_f(y, 3, 94)
         at = player_attrs(p, fam) if p else None
@@ -922,10 +1037,12 @@ def team_units(xi, tactics) -> dict:
 # the odds are computed from, then the engine decides WHO scored, who assisted and when,
 # weighted by the same attributes and roles that produced the xG. Re-simulating redraws,
 # so a scoreline is a single sample and the odds are what you'd see over many of them.
-_GOAL_BASE = {"ST": 1.00, "W": 0.58, "AM": 0.46, "CM": 0.22, "DM": 0.10, "FB": 0.09, "CB": 0.12}
-_ASSIST_BASE = {"ST": 0.45, "W": 0.95, "AM": 1.00, "CM": 0.66, "DM": 0.32, "FB": 0.58, "CB": 0.10}
-_CARD_BASE = {"CB": 1.00, "DM": 1.00, "FB": 0.85, "CM": 0.80, "ST": 0.50, "W": 0.45,
-              "AM": 0.45, "GK": 0.12}
+_GOAL_BASE = {"ST": 1.00, "W": 0.58, "AM": 0.46, "WM": 0.34, "CM": 0.22, "DM": 0.10,
+              "FB": 0.09, "CB": 0.12}
+_ASSIST_BASE = {"ST": 0.45, "W": 0.95, "AM": 1.00, "WM": 0.88, "CM": 0.66, "DM": 0.32,
+                "FB": 0.58, "CB": 0.10}
+_CARD_BASE = {"CB": 1.00, "DM": 1.00, "FB": 0.85, "CM": 0.80, "WM": 0.70, "ST": 0.50,
+              "W": 0.45, "AM": 0.45, "GK": 0.12}
 # Real goals-by-15-minute-block shape: more goals late, as legs go and games open up.
 _MIN_BLOCKS = [(1, 15, 0.84), (16, 30, 0.95), (31, 45, 1.02),
                (46, 60, 1.08), (61, 75, 1.15), (76, 90, 1.46)]
@@ -1051,8 +1168,11 @@ def _goal_events(rng, xi, n, side, used, et=False):
 
 def _card_events(rng, xi, t, side, used):
     """Bookings — an aggressive press and a compact, physical block earn more of them."""
+    roles_press = sum((ROLES.get(s.get("family"), {}).get(s.get("role")) or _role())["press"]
+                      for s in xi if s.get("player"))
     lam = _clamp_f(1.1 + (t.get("press", 50) - 50) / 45.0
-                   + (t.get("compactness", 50) - 50) / 80.0, 0.3, 3.6)
+                   + (t.get("compactness", 50) - 50) / 80.0
+                   + roles_press * 0.7, 0.3, 3.6)
     n = _pois_draw(rng, lam)
     pairs = [(s, _CARD_BASE.get(s.get("family"), 0.5)) for s in xi if s.get("player")]
     evs, seen, red_done = [], set(), False
