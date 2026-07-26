@@ -1795,8 +1795,11 @@ def _ucl_leaders(matches, photos):
             r["cc"] += cc
             r["bcc"] += bcc
             r["drb"] += drb
-    cats = [("goals", "👟 Goals"), ("assists", "🅰 Assists"), ("cc", "🎯 Chances created"),
-            ("bcc", "💥 Big chances created"), ("drb", "🌀 Dribbles completed")]
+    for r in agg.values():                               # the headline contribution number
+        r["ga"] = r["goals"] + r["assists"]
+    cats = [("goals", "👟 Goals"), ("assists", "🅰 Assists"), ("ga", "⚡ Goals + assists"),
+            ("cc", "🎯 Chances created"), ("bcc", "💥 Big chances created"),
+            ("drb", "🌀 Dribbles completed")]
     out = []
     for key, label in cats:
         top = sorted((r for r in agg.values() if r[key]),
