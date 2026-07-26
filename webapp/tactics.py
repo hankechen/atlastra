@@ -443,21 +443,59 @@ _BASE_OPP = {"attack": 78, "midfield": 77, "defense": 77, "press_resist": 75,
 
 def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
     """Project match metrics for a side (units u, tactics t) vs opponent (ou, ot).
-    Formulas are deliberately simple + monotonic so the 'why' is explainable."""
-    d = lambda k: (t.get(k, 50) - 50) / 50.0                 # tactic in [-1,1]
+    Formulas are deliberately simple + monotonic so the 'why' is explainable.
+
+    The sliders are the point of the Lab, so they carry real weight here, and every one of
+    them does something: tempo and compactness used to appear nowhere in this function, and
+    nothing a side did could LOWER what it conceded — only a high line with quick defenders
+    helped. Now the plan can be built to defend as well as to attack, and the settings that
+    matter most are the ones aimed at the opponent's:
+
+      • width vs their compactness      — width is worth most against a narrow block
+      • counter vs their line height    — the space behind is only there if they push up
+      • press vs their press-resistance — pressing a side that plays through it backfires
+      • compactness                     — denies the space between the lines
+      • tempo                           — more sequences, both ways: end-to-end games are open
+
+    Every term is written as a deviation from a neutral 50, so a default setup against a
+    default opponent produces exactly the same numbers as before this weighting existed."""
+    d = lambda k: (t.get(k, 50) - 50) / 50.0                 # our slider in [-1,1]  # noqa: E731
+    o = lambda k: (ot.get(k, 50) - 50) / 50.0                # theirs, for the matchups  # noqa: E731
+    # possession is relative: their directness and counter-attacking hand the ball back
     poss = _clamp(50 + 0.14 * (u["midfield"] - ou["midfield"])
-                  - 11 * d("directness") - 9 * d("counter") + 5 * d("press"), 26, 76)
+                  - 13 * (d("directness") - o("directness"))
+                  - 11 * (d("counter") - o("counter"))
+                  + 6 * (d("press") - o("press"))
+                  - 5 * (d("tempo") - o("tempo")), 26, 76)
+    terr = round(_clamp(50 + (poss - 50) * 0.6 + 30 * d("line_height") * 0.5
+                        - 10 * d("counter"), 12, 88))
     # attack (centred on 77 = an average side on the FIFA-attribute scale)
     att = 1.35 + (u["attack"] - 77) / 32.0 + (u["midfield"] - 77) / 70.0
-    att *= 1 + 0.06 * d("width") + 0.05 * d("patience") \
-        + 0.10 * d("counter") * ((ot.get("line_height", 50) - 50) / 50.0) + 0.06 * d("press")
-    att *= 1 - (ou["defense"] - 77) / 150.0
+    att *= (1
+            + 0.10 * d("width") * (0.6 + 0.6 * o("compactness"))   # stretch a narrow block
+            + 0.08 * d("patience")                                 # work it, wait for the ball
+            + 0.16 * d("counter") * o("line_height")               # the space behind their line
+            - 0.07 * max(0.0, d("counter"))                        # ...but you attack less often
+            + 0.06 * d("directness") * o("line_height")            # hit the space early
+            - 0.04 * max(0.0, d("directness"))                     # ...or hand it straight back
+            + 0.09 * d("press")                                    # turnovers high up the pitch
+            + 0.07 * d("tempo"))                                   # more sequences per game
+    att *= 1 - (ou["defense"] - 77) / 150.0 - 0.12 * o("compactness")
+    # where the game is played: a side pinned in its own half simply gets fewer goes at it
+    att *= 1 + 0.16 * ((terr - 50) / 50.0)
     xg = round(_clamp_f(att, 0.3, 3.3), 2)
     # concede
     xga = 1.35 + (ou["attack"] - 77) / 32.0 + (ou["midfield"] - 77) / 70.0
     xga *= 1 - (u["defense"] - 77) / 150.0
-    risk_line = 1 + 0.10 * d("line_height") * _clamp_f((73 - u["def_pace"]) / 30.0, -0.5, 1.0)
-    risk_press = 1 + 0.05 * d("press") * _clamp_f((74 - u["press_resist"]) / 30.0, -0.4, 1.0)
+    xga *= 1 - 0.16 * d("compactness")                       # a compact block denies the pockets
+    xga *= 1 - 0.08 * max(0.0, d("counter"))                 # sitting in cedes territory, not chances
+    xga *= 1 + 0.06 * d("tempo")                             # an end-to-end game runs both ways
+    # pressing high wins it back closer to their goal — worth most with legs up front, and
+    # a liability against a side comfortable playing through it
+    xga *= 1 - 0.14 * d("press") * (0.6 + 0.5 * _clamp_f((u["att_pace"] - 72) / 14.0, -1.0, 1.0))
+    risk_press = 1 + 0.14 * d("press") * (0.5 + 0.5 * _clamp_f((ou["press_resist"] - 74) / 12.0,
+                                                               -1.0, 1.0))
+    risk_line = 1 + 0.16 * d("line_height") * _clamp_f((73 - u["def_pace"]) / 30.0, -0.5, 1.0)
     xga = round(_clamp_f(xga * risk_line * risk_press, 0.30, 3.2), 2)
     # PPDA: the slider sets the intent, the ROLES supply the legs — a side full of
     # ball-winners and pressing forwards gets after it harder than the same slider with a
@@ -466,7 +504,6 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
                           - (t.get("line_height", 50) - 50) / 15.0
                           - 3.5 * u.get("press_roles", 0.0), 5, 20), 1)
     prog = round(_clamp(0.7 * u["midfield"] + 0.3 * u["press_resist"] + 8 * d("directness")))
-    terr = round(_clamp(50 + (poss - 50) * 0.6 + 30 * d("line_height") * 0.5 - 10 * d("counter"), 12, 88))
     return {"possession": round(poss), "xg": xg, "xga": xga, "ppda": ppda,
             "progression": prog, "territory": terr}
 
@@ -546,6 +583,19 @@ def _weaknesses(xi, u, t, m) -> list[dict]:
                         "reason": f"{fb['player']['player']} pushes high ({fb.get('role')}) while "
                         f"{near_cb['player']['player'] if near_cb else 'the cover CB'} lacks recovery "
                         f"pace (est. {round(cb_pace)}). Quick wingers can attack the space behind."})
+    # an open block: nobody squeezing the space between the lines
+    if t.get("compactness", 50) < 36:
+        out.append({"title": "Open block between the lines",
+                    "severity": "high" if u["defense"] < 82 else "med",
+                    "reason": f"Compactness is set to {t.get('compactness', 50)}, so the gaps "
+                    "between your units stay wide open. Anyone who receives on the half-turn "
+                    "in there is running at your back four before it can set."})
+    # end-to-end by design, with defenders who can't win the footrace it creates
+    if t.get("tempo", 50) > 72 and u["def_pace"] < 73:
+        out.append({"title": "End-to-end tempo with a slow back line", "severity": "med",
+                    "reason": f"A tempo of {t.get('tempo', 50)} turns the game into transitions, "
+                    f"and your defence's recovery pace (est. {round(u['def_pace'])}) is not built "
+                    "for that. Every attack you lose becomes a race you're behind in."})
     # play out under pressure
     if u["press_resist"] < 72 and t.get("directness", 50) < 46:
         gk = _find(xi, fam="GK")
