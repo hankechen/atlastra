@@ -1578,7 +1578,8 @@ def _ucl_match(rng, A, B, venue, rnd, label=None):
     return {"round": rnd, "label": label, "opponent": B["name"], "logo": B.get("logo"),
             "venue": venue, "score": {"us": gf, "them": ga},
             "xg": {"us": xg, "them": oxg}, "possession": poss,
-            "result": "W" if gf > ga else ("D" if gf == ga else "L"), "goals": evs}
+            "result": "W" if gf > ga else ("D" if gf == ga else "L"), "goals": evs,
+            "contrib": _match_contrib(rng, A["xi"], xg)}
 
 
 def _ucl_extra_time(rng, A, B, venue, used):
@@ -1688,6 +1689,44 @@ def _ucl_pick(rng, rows, taken, lo, hi, sharpness, build):
     return None
 
 
+# Per-90 creation and carrying rates before quality is applied. Calibrated against the real
+# competition, whose season leaders land around 34-39 chances created, 8-13 gilt-edged ones
+# and 40-56 completed dribbles across a 13-16 game run.
+_CC_BASE = {"AM": 2.05, "W": 1.75, "WM": 1.55, "CM": 1.35, "FB": 1.15, "ST": 1.00,
+            "DM": 0.95, "CB": 0.35, "GK": 0.05}
+_DRB_BASE = {"W": 2.30, "AM": 1.75, "WM": 1.60, "ST": 1.25, "FB": 0.90, "CM": 0.85,
+             "DM": 0.50, "CB": 0.22, "GK": 0.02}
+_BIG_SHARE = 0.27                # of the chances a player creates, how many are gilt-edged
+
+
+def _match_contrib(rng, xi, xg):
+    """One match's chances created, big chances and completed dribbles per starter.
+
+    Goals and assists fall out of the scoreline, but the rest of a campaign's leaderboards
+    don't — so they're drawn here from the same place everything else comes from: the
+    player's own attributes and the job his role gives him, lifted or damped by how much
+    the side is creating overall. A big chance is one of his own chances that was gilt-
+    edged, so it can never exceed the chances he made."""
+    tilt = _clamp_f(xg / 1.45, 0.55, 1.6)
+    out = {}
+    for s in xi:
+        p, fam = s.get("player"), s.get("family")
+        if not p:
+            continue
+        at = player_attrs(p, fam)
+        r = ROLES.get(fam, {}).get(s.get("role")) or _role()
+        cc_rate = (_CC_BASE.get(fam, 0.8) * (max(30, at["creativity"]) / 74.0) ** 1.7
+                   * (1 + 0.5 * r["mid"] + 0.5 * r["flank"] + 0.3 * r["att"]) * tilt)
+        drb_rate = (_DRB_BASE.get(fam, 0.6) * (max(30, at["dribbling"]) / 74.0) ** 2.2
+                    * (1 + 0.4 * r["att"] + 0.4 * r["flank"]))
+        cc = _pois_draw(rng, cc_rate)
+        big = sum(1 for _ in range(cc) if rng.random() < _BIG_SHARE)
+        drb = _pois_draw(rng, drb_rate)
+        if cc or drb:
+            out[_nm(s)] = [cc, big, drb]
+    return out
+
+
 def _ord(n):
     """1st, 2nd, 3rd, 4th … — finishing positions read badly without it."""
     if 10 <= n % 100 <= 20:
@@ -1712,6 +1751,42 @@ def _ucl_scorers(matches):
                 a["assists"] += 1
     out = sorted(tally.values(), key=lambda x: (-x["goals"], -x["assists"], x["player"]))
     return out[:8]
+
+
+def _ucl_leaders(matches, photos):
+    """The campaign's leaderboards for the user's side: goals and assists fall out of the
+    scorelines, chances created, big chances and dribbles out of _match_contrib. Same shape
+    as the season simulation's stat leaders, so the UI renders them the same way."""
+    agg: dict = {}
+
+    def row(name):
+        return agg.setdefault(name, {"player": name, "photo": photos.get(name),
+                                     "goals": 0, "assists": 0, "cc": 0, "bcc": 0, "drb": 0})
+    for mt in matches:
+        for e in mt.get("goals", []):
+            if e["side"] != "us":
+                continue
+            r = row(e["player"])
+            r["goals"] += 1
+            r["photo"] = r["photo"] or e.get("photo")
+            if e.get("assist"):
+                row(e["assist"])["assists"] += 1
+        for name, (cc, bcc, drb) in (mt.get("contrib") or {}).items():
+            r = row(name)
+            r["cc"] += cc
+            r["bcc"] += bcc
+            r["drb"] += drb
+    cats = [("goals", "👟 Goals"), ("assists", "🅰 Assists"), ("cc", "🎯 Chances created"),
+            ("bcc", "💥 Big chances created"), ("drb", "🌀 Dribbles completed")]
+    out = []
+    for key, label in cats:
+        top = sorted((r for r in agg.values() if r[key]),
+                     key=lambda x: (-x[key], x["player"]))[:5]
+        if top:
+            out.append({"key": key, "label": label,
+                        "top": [{"player": r["player"], "photo": r["photo"], "value": r[key]}
+                                for r in top]})
+    return out
 
 
 def _ucl_story(team, outcome, rank, ties):
@@ -1857,4 +1932,5 @@ def simulate_ucl(xi, tactics, team, table, build_opp, form_home=None, seed=None,
                          "substituted_for": substituted},
         "table": rows, "ties": ties, "outcome": outcome,
         "scorers": _ucl_scorers(all_matches), "summary": summary,
+        "leaders": _ucl_leaders(all_matches, {_nm(s): _photo(s) for s in xi if s.get("player")}),
     }

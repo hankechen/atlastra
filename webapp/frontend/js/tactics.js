@@ -979,10 +979,14 @@ function uclHTML(r) {
       <td class="tl-stteam">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span>${esc(t.name)}</span></td>
       <td class="tl-stpts">${t.pts}</td></tr>`).join('');
   const ties = (r.ties || []).map(uclTieCard).join('');
-  const scorers = (r.scorers || []).filter((s) => s.goals).slice(0, 5).map((s) => `<div class="tl-lrow">
-      <span class="tl-lph">${s.photo ? `<img src="${esc(s.photo)}" alt="" loading="lazy">` : ''}</span>
-      <span class="tl-lnm">${esc(s.player)}</span>
-      <b class="tl-lval">${s.goals}${s.assists ? ` <i>+${s.assists}a</i>` : ''}</b></div>`).join('');
+  // the campaign's leaderboards — goals and assists from the scorelines, creation and
+  // carrying from the same attributes and roles that produced them
+  const leaders = (r.leaders || []).map((cat) => `<div class="tl-lcat">
+      <div class="tl-lcath">${esc(cat.label)}</div>
+      ${cat.top.map((x, i) => `<div class="tl-lrow"><span class="tl-lrank">${i + 1}</span>
+          <span class="tl-lph">${x.photo ? `<img src="${esc(x.photo)}" alt="" loading="lazy">` : ''}</span>
+          <span class="tl-lnm">${esc(surname(x.player))}</span>
+          <b class="tl-lval">${x.value}</b></div>`).join('')}</div>`).join('');
   const sm = r.summary;
   const tally = UC.n > 1
     ? `<span class="tl-mtally">${UC.n} campaigns · <b>${UC.titles} title${UC.titles === 1 ? '' : 's'}</b> · best: ${esc(UCL_ORDER[UC.best] || '—')}</span>` : '';
@@ -1002,7 +1006,8 @@ function uclHTML(r) {
       <div class="tl-sechdr">📋 Final league-phase table <span class="muted">your points in the real 25/26 table</span></div>
       <div class="tl-sttblwrap tl-utbl"><table class="tl-sttbl"><thead><tr><th></th><th>Team</th><th>Pts</th></tr></thead><tbody>${table}</tbody></table></div>
       ${ties ? `<div class="tl-sechdr">🗝 Knockout rounds <span class="muted">two legs · extra time · penalties</span></div><div class="tl-uties">${ties}</div>` : ''}
-      ${scorers ? `<div class="tl-sechdr">👟 Campaign scorers</div><div class="tl-uscorers">${scorers}</div>` : ''}
+      ${leaders ? `<div class="tl-sechdr">📊 Campaign leaders <span class="muted">your side · top 5 per category</span></div>
+        <div class="tl-lgrid">${leaders}</div>` : ''}
       <div class="tl-mfoot"><button class="tl-seasonbtn" id="reuclBtn">🔄 Run it again</button>
         <button class="tl-seasonbtn ghost" id="uclSwitch">${UC.mode === 'live' ? '⚡ Instant' : '▶ Follow along'}</button>${tally}</div>
       <div class="tl-foot">The field, its points and the qualification bands are the real 2025/26 Champions League;
