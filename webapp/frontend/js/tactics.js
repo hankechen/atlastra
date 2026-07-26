@@ -792,7 +792,7 @@ function matchHTML(r) {
 // last 16, 9th-24th through the playoff, 25th and below out. Every tie after that is two
 // legs, extra time and penalties included. Re-running redraws the whole campaign.
 const UCL_ORDER = ['League phase', 'Knockout playoff', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final', 'Champions'];
-const UC = { key: '', n: 0, titles: 0, best: -1, stages: {} };
+const UC = { key: '', n: 0, titles: 0, best: -1, stages: {}, mode: 'instant' };
 function resetUclTally() { Object.assign(UC, { key: cur().team, n: 0, titles: 0, best: -1, stages: {} }); }
 
 async function openUclModal() {
@@ -806,10 +806,24 @@ async function openUclModal() {
   pop.onclick = (e) => { if (e.target === pop) closePop(); };
   document.addEventListener('keydown', function onEsc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', onEsc); } });
   if (UC.key !== cur().team) resetUclTally();       // new side → fresh campaign record
-  runUclSim();
+  showUclChooser();
 }
-async function runUclSim() {
+// Two ways to take the same campaign: read the result, or sit through it.
+function showUclChooser() {
   const box = document.getElementById('uclBody'); if (!box) return;
+  box.innerHTML = `<div class="tl-uchoose">
+      <button class="tl-uopt" id="uclInstant"><b>⚡ Instant</b>
+        <span>The whole campaign at once — final table, bracket and scorers.</span></button>
+      <button class="tl-uopt" id="uclLiveBtn"><b>▶ Follow along</b>
+        <span>Play it out match by match, goals landing as the clock runs.</span></button>
+    </div>`;
+  document.getElementById('uclInstant').onclick = () => runUclSim('instant');
+  document.getElementById('uclLiveBtn').onclick = () => runUclSim('live');
+}
+async function runUclSim(mode) {
+  const box = document.getElementById('uclBody'); if (!box) return;
+  UC.mode = mode || UC.mode || 'instant';
+  if (UCL_PLAY) { UCL_PLAY.cancelled = true; UCL_PLAY = null; }   // stop any run in progress
   box.innerHTML = '<div class="tl-loading">Playing the campaign — eight matchdays, then the bracket…</div>';
   const a = cur();
   const payload = { team: a.team, xi: a.xi, tactics: a.tactics, seed: Math.floor(Math.random() * 1e9) };
@@ -824,9 +838,110 @@ async function runUclSim() {
   if (r.outcome.won_it) UC.titles++;
   if (si > UC.best) UC.best = si;
   UC.stages[r.outcome.stage] = (UC.stages[r.outcome.stage] || 0) + 1;
+  if (UC.mode === 'live') { playCampaign(r); return; }
+  showUclResult(r);
+}
+function showUclResult(r) {
+  const el = document.getElementById('uclBody'); if (!el) return;
   el.innerHTML = uclHTML(r);
   const bd = el.closest('.tl-uclbd'); if (bd) bd.scrollTop = 0;
-  const rb = document.getElementById('reuclBtn'); if (rb) rb.onclick = runUclSim;
+  const rb = document.getElementById('reuclBtn'); if (rb) rb.onclick = () => runUclSim(UC.mode);
+  const sw = document.getElementById('uclSwitch');
+  if (sw) sw.onclick = () => runUclSim(UC.mode === 'live' ? 'instant' : 'live');
+}
+
+// ---- follow along: the campaign played out, one match at a time ----
+// The whole thing is already decided by the time it arrives — every goal comes with the
+// minute it was scored in — so this is a playback of that result, not a second simulation.
+// Nothing is re-drawn: skipping ahead lands on exactly the campaign you were watching.
+let UCL_PLAY = null;
+const MS_PER_MIN = 28;                                   // a match plays out in ~2.5 seconds
+const _sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+function campaignFixtures(r) {
+  const out = (r.league_phase.matches || []).map((m) => ({ m, round: 'League phase' }));
+  (r.ties || []).forEach((t) => (t.legs || []).forEach((lg, i) => out.push({
+    m: lg, round: t.round, tie: t, decisive: i === (t.legs.length - 1),
+  })));
+  return out;
+}
+async function playCampaign(r) {
+  const box = document.getElementById('uclBody'); if (!box) return;
+  const play = { cancelled: false };
+  UCL_PLAY = play;
+  box.innerHTML = `<div class="tl-uplay">
+      <div id="uclLive"></div>
+      <div class="tl-sechdr" id="uclDoneHdr" hidden>Played so far</div>
+      <div class="tl-umatches" id="uclDone"></div>
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="uclSkip">⏭ Skip to the end</button>
+        <span class="tl-mtally">${(r.league_phase.matches || []).length} league games, then the bracket</span></div>
+    </div>`;
+  const skip = document.getElementById('uclSkip');
+  if (skip) skip.onclick = () => { play.cancelled = true; showUclResult(r); };
+  for (const fx of campaignFixtures(r)) {
+    if (play.cancelled || !document.getElementById('uclLive')) return;
+    await playMatch(fx, play);
+    if (play.cancelled) return;
+    const done = document.getElementById('uclDone');
+    const hdr = document.getElementById('uclDoneHdr');
+    if (done) {
+      done.insertAdjacentHTML('afterbegin', uclMatchRow({ ...fx.m, label: fx.m.label || fx.round }));
+      if (hdr) hdr.hidden = false;
+    }
+    await _sleep(500);
+  }
+  if (!play.cancelled) showUclResult(r);
+}
+async function playMatch(fx, play) {
+  const m = fx.m, host = document.getElementById('uclLive');
+  if (!host) return;
+  const goals = [...(m.goals || [])].sort((a, b) => a.minute - b.minute);
+  const last = goals.length ? Math.max(90, Math.ceil(goals[goals.length - 1].minute)) : 90;
+  const full = m.extra_time ? Math.max(120, last) : last;
+  const venue = m.venue === 'H' ? 'Home' : (m.venue === 'A' ? 'Away' : 'Neutral');
+  const head = `${esc(fx.round)}${m.label && m.label !== fx.round ? ' · ' + esc(m.label) : ''} · ${venue}`;
+  // Build the card once and mutate the three things that change. Re-rendering the whole
+  // card every tick re-requested the crest and made the clock stutter.
+  host.innerHTML = `<div class="tl-ulive">
+      <div class="tl-ulround">${head}</div>
+      <div class="tl-ulteams">
+        <span class="tl-ulteam you">${esc(cur().team)}</span>
+        <span class="tl-ulscore" id="ulScore">0<i>–</i>0</span>
+        <span class="tl-ulteam opp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}${esc(m.opponent)}</span>
+      </div>
+      <div class="tl-ulclock"><i id="ulBar" style="width:0%"></i><b id="ulMin">0'</b></div>
+      <div class="tl-ulfeed" id="ulFeed"><div class="tl-ulnil">Kick-off…</div></div>
+    </div>`;
+  const $ = (id) => document.getElementById(id);
+  let us = 0, them = 0, shown = 0;
+  // The clock is driven by ELAPSED TIME, not by counting ticks: a background tab has its
+  // timers clamped to about a second, and a tick-counted clock then took the best part of
+  // a minute to play 90. This way each match lasts the same wall-clock ~2.5s either way.
+  const t0 = (window.performance || Date).now();
+  for (;;) {
+    if (play.cancelled || !$('ulMin')) return;
+    const minute = Math.min(full, ((window.performance || Date).now() - t0) / MS_PER_MIN);
+    while (shown < goals.length && goals[shown].minute <= minute) {
+      const e = goals[shown];
+      if (e.side === 'us') us++; else them++;
+      if (shown === 0) $('ulFeed').innerHTML = '';
+      $('ulFeed').insertAdjacentHTML('beforeend', `<div class="tl-ulgoal ${e.side === 'us' ? 'you' : 'opp'}">
+          <b>${esc(e.label)}</b> ${esc(e.player)}${e.how && e.how !== 'open play' ? ` <i>${esc(e.how)}</i>` : ''}
+          ${e.assist ? `<span>assist ${esc(surname(e.assist))}</span>` : ''}</div>`);
+      shown++;
+    }
+    $('ulScore').innerHTML = `${us}<i>–</i>${them}`;
+    $('ulBar').style.width = `${(minute / full * 100).toFixed(1)}%`;
+    $('ulMin').textContent = `${Math.round(minute)}'`;
+    if (minute >= full) break;
+    await _sleep(45);
+  }
+  // a two-legged tie is only settled at the end of the second leg
+  if (fx.tie && fx.decisive && fx.tie.line) {
+    const el = document.getElementById('uclLive');
+    if (el) el.insertAdjacentHTML('beforeend', `<div class="tl-ulagg ${fx.tie.won ? 'won' : 'lost'}">${esc(fx.tie.line)}</div>`);
+    await _sleep(900);
+  }
 }
 // scorers under a result: yours in accent, theirs muted — the story of the 90 in one line
 function uclGoals(m) {
@@ -888,7 +1003,8 @@ function uclHTML(r) {
       <div class="tl-sttblwrap tl-utbl"><table class="tl-sttbl"><thead><tr><th></th><th>Team</th><th>Pts</th></tr></thead><tbody>${table}</tbody></table></div>
       ${ties ? `<div class="tl-sechdr">🗝 Knockout rounds <span class="muted">two legs · extra time · penalties</span></div><div class="tl-uties">${ties}</div>` : ''}
       ${scorers ? `<div class="tl-sechdr">👟 Campaign scorers</div><div class="tl-uscorers">${scorers}</div>` : ''}
-      <div class="tl-mfoot"><button class="tl-seasonbtn" id="reuclBtn">🔄 Run it again</button>${tally}</div>
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="reuclBtn">🔄 Run it again</button>
+        <button class="tl-seasonbtn ghost" id="uclSwitch">${UC.mode === 'live' ? '⚡ Instant' : '▶ Follow along'}</button>${tally}</div>
       <div class="tl-foot">The field, its points and the qualification bands are the real 2025/26 Champions League;
         your eight matchdays replace your own row in it. Each match's goals are drawn from the same Poisson (xG) the
         matchup odds use — scaled by the squad-quality gap, home advantage and recent form — with each match

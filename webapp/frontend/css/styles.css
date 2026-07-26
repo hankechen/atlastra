@@ -2544,3 +2544,42 @@ a.hl-scorer:hover{color:var(--accent);text-decoration:underline}
 .tl-addnm i{font-style:normal;font-weight:600;font-size:11.5px;color:var(--accent,#5570f0)}
 .tl-nm .tl-yr{font-style:normal;font-size:9px;font-weight:800;margin-left:4px;padding:0 3px;border-radius:3px;
   color:#0e1f17;background:#f5b301;vertical-align:middle;letter-spacing:-.02em}
+
+/* Tactics Lab — Champions League: instant vs follow-along playback */
+.tl-uchoose{display:flex;flex-direction:column;gap:10px;padding:6px 0}
+.tl-uopt{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:13px 15px;cursor:pointer;
+  text-align:left;border:1px solid var(--border,#243049);border-radius:12px;background:transparent;color:inherit}
+.tl-uopt:hover{border-color:var(--accent,#5570f0);background:rgba(85,112,240,.07)}
+.tl-uopt b{font-size:15px}
+.tl-uopt span{font-size:12.5px;color:var(--muted,#7f8aa3);line-height:1.45}
+.tl-seasonbtn.ghost{background:transparent;color:var(--muted,#7f8aa3);border:1px solid var(--border,#243049)}
+.tl-seasonbtn.ghost:hover{color:var(--accent,#5570f0);border-color:var(--accent,#5570f0)}
+.tl-ulive{border:1px solid var(--border,#243049);border-radius:12px;padding:14px 16px;
+  background:linear-gradient(180deg,rgba(85,112,240,.08),transparent)}
+.tl-ulround{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--muted,#7f8aa3);text-align:center}
+.tl-ulteams{display:flex;align-items:center;gap:12px;margin-top:8px}
+.tl-ulteam{flex:1;min-width:0;font-size:14px;font-weight:700;display:flex;align-items:center;gap:7px}
+.tl-ulteam.you{justify-content:flex-end;text-align:right;color:var(--accent,#5570f0)}
+.tl-ulteam.opp{justify-content:flex-start}
+.tl-ulteam img{width:20px;height:20px;object-fit:contain;flex:none}
+.tl-ulscore{flex:none;font-size:32px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;
+  display:flex;align-items:center;gap:7px}
+.tl-ulscore i{font-style:normal;font-size:19px;color:var(--muted,#7f8aa3)}
+.tl-ulclock{position:relative;height:16px;margin:12px 0 10px;border-radius:9px;background:var(--border,#243049);overflow:hidden}
+.tl-ulclock i{position:absolute;left:0;top:0;bottom:0;background:var(--accent,#5570f0);transition:width .12s linear}
+.tl-ulclock b{position:absolute;right:8px;top:0;line-height:16px;font-size:10.5px;font-weight:800;
+  font-variant-numeric:tabular-nums;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.tl-ulfeed{display:flex;flex-direction:column;gap:4px;min-height:52px}
+.tl-ulgoal{font-size:12.5px;animation:tlGoalIn .28s ease-out}
+.tl-ulgoal::before{content:"⚽ ";}
+.tl-ulgoal.you{color:var(--accent,#5570f0);font-weight:600}
+.tl-ulgoal.opp{color:var(--muted,#7f8aa3)}
+.tl-ulgoal i{font-style:normal;font-size:11px;color:var(--muted,#7f8aa3)}
+.tl-ulgoal span{font-size:11px;color:var(--muted,#7f8aa3);margin-left:5px}
+.tl-ulnil{font-size:12px;color:var(--muted,#7f8aa3)}
+.tl-ulagg{margin-top:10px;padding-top:9px;border-top:1px solid var(--border,#243049);
+  font-size:13px;font-weight:700;text-align:center}
+.tl-ulagg.won{color:#2fbf71}.tl-ulagg.lost{color:#e0325b}
+.tl-uplay .tl-umatches{margin-top:2px}
+@keyframes tlGoalIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
