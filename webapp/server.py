@@ -918,6 +918,24 @@ class Handler(BaseHTTPRequestHandler):
                     res["form"] = {"home": fh_info, "away": fa_info}
             self._json(res)
             return
+        if u.path == "/api/tactics/match":             # Tactics Lab: play one match out
+            ob = b.get("opponent") or {}
+            if not (ob.get("team") and ob.get("xi")):
+                self._json({"available": False, "error": "No opponent set."})
+                return
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                team = b.get("team", "")
+                xi, _ = _tac_rebuild(d, team, b.get("xi"))
+                oxi, _ = _tac_rebuild(d, ob["team"], ob["xi"])
+                opp = {"name": ob["team"], "tactics": ob.get("tactics"),
+                       "units": tactics.team_units(oxi, ob.get("tactics"))}
+                fh = _team_form(d, team).get("form")
+                fa = _team_form(d, ob["team"]).get("form")
+                res = tactics.simulate_match(xi, b.get("tactics"), oxi, opp, team=team,
+                                             opp_name=ob["team"], form_home=fh, form_away=fa,
+                                             seed=_int(b.get("seed")) or None)
+            self._json(res)
+            return
         if u.path == "/api/tactics/season":            # Tactics Lab: full-season simulation
             with SoccerDB(read_only=DB_READ_ONLY) as d:
                 team = b.get("team", "")

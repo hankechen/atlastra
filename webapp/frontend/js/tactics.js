@@ -502,7 +502,8 @@ function renderResults(r) {
   if (r.win_probs) {
     const w = r.win_probs, oppName = other().team;
     const battles = (r.battles || []).map((b) => `<div class="tl-battle"><span>${esc(b.label)}</span><span class="tl-bbar"><i class="you" style="width:${b.a}%"></i><i class="opp" style="width:${100 - b.a}%"></i></span><b>${b.a}%</b></div>`).join('');
-    matchup = `<section class="card tl-card"><div class="card-h"><h3>Matchup: ${esc(cur().team)} vs ${esc(oppName)}</h3><span class="muted">10k-sim</span></div>
+    matchup = `<section class="card tl-card"><div class="card-h"><h3>Matchup: ${esc(cur().team)} vs ${esc(oppName)}</h3>
+        <button class="tl-seasonbtn" id="simMatchBtn">⚽ Simulate match</button></div>
         <div class="tl-wp"><div class="tl-wpseg you" style="width:${w.home}%">${esc(cur().team.split(' ')[0])} ${w.home}%</div>
           <div class="tl-wpseg draw" style="width:${w.draw}%">${w.draw >= 10 ? 'Draw ' + w.draw + '%' : ''}</div>
           <div class="tl-wpseg opp" style="width:${w.away}%">${esc(oppName.split(' ')[0])} ${w.away}%</div></div>
@@ -530,6 +531,7 @@ function renderResults(r) {
   if (r.chemistry) S.lastChem[S.active] = r.chemistry.score;
   wireSubs();
   const ssb = document.getElementById('simSeasonBtn'); if (ssb) ssb.onclick = openSeasonModal;
+  const smb = document.getElementById('simMatchBtn'); if (smb) smb.onclick = openMatchModal;
   scheduleAdvisor();
 }
 
@@ -608,6 +610,92 @@ function seasonHTML(r) {
       <div class="tl-lgrid">${leaders}</div>` : '';
   return `<div class="tl-season">${league}${cup}${leadersBlock}
     <div class="tl-foot">League: rivals extrapolated at their current pace, your side from the model. Player totals project each starter's real current per-90 output over ~85% of a full season. The cup result is the deepest round the side is more likely than not to reach.</div></div>`;
+}
+
+// ---- single-match simulation: play the fixture out of the same odds ----
+// The matchup card shows the distribution; this draws ONE result from it (scorers,
+// bookings, timeline). Re-simulating redraws with a new seed and keeps a running
+// tally, so you can watch the odds play themselves out.
+const MT = { key: '', n: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 };
+const mtKey = () => `${cur().team}|${other().team}`;
+function resetTally() { Object.assign(MT, { key: mtKey(), n: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 }); }
+
+async function openMatchModal() {
+  if (!hasB()) return;
+  closePop();
+  const pop = document.createElement('div'); pop.className = 'tl-pop'; pop.id = 'tlPop';
+  pop.innerHTML = `<div class="tl-pop-bd tl-matchbd">
+      <div class="tl-pop-h"><b>Match Simulation — ${esc(cur().team)} vs ${esc(other().team)}</b><button class="tl-pop-x">✕</button></div>
+      <div id="matchBody"><div class="tl-loading">Kick-off…</div></div></div>`;
+  document.body.appendChild(pop);
+  pop.querySelector('.tl-pop-x').onclick = closePop;
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  document.addEventListener('keydown', function onEsc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', onEsc); } });
+  if (MT.key !== mtKey()) resetTally();          // new fixture → fresh record
+  runMatchSim();
+}
+async function runMatchSim() {
+  const box = document.getElementById('matchBody'); if (!box) return;
+  box.innerHTML = '<div class="tl-loading">Simulating the match…</div>';
+  const a = cur(), b = other();
+  const payload = { team: a.team, xi: a.xi, tactics: a.tactics, seed: Math.floor(Math.random() * 1e9),
+    opponent: { team: b.team, xi: b.xi, tactics: b.tactics } };
+  let r; try { r = await fetch('/api/tactics/match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { r = null; }
+  const el = document.getElementById('matchBody'); if (!el) return;
+  if (!r || !r.available) { el.innerHTML = '<div class="empty-state">Could not simulate — load both sides first.</div>'; return; }
+  MT.n++; MT[r.result === 'W' ? 'w' : r.result === 'D' ? 'd' : 'l']++;
+  MT.gf += r.score.home; MT.ga += r.score.away;
+  el.innerHTML = matchHTML(r);
+  const bd = el.closest('.tl-matchbd'); if (bd) bd.scrollTop = 0;   // land on the new scoreline
+  const rb = document.getElementById('resimBtn'); if (rb) rb.onclick = runMatchSim;
+}
+const _EVICON = { goal: '⚽', yellow: '🟨', red: '🟥', miss: '❌', save: '🧤' };
+function evText(e) {
+  if (e.type === 'goal') {
+    const how = e.how && e.how !== 'open play' ? ` <i class="tl-evhow">${esc(e.how)}</i>` : '';
+    const as = e.assist ? `<span class="tl-evas">assist: ${esc(surname(e.assist))}</span>` : '';
+    return `<b>${esc(e.player)}</b>${how}${as}`;
+  }
+  const note = e.type === 'red' ? 'sent off' : e.type === 'yellow' ? 'booked' : (e.how || '');
+  return `<span>${esc(e.player)}</span> <i class="tl-evhow">${esc(note)}</i>`;
+}
+function statRow(s) {
+  const h = +s.home, a = +s.away, tot = (h + a) || 1, hp = Math.round(h / tot * 100);
+  const fmt = (v) => s.dp ? v.toFixed(s.dp) : Math.round(v);
+  return `<div class="tl-mstat"><b>${fmt(h)}</b><span class="tl-mslbl">${esc(s.label)}</span><b>${fmt(a)}</b>
+      <span class="tl-msbar"><i class="you" style="width:${hp}%"></i><i class="opp" style="width:${100 - hp}%"></i></span></div>`;
+}
+function matchHTML(r) {
+  const o = r.odds || {}, hn = esc(r.home.split(' ')[0]), an = esc(r.away.split(' ')[0]);
+  const odds = `<div class="tl-wp"><div class="tl-wpseg you" style="width:${o.home}%">${hn} ${o.home}%</div>
+      <div class="tl-wpseg draw" style="width:${o.draw}%">${o.draw >= 10 ? 'Draw ' + o.draw + '%' : ''}</div>
+      <div class="tl-wpseg opp" style="width:${o.away}%">${an} ${o.away}%</div></div>
+    <div class="tl-modds">Pre-match odds — this scoreline is one result drawn from them.</div>`;
+  const evs = (r.events || []).length ? r.events.map((e) => `<div class="tl-ev ${esc(e.side)} ${esc(e.type)}">
+        <span class="tl-evl">${e.side === 'home' ? evText(e) : ''}</span>
+        <span class="tl-evm">${_EVICON[e.type] || '•'}<i>${esc(e.label)}</i></span>
+        <span class="tl-evr">${e.side === 'away' ? evText(e) : ''}</span></div>`).join('')
+    : '<div class="tl-noweak">A goalless, incident-free 90 minutes.</div>';
+  const m = r.motm;
+  const motm = m ? `<div class="tl-motm"><span class="tl-lph">${m.photo ? `<img src="${esc(m.photo)}" alt="" loading="lazy">` : ''}</span>
+      <div><div class="tl-motmt">⭐ Man of the match</div>
+        <b>${esc(m.player)}</b> <span class="muted">${esc(m.side === 'home' ? r.home : r.away)}${m.goals ? ` · ${m.goals} goal${m.goals > 1 ? 's' : ''}` : ''}${m.assists ? ` · ${m.assists} assist${m.assists > 1 ? 's' : ''}` : ''}</span></div></div>` : '';
+  const tally = MT.n > 1
+    ? `<span class="tl-mtally">${MT.n} sims · <b>${MT.w}W ${MT.d}D ${MT.l}L</b> · goals ${MT.gf}-${MT.ga}</span>` : '';
+  return `<div class="tl-match">
+      ${odds}
+      <div class="tl-mscore"><span class="tl-mteam you">${esc(r.home)}</span>
+        <span class="tl-mnum">${r.score.home}<i>–</i>${r.score.away}</span>
+        <span class="tl-mteam opp">${esc(r.away)}</span></div>
+      <div class="tl-mstory">${esc(r.story || '')}</div>
+      ${motm}
+      <div class="tl-sechdr">⏱ Match events</div>
+      <div class="tl-evs">${evs}</div>
+      <div class="tl-sechdr">📊 Match stats</div>
+      <div class="tl-mstats">${(r.stats || []).map(statRow).join('')}</div>
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="resimBtn">🔄 Re-simulate</button>${tally}</div>
+      <div class="tl-foot">Goals are drawn from the same Poisson (xG) the odds come from; scorers, assists
+        and bookings are weighted by the same player attributes, roles and tactics. Every re-sim is a fresh draw.</div></div>`;
 }
 
 // ---- visualization: shape + passing network + territory heat ----

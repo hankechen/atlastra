@@ -8,11 +8,14 @@ say *why* a setup succeeds or fails, and show what each change does ("What Chang
 
 Flow:  squad -> pick XI in a formation -> assign roles -> set tactic sliders
        -> simulate() -> unit strengths, projected metrics, weaknesses, style match,
-          and (vs an opponent) win probability + tactical battles.
+          and (vs an opponent) win probability + tactical battles
+       -> simulate_match() -> one match played out of those same odds: scoreline,
+          scorers, assists, bookings and a timeline. Re-seed to re-simulate.
 """
 from __future__ import annotations
 
 import math
+import random
 
 # ------------------------------------------------------------------ formations #
 # Slot: id, family (role menu + unit membership), pitch coords x(0-100 L→R),
@@ -911,3 +914,269 @@ def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=No
 def team_units(xi, tactics) -> dict:
     """Just the unit vector — used to precompute an opponent for head-to-head."""
     return _units(xi)
+
+
+# ------------------------------------------------- single-match simulation --- #
+# The matchup card gives the ODDS — the whole distribution of results. This plays ONE
+# match out of exactly that distribution: goals are drawn from the same Poisson (xG, xGA)
+# the odds are computed from, then the engine decides WHO scored, who assisted and when,
+# weighted by the same attributes and roles that produced the xG. Re-simulating redraws,
+# so a scoreline is a single sample and the odds are what you'd see over many of them.
+_GOAL_BASE = {"ST": 1.00, "W": 0.58, "AM": 0.46, "CM": 0.22, "DM": 0.10, "FB": 0.09, "CB": 0.12}
+_ASSIST_BASE = {"ST": 0.45, "W": 0.95, "AM": 1.00, "CM": 0.66, "DM": 0.32, "FB": 0.58, "CB": 0.10}
+_CARD_BASE = {"CB": 1.00, "DM": 1.00, "FB": 0.85, "CM": 0.80, "ST": 0.50, "W": 0.45,
+              "AM": 0.45, "GK": 0.12}
+# Real goals-by-15-minute-block shape: more goals late, as legs go and games open up.
+_MIN_BLOCKS = [(1, 15, 0.84), (16, 30, 0.95), (31, 45, 1.02),
+               (46, 60, 1.08), (61, 75, 1.15), (76, 90, 1.46)]
+
+
+def _pois_draw(rng, lam):
+    """Sample a goal count from Poisson(lam) — Knuth's method, capped so a freak run
+    of luck can't produce a 15-0."""
+    L, k, p = math.exp(-max(lam, 0.01)), 0, 1.0
+    while p > L and k < 12:
+        k += 1
+        p *= rng.random()
+    return k - 1
+
+
+def _minute(rng, used):
+    """A match minute for an event, shaped like real goal timing, avoiding collisions.
+    Returns (sort_minute, display_label) — a 90th-minute event may land in stoppage."""
+    tot = sum(b[2] for b in _MIN_BLOCKS)
+    m = 45
+    for _ in range(10):
+        x = rng.random() * tot
+        for lo, hi, w in _MIN_BLOCKS:
+            x -= w
+            if x <= 0:
+                m = rng.randint(lo, hi)
+                break
+        if m not in used:
+            break
+    used.add(m)
+    if m == 90 and rng.random() < 0.55:
+        add = rng.randint(1, 5)
+        return 90 + add / 10.0, f"90+{add}'"
+    return float(m), f"{m}'"
+
+
+def _pick_w(rng, pairs, exclude=None):
+    """Weighted random choice over [(slot, weight)], optionally excluding one slot."""
+    cand = [(s, w) for s, w in pairs if s is not exclude and w > 0]
+    tot = sum(w for _, w in cand)
+    if not cand or tot <= 0:
+        return None
+    x = rng.random() * tot
+    for s, w in cand:
+        x -= w
+        if x <= 0:
+            return s
+    return cand[-1][0]
+
+
+def _goal_weights(xi):
+    """How likely each starter is to be the one who finishes — position, finishing
+    ability and how far forward the role pushes him."""
+    out = []
+    for s in xi:
+        p, fam = s.get("player"), s.get("family")
+        if not p or fam == "GK":
+            continue
+        at = player_attrs(p, fam)
+        r = ROLES.get(fam, {}).get(s.get("role")) or _role()
+        w = _GOAL_BASE.get(fam, 0.2) * (max(30, at["shooting"]) / 74.0) ** 1.8 * (1 + 1.5 * r["att"])
+        if fam in ("CB", "FB"):                      # defenders score from set pieces
+            w *= 0.55 + at["aerial"] / 120.0
+        out.append((s, max(0.01, w)))
+    return out
+
+
+def _assist_weights(xi):
+    """How likely each starter is to lay the goal on — creativity, plus roles that get
+    on the ball (playmakers) or get to the byline (wide, overlapping)."""
+    out = []
+    for s in xi:
+        p, fam = s.get("player"), s.get("family")
+        if not p or fam == "GK":
+            continue
+        at = player_attrs(p, fam)
+        r = ROLES.get(fam, {}).get(s.get("role")) or _role()
+        w = (_ASSIST_BASE.get(fam, 0.3) * (max(30, at["creativity"]) / 74.0) ** 1.6
+             * (1 + 1.2 * r["mid"] + 0.6 * r["flank"]))
+        out.append((s, max(0.01, w)))
+    return out
+
+
+def _nm(s):
+    return s["player"]["player"] if s and s.get("player") else ""
+
+
+def _photo(s):
+    return (s["player"].get("photo") if s and s.get("player") else None)
+
+
+def _goal_events(rng, xi, n, side, used):
+    """Play out n goals for one side: who, when, and how (open play / header / penalty)."""
+    gw, aw = _goal_weights(xi), _assist_weights(xi)
+    pen_taker = max(gw, key=lambda z: player_attrs(z[0]["player"], z[0]["family"])["shooting"],
+                    default=(None, 0))[0] if gw else None
+    evs = []
+    for _ in range(n):
+        pen = rng.random() < 0.07 and pen_taker is not None
+        sc = pen_taker if pen else _pick_w(rng, gw)
+        if sc is None:
+            continue
+        at = player_attrs(sc["player"], sc["family"])
+        header = (not pen) and at["aerial"] > 72 and rng.random() < 0.24
+        asst = None
+        if not pen and rng.random() < (0.86 if header else 0.70):
+            asst = _pick_w(rng, aw, exclude=sc)
+        mn, lbl = _minute(rng, used)
+        evs.append({"minute": mn, "label": lbl, "side": side, "type": "goal",
+                    "player": _nm(sc), "photo": _photo(sc),
+                    "assist": _nm(asst) if asst else None,
+                    "how": "penalty" if pen else ("header" if header else "open play")})
+    return evs
+
+
+def _card_events(rng, xi, t, side, used):
+    """Bookings — an aggressive press and a compact, physical block earn more of them."""
+    lam = _clamp_f(1.1 + (t.get("press", 50) - 50) / 45.0
+                   + (t.get("compactness", 50) - 50) / 80.0, 0.3, 3.6)
+    n = _pois_draw(rng, lam)
+    pairs = [(s, _CARD_BASE.get(s.get("family"), 0.5)) for s in xi if s.get("player")]
+    evs, seen, red_done = [], set(), False
+    for _ in range(n):
+        s = _pick_w(rng, [(sl, w) for sl, w in pairs if id(sl) not in seen])
+        if s is None:
+            continue
+        seen.add(id(s))                                  # one booking per player
+        red = (not red_done) and rng.random() < 0.035
+        red_done = red_done or red
+        mn, lbl = _minute(rng, used)
+        evs.append({"minute": mn, "label": lbl, "side": side,
+                    "type": "red" if red else "yellow", "player": _nm(s), "photo": _photo(s)})
+    return evs
+
+
+def _chance_events(rng, xi, opp_xi, xg, goals, side, used):
+    """The near-misses the scoreline hides: chances burned when a side under-performs its
+    xG, and the keeper's night when it over-performs against him."""
+    evs = []
+    if xg - goals >= 0.75:
+        s = _pick_w(rng, _goal_weights(xi))
+        if s:
+            mn, lbl = _minute(rng, used)
+            evs.append({"minute": mn, "label": lbl, "side": side, "type": "miss",
+                        "player": _nm(s), "photo": _photo(s),
+                        "how": rng.choice(["big chance spurned", "hit the post",
+                                           "denied one-on-one"])})
+    if xg >= 1.3 and goals <= 1:
+        gk = next((s for s in opp_xi if s.get("family") == "GK" and s.get("player")), None)
+        if gk and rng.random() < 0.7:
+            mn, lbl = _minute(rng, used)
+            evs.append({"minute": mn, "label": lbl,
+                        "side": "away" if side == "home" else "home", "type": "save",
+                        "player": _nm(gk), "photo": _photo(gk), "how": "big save"})
+    return evs
+
+
+def _motm(xi_h, xi_a, evs, gh, ga):
+    """Man of the match: goals and assists first, then squad quality, with a nod to the
+    winning side and to a keeper who kept a clean sheet."""
+    best, best_sc = None, -1e9
+    for xi, side, gf, gagt in ((xi_h, "home", gh, ga), (xi_a, "away", ga, gh)):
+        for s in xi:
+            if not s.get("player"):
+                continue
+            nm = _nm(s)
+            g = sum(1 for e in evs if e["type"] == "goal" and e["player"] == nm)
+            a = sum(1 for e in evs if e["type"] == "goal" and e.get("assist") == nm)
+            sc = g * 3.2 + a * 1.7 + (s["player"].get("rating") or 70) / 45.0
+            sc += 0.7 if gf > gagt else (0.0 if gf == gagt else -0.5)
+            if s["family"] == "GK":
+                sc += 1.5 if gagt == 0 else -0.4
+            if any(e["type"] == "red" and e["player"] == nm for e in evs):
+                sc -= 4.0
+            if sc > best_sc:
+                best, best_sc = {"player": nm, "side": side, "photo": _photo(s),
+                                 "goals": g, "assists": a,
+                                 "rating": s["player"].get("rating")}, sc
+    return best
+
+
+def _match_story(home, away, gh, ga, xgh, xga, evs):
+    """One line of context: what the scoreline says, and whether it flattered anyone."""
+    hn, an = home.split(" ")[0], away.split(" ")[0]
+    if gh > ga:
+        w, l, gw, gl, xw, xl = hn, an, gh, ga, xgh, xga
+    elif ga > gh:
+        w, l, gw, gl, xw, xl = an, hn, ga, gh, xga, xgh
+    else:
+        base = f"{hn} and {an} share the points, {gh}-{ga}."
+        if gh == 0:
+            return base + " Neither side could find a way through."
+        return base + (" Both sides took their chances." if gh >= 2 else " A cagey, tight afternoon.")
+    line = f"{w} win it {gw}-{gl}."
+    if gw - xw >= 0.9:
+        line += f" A clinical night — {w} scored {gw} from {xw:.2f} xG."
+    elif xl - gl >= 0.9:
+        line += f" {l} will feel robbed, creating {xl:.2f} xG and taking {gl}."
+    elif gw - gl >= 3:
+        line += " A comprehensive, one-sided performance."
+    elif abs(xw - xl) < 0.35:
+        line += " Fine margins — there was almost nothing between the two."
+    if any(e["type"] == "red" for e in evs):
+        line += " The red card was the turning point."
+    return line
+
+
+def simulate_match(xi, tactics, opp_xi, opponent, team=None, opp_name="Opponent",
+                   form_home=None, form_away=None, seed=None) -> dict:
+    """Play a single match between the user's XI and the opponent's, drawn from the same
+    model the odds come from. Same arguments as simulate(), plus the opponent's rebuilt XI
+    (needed to pick their scorers) and a seed — pass a new seed to re-simulate."""
+    base = simulate(xi, tactics, opponent=opponent, team=None,
+                    form_home=form_home, form_away=form_away)
+    if not base.get("win_probs"):
+        return {"available": False}
+    rng = random.Random(seed)
+    xgh = base["metrics"]["xg"]
+    xga = base["opponent_metrics"]["xg"]
+    gh, ga = _pois_draw(rng, xgh), _pois_draw(rng, xga)
+    t = {**DEFAULT_TACTICS, **(tactics or {})}
+    ot = {**DEFAULT_TACTICS, **((opponent or {}).get("tactics") or {})}
+    used: set = set()
+    evs = _goal_events(rng, xi, gh, "home", used) + _goal_events(rng, opp_xi, ga, "away", used)
+    evs += _card_events(rng, xi, t, "home", used) + _card_events(rng, opp_xi, ot, "away", used)
+    evs += _chance_events(rng, xi, opp_xi, xgh, gh, "home", used)
+    evs += _chance_events(rng, opp_xi, xi, xga, ga, "away", used)
+    evs.sort(key=lambda e: e["minute"])
+
+    def shots(xg, g):
+        sh = max(g, round(xg * 8.4 * (0.82 + 0.36 * rng.random())))
+        return sh, max(g, min(sh, round(sh * (0.30 + 0.14 * rng.random()))))
+    sh_h, sot_h = shots(xgh, gh)
+    sh_a, sot_a = shots(xga, ga)
+    poss = base["metrics"]["possession"]
+    corner = lambda sh: max(0, int(round(sh * 0.45 + rng.gauss(0, 1.2))))  # noqa: E731
+    stats = [
+        {"label": "Possession %", "home": poss, "away": 100 - poss, "dp": 0},
+        {"label": "Shots", "home": sh_h, "away": sh_a, "dp": 0},
+        {"label": "On target", "home": sot_h, "away": sot_a, "dp": 0},
+        {"label": "xG", "home": xgh, "away": xga, "dp": 2},
+        {"label": "Corners", "home": corner(sh_h), "away": corner(sh_a), "dp": 0},
+    ]
+    home_name = team or "Your side"
+    res = "W" if gh > ga else ("D" if gh == ga else "L")
+    return {
+        "available": True, "home": home_name, "away": opp_name,
+        "score": {"home": gh, "away": ga}, "result": res,
+        "xg": {"home": xgh, "away": xga},
+        "odds": base["win_probs"], "events": evs, "stats": stats,
+        "motm": _motm(xi, opp_xi, evs, gh, ga),
+        "story": _match_story(home_name, opp_name, gh, ga, xgh, xga, evs),
+        "seed": seed,
+    }
