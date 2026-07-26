@@ -53,19 +53,24 @@ def _season_label(code):
 # the overall that an EA FC card of that position typically carries (a 90-rated striker is
 # not a 90 defender). Used to synthesise a card for a player we only have season stats for.
 _CARD_SHAPE = {
-    "ST": {"sho": 1, "pac": 0, "dri": -3, "pas": -12, "def": -38, "phy": -3, "hea": -3},
-    "W":  {"sho": -4, "pac": 4, "dri": 2, "pas": -8, "def": -30, "phy": -11, "hea": -13},
-    "AM": {"sho": -5, "pac": -3, "dri": 2, "pas": 1, "def": -25, "phy": -10, "hea": -12},
-    "CM": {"sho": -9, "pac": -6, "dri": -2, "pas": 2, "def": -8, "phy": -3, "hea": -8},
-    "WM": {"sho": -7, "pac": 2, "dri": 0, "pas": -3, "def": -18, "phy": -7, "hea": -10},
-    "DM": {"sho": -15, "pac": -8, "dri": -6, "pas": 0, "def": 2, "phy": 1, "hea": -3},
-    "FB": {"sho": -19, "pac": 3, "dri": -4, "pas": -3, "def": 1, "phy": -4, "hea": -8},
-    "CB": {"sho": -30, "pac": -6, "dri": -14, "pas": -8, "def": 3, "phy": 3, "hea": 3},
-    "GK": {"sho": -40, "pac": -20, "dri": -25, "pas": -12, "def": -20, "phy": -2, "hea": -10},
+    "ST": {"sho": 1, "pac": 0, "dri": -3, "pas": -12, "def": -38, "phy": -3, "hea": -3, "cre": -8},
+    "W":  {"sho": -4, "pac": 4, "dri": 2, "pas": -8, "def": -30, "phy": -11, "hea": -13, "cre": -1},
+    "AM": {"sho": -5, "pac": -3, "dri": 2, "pas": 1, "def": -25, "phy": -10, "hea": -12, "cre": 3},
+    "CM": {"sho": -9, "pac": -6, "dri": -2, "pas": 2, "def": -8, "phy": -3, "hea": -8, "cre": 0},
+    "WM": {"sho": -7, "pac": 2, "dri": 0, "pas": -3, "def": -18, "phy": -7, "hea": -10, "cre": -1},
+    "DM": {"sho": -15, "pac": -8, "dri": -6, "pas": 0, "def": 2, "phy": 1, "hea": -3, "cre": -7},
+    "FB": {"sho": -19, "pac": 3, "dri": -4, "pas": -3, "def": 1, "phy": -4, "hea": -8, "cre": -8},
+    "CB": {"sho": -30, "pac": -6, "dri": -14, "pas": -8, "def": 3, "phy": 3, "hea": 3, "cre": -22},
+    "GK": {"sho": -40, "pac": -20, "dri": -25, "pas": -12, "def": -20, "phy": -2, "hea": -10, "cre": -30},
 }
-# which per-90 / percentile signal says a player was unusually good at each card attribute
-_CARD_SIGNAL = {"sho": ("xg", 0.55), "pas": ("passes", 60.0), "dri": ("dribbles", 2.4),
-                "def": ("tackles_int", 5.0)}
+# Which per-90 signal says a player was unusually good at each card attribute, and the value
+# a typical rated player posts — MEASURED from the warehouse, not guessed. The first cut of
+# this used invented references (passes 60, dribbles 2.4, tackles 5.0) that no player comes
+# close to, so every synthesised card took the full penalty on passing, dribbling and
+# defending. Half of these fields are also simply absent before the later seasons, and a
+# missing stat must read as "unknown", never as "bad" — see the skip in _synth_card.
+_CARD_SIGNAL = {"sho": ("xg", 0.19), "pas": ("passes", 39.0), "dri": ("dribbles", 1.08),
+                "def": ("tackles_int", 3.03), "cre": ("creation", 1.30)}
 
 
 def _synth_card(overall, family, p) -> dict:
@@ -82,6 +87,13 @@ def _synth_card(overall, family, p) -> dict:
     n = p.get("per90") or {}
     sig = dict(n)
     sig["tackles_int"] = (n.get("tackles") or 0) + (n.get("interceptions") or 0)
+    # What a player CREATED, which nothing read before: a season of 23 assists and 2.7
+    # chances a game left no trace on the card, so the engine — which derives creativity
+    # from passing and dribbling — decided 2014/15 Messi lacked the creativity to be an
+    # Advanced Playmaker. Chances created and xA are populated for 95% of player-seasons,
+    # assists for 67%, which makes this the most reliable signal available.
+    sig["creation"] = ((n.get("chances") or 0) + 1.5 * (n.get("assists") or 0)
+                       + 2.0 * (n.get("xa") or 0))
     card = {"o": int(overall)}
     for k, off in shape.items():
         base = overall + off
@@ -89,7 +101,12 @@ def _synth_card(overall, family, p) -> dict:
         if name_ref:
             key, ref = name_ref
             got = sig.get(key) or 0
-            base += max(-7.0, min(7.0, (got / ref - 1.0) * 7.0))
+            # a stat we don't hold for that season says nothing about him — half these
+            # fields are empty in the older data, and reading that as a weakness took 7
+            # points off every historical player's passing, dribbling and defending
+            if got > 0:
+                span = 12.0 if k == "cre" else 7.0      # creation is the discriminating one
+                base += max(-span, min(span, (got / ref - 1.0) * span))
         card[k] = int(max(20, min(99, round(base))))
     return card
 

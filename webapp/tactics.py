@@ -343,7 +343,10 @@ def player_attrs(p: dict, family: str) -> dict:
     if f:
         return {
             "shooting": _clamp(f["sho"]),
-            "creativity": _clamp(0.7 * f["pas"] + 0.3 * f["dri"]),
+            # An EA FC card has no creativity rating, so it's inferred from passing and
+            # dribbling. A card we synthesise from a real season DOES know what the player
+            # created (see _synth_card), and that measurement beats the inference.
+            "creativity": _clamp(f.get("cre") or (0.7 * f["pas"] + 0.3 * f["dri"])),
             "dribbling": _clamp(f["dri"]),
             "passing": _clamp(f["pas"]),
             "progression": _clamp(0.5 * f["pas"] + 0.4 * f["dri"] + 0.1 * f["pac"]),
