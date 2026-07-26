@@ -1480,6 +1480,11 @@ _UCL_AWAY_XG = 0.93          # ...and their visitors ~7% less. A neutral final g
 _UCL_ET_RATE = 0.30          # extra time: 30 cagier minutes, so well under a third of the 90
 _UCL_GAP_K = 0.028           # squad-quality amplifier: a 15-point rating gulf ~1.5x the xG
 _UCL_XG_SCALE = 0.86         # campaign scoring damper — see the note above _ucl_xg
+# A final is a tighter game than the rounds that lead to it — one match, no second leg to
+# fix it in, and both sides start by making sure they don't lose it. In the last eighteen
+# the real ones averaged 2.72 goals against 2.99 in the quarters and last 16, and 3.09 in
+# the semis; this is that ~10% gap, which our finals didn't have at all.
+_UCL_FINAL_XG = 0.90
 _UCL_TOP8 = 8                # rank 1-8  -> straight to the Round of 16
 _UCL_PLAYOFF_LAST = 24       # rank 9-24 -> knockout playoff; 25th and below are out
 # Our team names vs the names the European field is published under.
@@ -1563,13 +1568,13 @@ def _ucl_xg(A, B, venue):
     return round(_clamp_f(xg, 0.2, 3.6), 2), round(_clamp_f(oxg, 0.2, 3.6), 2), m["possession"]
 
 
-def _ucl_match(rng, A, B, venue, rnd, label=None):
+def _ucl_match(rng, A, B, venue, rnd, label=None, damp=1.0):
     """One match of the campaign: goals drawn from that xG pair, then who scored, who
     laid it on and when — the same weighting the single-match simulator uses. Each match
     draws its OWN xG around the projection (see _xg_draw), so a campaign has its flat
     afternoons and its 4-1s rather than the same game replayed eight times."""
     exg, eoxg, poss = _ucl_xg(A, B, venue)
-    xg, oxg = _xg_draw(rng, exg), _xg_draw(rng, eoxg)
+    xg, oxg = _xg_draw(rng, exg * damp), _xg_draw(rng, eoxg * damp)
     gf, ga = _pois_draw(rng, xg), _pois_draw(rng, oxg)
     used: set = set()
     evs = (_goal_events(rng, A["xi"], gf, "us", used)
@@ -1582,12 +1587,12 @@ def _ucl_match(rng, A, B, venue, rnd, label=None):
             "contrib": _match_contrib(rng, A["xi"], xg)}
 
 
-def _ucl_extra_time(rng, A, B, venue, used):
+def _ucl_extra_time(rng, A, B, venue, used, damp=1.0):
     """Thirty more minutes when a tie is level — played at a fraction of the 90's rate,
     because sides that reach extra time are usually the ones afraid to lose it."""
     exg, eoxg, _ = _ucl_xg(A, B, venue)
-    gf = _pois_draw(rng, _xg_draw(rng, exg * _UCL_ET_RATE))
-    ga = _pois_draw(rng, _xg_draw(rng, eoxg * _UCL_ET_RATE))
+    gf = _pois_draw(rng, _xg_draw(rng, exg * _UCL_ET_RATE * damp))
+    ga = _pois_draw(rng, _xg_draw(rng, eoxg * _UCL_ET_RATE * damp))
     evs = (_goal_events(rng, A["xi"], gf, "us", used, et=True)
            + _goal_events(rng, B["xi"], ga, "them", used, et=True))
     evs.sort(key=lambda e: e["minute"])
@@ -1623,8 +1628,9 @@ def _ucl_tie(rng, A, B, rnd, second_leg_home, one_off=False):
     """A knockout tie. Two legs, aggregate scores, no away goals (as UEFA has scored it
     since 2021); level after 180 minutes → extra time in the second leg → penalties.
     The final (one_off) is a single match on neutral ground."""
+    damp = _UCL_FINAL_XG if one_off else 1.0
     if one_off:
-        leg = _ucl_match(rng, A, B, "N", rnd, "Final")
+        leg = _ucl_match(rng, A, B, "N", rnd, "Final", damp=damp)
         legs, gf, ga = [leg], leg["score"]["us"], leg["score"]["them"]
     else:
         v1 = "H" if not second_leg_home else "A"
@@ -1638,7 +1644,7 @@ def _ucl_tie(rng, A, B, rnd, second_leg_home, one_off=False):
         last = legs[-1]
         used = {int(e["minute"]) for e in last["goals"]}
         efa, efb, evs = _ucl_extra_time(rng, A, B, "N" if one_off else
-                                        ("H" if second_leg_home else "A"), used)
+                                        ("H" if second_leg_home else "A"), used, damp=damp)
         last["goals"] += evs
         last["goals"].sort(key=lambda e: e["minute"])
         last["score"]["us"] += efa
