@@ -2456,6 +2456,7 @@ a.hl-scorer:hover{color:var(--accent);text-decoration:underline}
 .tl-brk{position:absolute;left:-7px;top:-6px;z-index:4;font-style:normal;font-size:11px;line-height:16px;
   width:18px;height:18px;text-align:center;background:#f5b301;border:1.5px solid #0e1f17;border-radius:50%;
   box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.tl-brk.down{background:#e0325b;color:#fff;font-weight:800}
 
 /* Tactics Lab — season & cup projection */
 .tl-projrow{display:flex;align-items:center;gap:10px;margin:8px 0;font-size:14px}

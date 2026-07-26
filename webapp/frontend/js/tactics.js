@@ -79,7 +79,13 @@ let _simT; const debouncedSim = () => { clearTimeout(_simT); _simT = setTimeout(
 function chipHTML(s) {
   const p = s.player, nm = p ? p.player.split(' ').slice(-1)[0] : '—';
   const ph = p && p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" draggable="false">` : '';
-  const brk = p && p.breakout ? `<i class="tl-brk" title="Breakout season — Atlas rating above FIFA, rating boosted +${p.breakout}">⚡</i>` : '';
+  // Form badge, both ways: ⚡ a breakout season the EA FC card underrates, ↓ a season
+  // running below what the card promises (capped at half the upside — see _breakout_boost).
+  const brk = p && p.breakout
+    ? (p.breakout > 0
+      ? `<i class="tl-brk" title="Breakout season — Atlas rating above FIFA, rating boosted +${p.breakout}">⚡</i>`
+      : `<i class="tl-brk down" title="Below his card — Atlas rating under FIFA, rating cut ${p.breakout}">↓</i>`)
+    : '';
   return `<button class="tl-chip" style="left:${s.x}%;bottom:${s.y}%" data-slot="${s.id}">
       <span class="tl-phwrap"><span class="tl-ph">${ph}</span><i class="tl-rt">${p ? p.rating : '-'}</i>${brk}</span>
       <span class="tl-nm">${esc(nm)}</span><span class="tl-role">${esc(s.role)}</span></button>`;

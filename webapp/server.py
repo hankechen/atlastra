@@ -130,12 +130,58 @@ def _build_club_squad(team, tid):
 _BREAKOUT_ATTRS = ("pac", "sho", "pas", "dri", "def", "phy", "hea")
 
 
-def _breakout_boost(base, ar):
-    """Rating boost when a player's current-season combined Atlastra rating (best of their
-    league & UCL rating — see atlas_rating_index) beats their EA FC overall.
-      • gap >= 10  -> flat +10  (a big league+UCL over-performer the EA FC card underrates)
-      • gap  > 2   -> gentle scaled bump, capped at +6
-    FIFA stays the base (Atlas is season-dependent); the boost just lets the sim reward form."""
+_ATLAS_NORM: dict = {}                                    # cache: rating band -> median gap
+
+
+def _atlas_band(o):
+    """Card-rating band a player belongs to, for the norm below."""
+    return "<70" if o < 70 else ("70-74" if o < 75 else
+                                 ("75-79" if o < 80 else ("80-84" if o < 85 else "85+")))
+
+
+def _atlas_norms(atlas):
+    """Median (Atlas − EA FC) gap per card-rating band, measured on this season's index.
+
+    The two numbers are NOT the same ruler: an Atlas rating is percentile- and
+    season-based and sits ~21 points under an EA FC overall for a typical player (only ~4%
+    of players clear their card at all). So a raw negative gap says nothing — comparing to
+    zero would downgrade almost every player in the game. 'Below his card' only means
+    something relative to what players at that card level normally rate, which is what
+    this measures (and it does vary: the 85+ band runs ~10 under, the 70-79 bands ~22)."""
+    if _ATLAS_NORM.get("bands"):
+        return _ATLAS_NORM["bands"]
+    from statistics import median
+    from webapp import fifa
+    by_band: dict = {}
+    for nm, ar in (atlas or {}).items():
+        if "|" in nm:                                    # initial+surname alias of a full name
+            continue
+        c = fifa.match(nm)
+        if not c or not c.get("o"):
+            continue
+        by_band.setdefault(_atlas_band(c["o"]), []).append(ar - c["o"])
+    bands = {b: median(g) for b, g in by_band.items() if len(g) >= 30}
+    if bands:
+        _ATLAS_NORM["bands"] = bands
+    return bands
+
+
+def _breakout_boost(base, ar, norm=None):
+    """Signed rating adjustment from how a player's current-season combined Atlastra rating
+    (best of their league & UCL rating — see atlas_rating_index) compares with their EA FC
+    overall. Form cuts both ways:
+      • gap  >= 10  -> flat +10  (a big league+UCL over-performer the EA FC card underrates)
+      • gap  >   2  -> gentle scaled bump, capped at +6
+      • rel <= -20  -> flat -5   (a season far below what his card level normally rates)
+      • rel <  -10  -> gentle scaled cut, floored at -5
+    `gap` is the raw difference (beating a scale that normally sits ~21 points lower is a
+    strong signal on its own), while `rel` is the gap measured against `norm`, the median
+    gap for that card band — see _atlas_norms for why the downside needs that reference.
+    The cut is capped at HALF the upside: a card that flatters a player is weaker evidence
+    than a season that beats it (injury, a bad team or a role change all drag the Atlas
+    rating down without the player being worse). FIFA stays the base either way, so this
+    tilts the sim rather than rewriting the player, and a player with no Atlas rating this
+    season (under 450 minutes) is left alone."""
     if ar is None:
         return 0.0
     gap = ar - base
@@ -143,11 +189,20 @@ def _breakout_boost(base, ar):
         return 10.0
     if gap > 2:
         return min(6.0, (gap - 2) * 0.55)
+    if norm is None:
+        return 0.0
+    rel = gap - norm
+    if rel <= -20:
+        return -5.0
+    if rel < -10:
+        return max(-5.0, (rel + 10) * 0.5)
     return 0.0
 
 
 def _apply_breakout(p, atlas):
-    """Apply the breakout boost to a player dict in place (effective rating + FIFA attrs)."""
+    """Apply the signed form adjustment to a player dict in place (effective rating + FIFA
+    attrs). `p["breakout"]` carries the signed number, so the UI can badge a boost and a
+    downgrade differently."""
     from analytics.queries import _fold
     f = p.get("fifa")
     if not f or not atlas:
@@ -158,15 +213,16 @@ def _apply_breakout(p, atlas):
     if ar is None and len(t) >= 2:
         ar = atlas.get(t[0][0] + "|" + t[-1])
     base = f.get("o", p.get("rating") or 70)
-    boost = _breakout_boost(base, ar)
-    if boost <= 0:
+    boost = _breakout_boost(base, ar, _atlas_norms(atlas).get(_atlas_band(base)))
+    if not boost:
         return
+    clamp = (lambda v: max(1, min(99, int(round(v)))))    # noqa: E731
     p["breakout"] = round(boost, 1)
-    p["rating"] = min(99, int(round(base + boost)))
+    p["rating"] = clamp(base + boost)
     f["o"] = p["rating"]
     for k in _BREAKOUT_ATTRS:
         if k in f and f[k]:
-            f[k] = min(99, int(round(f[k] + boost)))
+            f[k] = clamp(f[k] + boost)
 
 
 def _tac_squad(d, team, tid=None):
