@@ -1183,7 +1183,7 @@ def _xg_draw(rng, mean):
     """One match's xG, drawn around the model's expectation for it."""
     m = max(0.05, mean)
     return round(_clamp_f(rng.gammavariate(_XG_SHAPE, m / _XG_SHAPE), 0.05, 6.0), 2)
-_GOAL_BASE = {"ST": 1.00, "W": 0.58, "AM": 0.46, "WM": 0.34, "CM": 0.22, "DM": 0.10,
+_GOAL_BASE = {"ST": 0.86, "W": 0.62, "AM": 0.50, "WM": 0.36, "CM": 0.24, "DM": 0.10,
               "FB": 0.09, "CB": 0.12}
 _ASSIST_BASE = {"ST": 0.45, "W": 0.95, "AM": 1.00, "WM": 0.88, "CM": 0.66, "DM": 0.32,
                 "FB": 0.58, "CB": 0.10}
@@ -1257,7 +1257,11 @@ def _goal_weights(xi):
             continue
         at = player_attrs(p, fam)
         r = ROLES.get(fam, {}).get(s.get("role")) or _role()
-        w = _GOAL_BASE.get(fam, 0.2) * (max(30, at["shooting"]) / 74.0) ** 1.8 * (1 + 1.5 * r["att"])
+        # Finishing still decides who scores, but gently: a steep exponent funnelled a
+        # campaign's goals into the single best finisher (an elite striker was taking 55% of
+        # them and reaching 25 in a run). Real front lines share the load — the centre
+        # forward leads it, the wide men and the 10 get a real cut.
+        w = _GOAL_BASE.get(fam, 0.2) * (max(30, at["shooting"]) / 74.0) ** 1.2 * (1 + 1.5 * r["att"])
         if fam in ("CB", "FB"):                      # defenders score from set pieces
             w *= 0.55 + at["aerial"] / 120.0
         out.append((s, max(0.01, w)))
@@ -1474,7 +1478,8 @@ def simulate_match(xi, tactics, opp_xi, opponent, team=None, opp_name="Opponent"
 _UCL_HOME_XG = 1.10          # home sides in Europe score ~10% more...
 _UCL_AWAY_XG = 0.93          # ...and their visitors ~7% less. A neutral final gets neither.
 _UCL_ET_RATE = 0.30          # extra time: 30 cagier minutes, so well under a third of the 90
-_UCL_GAP_K = 0.035           # squad-quality amplifier: a 15-point rating gulf ~1.7x the xG
+_UCL_GAP_K = 0.028           # squad-quality amplifier: a 15-point rating gulf ~1.5x the xG
+_UCL_XG_SCALE = 0.86         # campaign scoring damper — see the note above _ucl_xg
 _UCL_TOP8 = 8                # rank 1-8  -> straight to the Round of 16
 _UCL_PLAYOFF_LAST = 24       # rank 9-24 -> knockout playoff; 25th and below are out
 # Our team names vs the names the European field is published under.
@@ -1550,7 +1555,12 @@ def _ucl_xg(A, B, venue):
         xg, oxg = xg * _UCL_HOME_XG, oxg * _UCL_AWAY_XG
     elif venue == "A":
         xg, oxg = xg * _UCL_AWAY_XG, oxg * _UCL_HOME_XG
-    return round(_clamp_f(xg, 0.2, 3.8), 2), round(_clamp_f(oxg, 0.2, 3.8), 2), m["possession"]
+    # European nights are tighter than the domestic model expects: sides are better matched,
+    # more of the games matter, and a campaign of them ran hot — an elite side was averaging
+    # 2.7 goals a game and its striker 14 a campaign, when only about two players in the
+    # whole competition reach 12 in a real season.
+    xg, oxg = xg * _UCL_XG_SCALE, oxg * _UCL_XG_SCALE
+    return round(_clamp_f(xg, 0.2, 3.6), 2), round(_clamp_f(oxg, 0.2, 3.6), 2), m["possession"]
 
 
 def _ucl_match(rng, A, B, venue, rnd, label=None):
