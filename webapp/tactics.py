@@ -1696,7 +1696,10 @@ _CC_BASE = {"AM": 2.05, "W": 1.75, "WM": 1.55, "CM": 1.35, "FB": 1.15, "ST": 1.0
             "DM": 0.95, "CB": 0.35, "GK": 0.05}
 _DRB_BASE = {"W": 2.30, "AM": 1.75, "WM": 1.60, "ST": 1.25, "FB": 0.90, "CM": 0.85,
              "DM": 0.50, "CB": 0.22, "GK": 0.02}
-_BIG_SHARE = 0.27                # of the chances a player creates, how many are gilt-edged
+# Of the chances a player creates, how many are gilt-edged. Kept deliberately low: at a
+# quarter of them an elite squad had three men clearing eight big chances in a single
+# campaign, when the real competition produces about four such players across all 36 clubs.
+_BIG_SHARE = 0.13
 
 
 def _match_contrib(rng, xi, xg):
