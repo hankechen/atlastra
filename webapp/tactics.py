@@ -104,6 +104,39 @@ _POS_FAMILY = {
 def family_for_position(pos: str) -> str:
     return _POS_FAMILY.get((pos or "").upper(), "CM")
 
+
+# Which flank a position code belongs to. Only codes that actually name a side count — a
+# plain CB, CM or ST has no natural flank and should never be pushed to one.
+_POS_SIDE = {"LB": "L", "LWB": "L", "LM": "L", "LW": "L", "LCM": "L",
+             "RB": "R", "RWB": "R", "RM": "R", "RW": "R", "RCM": "R"}
+# How much being on his own side is worth, per family. A fullback on the wrong flank is a
+# real cost (he defends and crosses off the wrong foot); a winger inverting is a choice, so
+# the nudge there is gentle enough that a clearly better player still gets the shirt.
+_SIDE_WEIGHT = {"FB": 7.0, "WM": 4.0, "W": 4.0}
+
+
+def _slot_side(slot) -> str:
+    """'L', 'R' or '' for a central slot — from the slot id, falling back to its x."""
+    sid = (slot.get("id") or "").upper()
+    if sid.startswith("L"):
+        return "L"
+    if sid.startswith("R"):
+        return "R"
+    x = slot.get("x", 50)
+    return "" if 34 <= x <= 66 else ("L" if x < 50 else "R")
+
+
+def _side_bonus(player, slot) -> float:
+    """Rating-equivalent bonus for a player lining up on his natural flank (and the matching
+    penalty for the wrong one). Zero for anyone whose position names no side."""
+    w = _SIDE_WEIGHT.get(slot.get("family"))
+    if not w:
+        return 0.0
+    ps, ss = _POS_SIDE.get((player.get("position") or "").upper(), ""), _slot_side(slot)
+    if not ps or not ss:
+        return 0.0
+    return w if ps == ss else -w
+
 # ------------------------------------------------------------------- roles ---- #
 # Each role nudges how a player's quality feeds the team's units, plus side-effects
 # (flank_risk raises transition exposure; buildup helps play out; press adds
@@ -354,8 +387,14 @@ def build_xi(squad: list[dict], formation: str) -> list[dict]:
     used, xi = set(), []
     for s in slots:
         elig = FAMILY_POS[s["family"]]
-        pick = next((p for p in pool if p["player"] not in used
-                     and (p.get("position") or "").upper() in elig), None)
+        cands = [p for p in pool if p["player"] not in used
+                 and (p.get("position") or "").upper() in elig]
+        # Rating alone filled the left back slot first and therefore gave it to the best
+        # fullback in the squad, whichever flank he actually plays — PSG lined up with
+        # Hakimi at left back and Nuno Mendes at right back. A player's own side is worth a
+        # few rating points here, so the natural pairing wins unless the gap is big.
+        pick = max(cands, key=lambda p: (p.get("rating") or 0) + _side_bonus(p, s),
+                   default=None)
         if pick is None:                                   # fall back to best remaining
             pick = next((p for p in pool if p["player"] not in used), None)
         if pick:

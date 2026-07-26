@@ -209,6 +209,15 @@ async function showSeasons(name) {
   const b = document.getElementById('addBack');
   if (b) b.onclick = () => runAddSearch(document.getElementById('addSearch').value);
 }
+// A player's natural flank, mirroring the engine's _POS_SIDE — a right back dropped into a
+// squad should land at right back, not wherever happens to be free first.
+const _POS_SIDE = { LB: 'L', LWB: 'L', LM: 'L', LW: 'L', RB: 'R', RWB: 'R', RM: 'R', RW: 'R' };
+const slotSide = (s) => {
+  const id = (s.id || '').toUpperCase();
+  if (id.startsWith('L')) return 'L';
+  if (id.startsWith('R')) return 'R';
+  return (s.x >= 34 && s.x <= 66) ? '' : (s.x < 50 ? 'L' : 'R');
+};
 // Compatible families to fall back to when no exact-position slot is free.
 const _FAM_COMPAT = { DM: ['CM'], CM: ['DM', 'AM', 'WM'], AM: ['CM', 'W', 'WM'], WM: ['W', 'CM', 'AM'], W: ['WM', 'AM'], ST: ['W', 'WM'], FB: [], CB: [], GK: [] };
 async function addPlayerToSquad(name, season) {
@@ -224,16 +233,21 @@ async function addPlayerToSquad(name, season) {
   // family, and only then displace someone — otherwise building an XI from scratch has each
   // new forward knocking out the last one while the wings stand empty.
   const fams = [p.family, ...(_FAM_COMPAT[p.family] || [])].filter(Boolean);
+  const mySide = _POS_SIDE[(p.position || '').toUpperCase()] || '';
+  const fits = (s) => !mySide || !slotSide(s) || slotSide(s) === mySide;   // his natural flank
   let target = null;
   for (const fam of fams) {
-    target = a.xi.find((s) => s.family === fam && !s.player);
+    const empty = a.xi.filter((s) => s.family === fam && !s.player);
+    target = empty.find(fits) || empty[0];
     if (target) break;
   }
   if (!target) {
     for (const fam of fams) {
       const slots = a.xi.filter((s) => s.family === fam);
       if (!slots.length) continue;
-      target = slots.reduce((lo, s) => (!lo || (s.player ? s.player.rating : 0) < (lo.player ? lo.player.rating : 0)) ? s : lo, null);
+      const sided = slots.filter(fits);
+      const from = sided.length ? sided : slots;
+      target = from.reduce((lo, s) => (!lo || (s.player ? s.player.rating : 0) < (lo.player ? lo.player.rating : 0)) ? s : lo, null);
       if (target) break;
     }
   }
