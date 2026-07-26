@@ -1810,27 +1810,59 @@ class SoccerDB:
     # maps one to the other empirically: for the CURRENT season, where players have both
     # numbers, take the median EA FC overall at each Atlas level and interpolate. So a
     # historical season is priced at whatever a player rating that well is worth today.
-    _SEASON_RATINGS: dict = {}                               # season -> sorted Atlas ratings
-    _FIFA_SCALE = None                                       # sorted EA FC overalls, today
+    _SEASON_RATINGS: dict = {}                   # (season, group) -> sorted Atlas ratings
+    _FIFA_SCALE = None                           # group -> sorted EA FC overalls today ('' = all)
 
-    def atlas_to_fifa(self, atlas: float, season: str) -> int:
+    def atlas_to_fifa(self, atlas: float, season: str, group: str | None = None) -> int:
         """A season rating expressed on today's EA FC overall scale, matched on RANK: where
         that number placed among the season's regulars, read off at the same place in the
         current EA FC distribution. Matching on value instead would flatten the icons —
         Atlas and EA FC correlate loosely, so the median card at Atlas 90 is only an 83, and
         prime Ronaldo would come out worse than a current squad player. Rank keeps the tail:
         the best player of 2014/15 is priced like the best player of today."""
-        if season not in SoccerDB._SEASON_RATINGS:
+        # Both halves are read WITHIN the player's position where the sample allows it. A
+        # holding midfielder and a striker are not scored on the same curve at either end:
+        # the season rating rewards output, and the EA FC scale is shaped differently per
+        # position too (its centre-backs top out lower than its attacking midfielders). The
+        # Atlas percentiles turn out nearly identical by position, so most of the correction
+        # comes from the card side — worth a couple of points to defenders and holders, not
+        # a transformation. A thin group (fewer than 40 rated that season) falls back to the
+        # whole league rather than rank someone against a handful.
+        key = (season, group or "")
+        if key not in SoccerDB._SEASON_RATINGS:
+            sql = ("SELECT max(rating) FROM player_ratings_combined WHERE season = ? "
+                   "AND minutes >= 900" + (" AND position_group = ?" if group else "")
+                   + " GROUP BY player_id")
+            rows = self.con.execute(sql, [season, group] if group else [season]).fetchall()
+            vals = sorted(float(r[0]) for r in rows if r[0])
+            SoccerDB._SEASON_RATINGS[key] = vals if len(vals) >= 40 else None
+        if SoccerDB._FIFA_SCALE is None:
+            from webapp import fifa
+            SoccerDB._FIFA_SCALE = {}
+            rows = self.con.execute(
+                "SELECT p.player_name, any_value(r.position_group) FROM player_ratings_combined r "
+                "JOIN players p ON p.player_id = r.player_id "
+                "WHERE r.season = ? AND r.minutes >= 600 GROUP BY 1", [FOCUS_SEASON]).fetchall()
+            everyone = []
+            for nm, grp in rows:
+                c = fifa.match(nm)
+                if c and c.get("o"):
+                    everyone.append(float(c["o"]))
+                    if grp:
+                        SoccerDB._FIFA_SCALE.setdefault(grp, []).append(float(c["o"]))
+            for g in list(SoccerDB._FIFA_SCALE):
+                SoccerDB._FIFA_SCALE[g] = sorted(SoccerDB._FIFA_SCALE[g])
+                if len(SoccerDB._FIFA_SCALE[g]) < 40:
+                    del SoccerDB._FIFA_SCALE[g]
+            SoccerDB._FIFA_SCALE[""] = sorted(everyone)
+        peers = SoccerDB._SEASON_RATINGS.get(key) or SoccerDB._SEASON_RATINGS.get((season, ""))
+        if peers is None:                                    # league-wide list not built yet
             rows = self.con.execute(
                 "SELECT max(rating) FROM player_ratings_combined WHERE season = ? "
                 "AND minutes >= 900 GROUP BY player_id", [season]).fetchall()
-            SoccerDB._SEASON_RATINGS[season] = sorted(float(r[0]) for r in rows if r[0])
-        if SoccerDB._FIFA_SCALE is None:
-            from webapp import fifa
-            names = self.con.execute("SELECT DISTINCT player_name FROM players").fetchall()
-            cards = [c["o"] for (n,) in names if (c := fifa.match(n)) and c.get("o")]
-            SoccerDB._FIFA_SCALE = sorted(float(o) for o in cards)
-        peers, scale = SoccerDB._SEASON_RATINGS.get(season) or [], SoccerDB._FIFA_SCALE
+            peers = sorted(float(r[0]) for r in rows if r[0])
+            SoccerDB._SEASON_RATINGS[(season, "")] = peers
+        scale = SoccerDB._FIFA_SCALE.get(group or "") or SoccerDB._FIFA_SCALE.get("") or []
         if not peers or not scale:
             return int(round(float(atlas or 70)))
         x = float(atlas or 0)
@@ -1875,16 +1907,17 @@ class SoccerDB:
               FROM v_stats_combined_player s JOIN players p ON p.player_id = s.player_id
               WHERE strip_accents(lower(p.player_name)) = strip_accents(lower(?))
               GROUP BY s.player_id, s.season),
-            rt AS (SELECT player_id, season, max(rating) rating
+            rt AS (SELECT player_id, season, max(rating) rating,
+                          any_value(position_group) grp
                    FROM player_ratings_combined GROUP BY player_id, season)
-            SELECT st.season, st.team, st.mins, st.g, st.a, rt.rating
+            SELECT st.season, st.team, st.mins, st.g, st.a, rt.rating, rt.grp
             FROM st LEFT JOIN rt ON rt.player_id = st.player_id AND rt.season = st.season
             WHERE st.mins >= 600 ORDER BY st.season DESC LIMIT ?""", [name, limit]).fetchall()
         out = []
-        for season, team, mins, g, a, rating in rows:
+        for season, team, mins, g, a, rating, grp in rows:
             out.append({"season": season, "label": _season_label(season), "team": team,
                         "minutes": _i(mins), "goals": _i(g), "assists": _i(a),
-                        "rating": self.atlas_to_fifa(rating, season) if rating else None})
+                        "rating": self.atlas_to_fifa(rating, season, grp) if rating else None})
         return out
 
     def tactics_player_season(self, name: str, season: str) -> dict | None:
@@ -1907,7 +1940,7 @@ class SoccerDB:
         fam = (r.pos_group or {"FWD": "ST", "MID": "CM", "DEF": "CB", "GK": "GK"}.get(
             (r.primary_position or "").split()[0].replace("F", "FWD").replace("M", "MID")
             .replace("D", "DEF"), "CM")) or "CM"
-        overall = self.atlas_to_fifa(r.rating, season) if r.rating else 70
+        overall = self.atlas_to_fifa(r.rating, season, fam) if r.rating else 70
         # Keepers are the one position the season ratings can't price. The rating engine
         # barely covers them historically — 3 to 8 per season against ~1500 outfielders —
         # so ranking one against that handful put a 2014/15 Neuer on 71. Where the keeper
@@ -2032,15 +2065,16 @@ class SoccerDB:
                 WITH st AS (
                   SELECT s.player_id, s.season, sum(s.minutes) mins
                   FROM v_stats_combined_player s GROUP BY s.player_id, s.season),
-                rt AS (SELECT player_id, season, max(rating) rating
+                rt AS (SELECT player_id, season, max(rating) rating,
+                              any_value(position_group) grp
                        FROM player_ratings_combined GROUP BY player_id, season),
                 best AS (
-                  SELECT st.player_id, st.season, st.mins, rt.rating,
+                  SELECT st.player_id, st.season, st.mins, rt.rating, rt.grp,
                          row_number() OVER (PARTITION BY st.player_id
                                             ORDER BY rt.rating DESC NULLS LAST) rn
                   FROM st LEFT JOIN rt ON rt.player_id = st.player_id AND rt.season = st.season
                   WHERE st.mins >= 900 AND st.season <> ?)
-                SELECT p.player_name, b.season, b.rating, any_value(v.team) team,
+                SELECT p.player_name, b.season, b.rating, b.grp, any_value(v.team) team,
                        max(pe.fpid) fpid
                 FROM best b JOIN players p ON p.player_id = b.player_id
                 LEFT JOIN v_stats_combined_player v
@@ -2049,16 +2083,16 @@ class SoccerDB:
                            WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
                        ON pe.player_id = b.player_id
                 WHERE b.rn = 1 AND strip_accents(lower(p.player_name)) LIKE ?
-                GROUP BY p.player_name, b.season, b.rating
+                GROUP BY p.player_name, b.season, b.rating, b.grp
                 ORDER BY b.rating DESC NULLS LAST LIMIT ?""",
                 [FOCUS_SEASON, "%" + _fold(q) + "%", limit]).fetchall()
-            for player, season, rating, team, fpid in past:
+            for player, season, rating, grp, team, fpid in past:
                 if player.lower() in seen or len(out) >= limit:
                     continue
                 seen.add(player.lower())
-                out.append({"player": player, "position": "CM", "season": season,
+                out.append({"player": player, "position": grp or "CM", "season": season,
                             "season_label": _season_label(season),
-                            "rating": self.atlas_to_fifa(rating, season) if rating else 70,
+                            "rating": self.atlas_to_fifa(rating, season, grp) if rating else 70,
                             "team": team, "photo": self.player_photo(fpid), "past": True})
         return out
 
