@@ -681,6 +681,7 @@ function statRow(s) {
 }
 function matchHTML(r) {
   const o = r.odds || {}, hn = esc(r.home.split(' ')[0]), an = esc(r.away.split(' ')[0]);
+  const xe = r.xg_expected;
   const odds = `<div class="tl-wp"><div class="tl-wpseg you" style="width:${o.home}%">${hn} ${o.home}%</div>
       <div class="tl-wpseg draw" style="width:${o.draw}%">${o.draw >= 10 ? 'Draw ' + o.draw + '%' : ''}</div>
       <div class="tl-wpseg opp" style="width:${o.away}%">${an} ${o.away}%</div></div>
@@ -708,8 +709,10 @@ function matchHTML(r) {
       <div class="tl-sechdr">📊 Match stats</div>
       <div class="tl-mstats">${(r.stats || []).map(statRow).join('')}</div>
       <div class="tl-mfoot"><button class="tl-seasonbtn" id="resimBtn">🔄 Re-simulate</button>${tally}</div>
-      <div class="tl-foot">Goals are drawn from the same Poisson (xG) the odds come from; scorers, assists
-        and bookings are weighted by the same player attributes, roles and tactics. Every re-sim is a fresh draw.</div></div>`;
+      <div class="tl-foot">Each match draws its <b>own xG</b> around the projection${xe ? ` (${hn} ${xe.home.toFixed(2)}, ${an} ${xe.away.toFixed(2)} expected)` : ''},
+        then the goals from that — real match xG swings hard around a side's average, so the same fixture gives a
+        flat afternoon one run and a 4-3 the next. Scorers, assists and bookings are weighted by the same player
+        attributes, roles and tactics, and the odds above integrate over exactly this distribution.</div></div>`;
 }
 
 // ---- Champions League campaign: the whole run, played match by match ----
@@ -818,7 +821,8 @@ function uclHTML(r) {
       <div class="tl-mfoot"><button class="tl-seasonbtn" id="reuclBtn">🔄 Run it again</button>${tally}</div>
       <div class="tl-foot">The field, its points and the qualification bands are the real 2025/26 Champions League;
         your eight matchdays replace your own row in it. Each match's goals are drawn from the same Poisson (xG) the
-        matchup odds use — scaled by the squad-quality gap, home advantage and recent form — and the scorers are
+        matchup odds use — scaled by the squad-quality gap, home advantage and recent form — with each match
+        drawing its own xG around that projection, so the campaign has its flat nights and its 4-1s. Scorers are
         weighted by the same attributes, roles and tactics. Level ties go to extra time, then penalties.</div></div>`;
 }
 

@@ -516,11 +516,28 @@ def _pois(k, lam):
     return math.exp(-lam) * lam ** k / math.factorial(k)
 
 
-def _win_probs(hx, ax):
+def _goal_pmf(k, mean, shape=None):
+    """P(exactly k goals) when the match's own xG is itself uncertain — a Poisson whose mean
+    is drawn from a Gamma around `mean`, which integrates to the negative binomial. This is
+    the marginal the simulators sample from (see _xg_draw), so odds and scorelines agree.
+    `shape=None` falls back to a plain Poisson on a fixed mean."""
+    if not shape:
+        return _pois(k, mean)
+    r = shape
+    p = r / (r + max(0.05, mean))
+    # C(k+r-1, k) * p^r * (1-p)^k, with the binomial coefficient built by ratio so a
+    # non-integer shape stays valid
+    c = 1.0
+    for i in range(k):
+        c *= (r + i) / (i + 1)
+    return c * (p ** r) * ((1 - p) ** k)
+
+
+def _win_probs(hx, ax, shape=None):
     ph = pd = pa = 0.0
-    for i in range(8):
-        for j in range(8):
-            p = _pois(i, hx) * _pois(j, ax)
+    for i in range(9):
+        for j in range(9):
+            p = _goal_pmf(i, hx, shape) * _goal_pmf(j, ax, shape)
             if i > j:
                 ph += p
             elif i == j:
@@ -974,11 +991,13 @@ _POS_CURVE = [(88, 1), (82, 2), (75, 3), (69, 4), (64, 5), (59, 6), (55, 7), (51
 
 
 def _xpts(xg, xga):
-    """Expected points per game from a Poisson (xg, xga) vs an average opponent."""
+    """Expected points per game vs an average opponent, over the same over-dispersed goal
+    model the matches are simulated from (see _xg_draw) rather than a Poisson on a fixed
+    mean — which flattered the strong, because a fixed mean never has an off day."""
     pw = pd = 0.0
-    for i in range(8):
-        for j in range(8):
-            p = _pois(i, xg) * _pois(j, xga)
+    for i in range(9):
+        for j in range(9):
+            p = _goal_pmf(i, xg, _XG_SHAPE) * _goal_pmf(j, xga, _XG_SHAPE)
             if i > j:
                 pw += p
             elif i == j:
@@ -1093,7 +1112,7 @@ def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=No
             om["xg"] = round(om["xg"] * _clamp_f(1 - k * diff, 0.85, 1.15), 2)
             res["form_adj"] = {"home": round(fh, 2), "away": round(fa, 2), "diff": round(diff, 2)}
         res["opponent_metrics"] = om
-        res["win_probs"] = _win_probs(m["xg"], om["xg"])
+        res["win_probs"] = _win_probs(m["xg"], om["xg"], _XG_SHAPE)
         res["battles"] = _battles(u, t, ou, ot)
     return res
 
@@ -1105,10 +1124,26 @@ def team_units(xi, tactics) -> dict:
 
 # ------------------------------------------------- single-match simulation --- #
 # The matchup card gives the ODDS — the whole distribution of results. This plays ONE
-# match out of exactly that distribution: goals are drawn from the same Poisson (xG, xGA)
-# the odds are computed from, then the engine decides WHO scored, who assisted and when,
-# weighted by the same attributes and roles that produced the xG. Re-simulating redraws,
-# so a scoreline is a single sample and the odds are what you'd see over many of them.
+# match out of exactly that distribution: the engine decides WHO scored, who assisted and
+# when, weighted by the same attributes and roles that produced the xG. Re-simulating
+# redraws, so a scoreline is a single sample and the odds are what you'd see over many.
+#
+# The projection is the side's EXPECTED xG, not the xG of any particular afternoon. Real
+# match xG is heavily over-dispersed around it: the fixture that projects 2.0 produces 0.9
+# one week and 3.4 the next, because chances arrive in clusters and the game state (an
+# early goal, a red card, a side chasing it from the 60th minute) reshapes everything after
+# it. So each match draws its own xG from a Gamma around the projection, and the goals come
+# from a Poisson given THAT xG. Compounded, that is the standard Gamma-Poisson (negative
+# binomial) goal model — it produces the goalless draws and the 4-3s a bare Poisson on a
+# fixed mean never gets to. `_win_probs` integrates over the same Gamma, so the odds on the
+# card remain exactly the distribution the scorelines are drawn from.
+_XG_SHAPE = 5.0          # variance = mean^2 / shape, i.e. sd ~= 0.45 x the projection
+
+
+def _xg_draw(rng, mean):
+    """One match's xG, drawn around the model's expectation for it."""
+    m = max(0.05, mean)
+    return round(_clamp_f(rng.gammavariate(_XG_SHAPE, m / _XG_SHAPE), 0.05, 6.0), 2)
 _GOAL_BASE = {"ST": 1.00, "W": 0.58, "AM": 0.46, "WM": 0.34, "CM": 0.22, "DM": 0.10,
               "FB": 0.09, "CB": 0.12}
 _ASSIST_BASE = {"ST": 0.45, "W": 0.95, "AM": 1.00, "WM": 0.88, "CM": 0.66, "DM": 0.32,
@@ -1343,8 +1378,9 @@ def simulate_match(xi, tactics, opp_xi, opponent, team=None, opp_name="Opponent"
     if not base.get("win_probs"):
         return {"available": False}
     rng = random.Random(seed)
-    xgh = base["metrics"]["xg"]
-    xga = base["opponent_metrics"]["xg"]
+    # this match's xG, not the season-long expectation behind the odds
+    xgh = _xg_draw(rng, base["metrics"]["xg"])
+    xga = _xg_draw(rng, base["opponent_metrics"]["xg"])
     gh, ga = _pois_draw(rng, xgh), _pois_draw(rng, xga)
     t = {**DEFAULT_TACTICS, **(tactics or {})}
     ot = {**DEFAULT_TACTICS, **((opponent or {}).get("tactics") or {})}
@@ -1375,7 +1411,7 @@ def simulate_match(xi, tactics, opp_xi, opponent, team=None, opp_name="Opponent"
         "available": True, "home": home_name, "away": opp_name,
         "score": {"home": gh, "away": ga}, "result": res,
         "xg": {"home": xgh, "away": xga},
-        "odds": base["win_probs"], "events": evs, "stats": stats,
+        "odds": base["win_probs"], "xg_expected": {"home": base["metrics"]["xg"], "away": base["opponent_metrics"]["xg"]}, "events": evs, "stats": stats,
         "motm": _motm(xi, opp_xi, evs, gh, ga),
         "story": _match_story(home_name, opp_name, gh, ga, xgh, xga, evs),
         "seed": seed,
@@ -1480,8 +1516,11 @@ def _ucl_xg(A, B, venue):
 
 def _ucl_match(rng, A, B, venue, rnd, label=None):
     """One match of the campaign: goals drawn from that xG pair, then who scored, who
-    laid it on and when — the same weighting the single-match simulator uses."""
-    xg, oxg, poss = _ucl_xg(A, B, venue)
+    laid it on and when — the same weighting the single-match simulator uses. Each match
+    draws its OWN xG around the projection (see _xg_draw), so a campaign has its flat
+    afternoons and its 4-1s rather than the same game replayed eight times."""
+    exg, eoxg, poss = _ucl_xg(A, B, venue)
+    xg, oxg = _xg_draw(rng, exg), _xg_draw(rng, eoxg)
     gf, ga = _pois_draw(rng, xg), _pois_draw(rng, oxg)
     used: set = set()
     evs = (_goal_events(rng, A["xi"], gf, "us", used)
@@ -1496,9 +1535,9 @@ def _ucl_match(rng, A, B, venue, rnd, label=None):
 def _ucl_extra_time(rng, A, B, venue, used):
     """Thirty more minutes when a tie is level — played at a fraction of the 90's rate,
     because sides that reach extra time are usually the ones afraid to lose it."""
-    xg, oxg, _ = _ucl_xg(A, B, venue)
-    gf = _pois_draw(rng, xg * _UCL_ET_RATE)
-    ga = _pois_draw(rng, oxg * _UCL_ET_RATE)
+    exg, eoxg, _ = _ucl_xg(A, B, venue)
+    gf = _pois_draw(rng, _xg_draw(rng, exg * _UCL_ET_RATE))
+    ga = _pois_draw(rng, _xg_draw(rng, eoxg * _UCL_ET_RATE))
     evs = (_goal_events(rng, A["xi"], gf, "us", used, et=True)
            + _goal_events(rng, B["xi"], ga, "them", used, et=True))
     evs.sort(key=lambda e: e["minute"])
