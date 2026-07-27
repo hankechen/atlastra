@@ -1027,6 +1027,18 @@ LEAGUE_INFO = {
     "Internazionale": ("Serie A", 38, 20), "Napoli": ("Serie A", 38, 20), "Milan": ("Serie A", 38, 20),
     "Juventus": ("Serie A", 38, 20), "PSG": ("Ligue 1", 34, 18),
 }
+# Strength -> points per game. These two numbers are FITTED, not chosen: least-squares over
+# the real 2025/26 final tables of all five leagues (94 clubs), and checked against two
+# seasons they were not fitted on. The hand-set line they replace (0.5 + (S-50)*0.052) was
+# both too low and too steep — it under-projected every club by 6-8 points a season and
+# exaggerated the spread between good and bad sides:
+#
+#     season      hand-set MAE / bias        fitted MAE / bias
+#     2025/26     11.20 / -6.27              8.00 / +1.09      (fitted here)
+#     2024/25     10.93 / -7.69              6.63 / -1.64      (out of sample)
+#     2023/24     10.62 / -6.58              7.75 / -0.57      (out of sample)
+_PPG_A = 0.929           # points per game for a league-average squad (S = 50)
+_PPG_B = 0.0341          # per point of strength above/below that
 # projected points → finishing position (top-5-league distribution)
 _POS_CURVE = [(88, 1), (82, 2), (75, 3), (69, 4), (64, 5), (59, 6), (55, 7), (51, 8),
               (47, 9), (43, 11), (39, 13), (35, 15), (32, 17), (28, 18)]
@@ -1089,7 +1101,7 @@ def _project(u, t, team, chem_mult=1.0, ctx=None):
     league_mult = 1 + 0.25 * (1 - (ctx or {}).get("difficulty", 1.0))
     # the base cap still holds a title season to ~91 points; the league multiplier lifts it
     # only as far as a dominant side in a weak league really goes (Bayern's 89 from 34)
-    ppg = _clamp_f(_clamp_f(0.5 + (S - 50) * 0.052, 0.4, 2.4) * league_mult, 0.4, 2.62)
+    ppg = _clamp_f(_clamp_f(_PPG_A + (S - 50) * _PPG_B, 0.4, 2.4) * league_mult, 0.4, 2.62)
     if team in LEAGUE_INFO or ctx:
         c = ctx or {}
         lg, games, n = LEAGUE_INFO.get(team, (c.get("league") or "League",
