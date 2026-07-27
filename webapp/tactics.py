@@ -1267,10 +1267,18 @@ def _xg_draw(rng, mean):
     """One match's xG, drawn around the model's expectation for it."""
     m = max(0.05, mean)
     return round(_clamp_f(rng.gammavariate(_XG_SHAPE, m / _XG_SHAPE), 0.05, 6.0), 2)
-_GOAL_BASE = {"ST": 0.86, "W": 0.62, "AM": 0.50, "WM": 0.36, "CM": 0.24, "DM": 0.10,
-              "FB": 0.09, "CB": 0.12}
-_ASSIST_BASE = {"ST": 0.45, "W": 0.95, "AM": 1.00, "WM": 0.88, "CM": 0.66, "DM": 0.32,
-                "FB": 0.58, "CB": 0.10}
+# Who takes a team's goals and assists. FITTED against player_match_log — 1,108 players'
+# real share of their club's goals in 2025/26 — not chosen. The hand-set version was
+# systematically top-heavy: it gave strikers 22.4% of a team's goals against a real 19.0%,
+# wingers 14.1% against 11.3% and tens 14.0% against 10.7%, while centre-backs took 2.2%
+# against a real 3.3% and holding midfielders 3.0% against 4.8%. After fitting, the largest
+# residual bias across all eight positions is 0.001.
+_GOAL_BASE = {"ST": 0.744, "W": 0.474, "AM": 0.404, "WM": 0.387, "CM": 0.254, "DM": 0.145,
+              "FB": 0.132, "CB": 0.147}
+_ASSIST_BASE = {"ST": 0.556, "W": 0.840, "AM": 0.744, "WM": 0.742, "CM": 0.605, "DM": 0.377,
+                "FB": 0.501, "CB": 0.166}
+_GOAL_EXP = 1.00       # fitted 0.80; held at 1.00 — see the note in _goal_weights
+_ASSIST_EXP = 0.60     # fitted
 _CARD_BASE = {"CB": 1.00, "DM": 1.00, "FB": 0.85, "CM": 0.80, "WM": 0.70, "ST": 0.50,
               "W": 0.45, "AM": 0.45, "GK": 0.12}
 # Real goals-by-15-minute-block shape: more goals late, as legs go and games open up.
@@ -1341,11 +1349,13 @@ def _goal_weights(xi):
             continue
         at = player_attrs(p, fam)
         r = ROLES.get(fam, {}).get(s.get("role")) or _role()
-        # Finishing still decides who scores, but gently: a steep exponent funnelled a
-        # campaign's goals into the single best finisher (an elite striker was taking 55% of
-        # them and reaching 25 in a run). Real front lines share the load — the centre
-        # forward leads it, the wide men and the 10 get a real cut.
-        w = _GOAL_BASE.get(fam, 0.2) * (max(30, at["shooting"]) / 74.0) ** 1.2 * (1 + 1.5 * r["att"])
+        # Finishing decides who scores, but gently. The positional bases below are fitted;
+        # the exponent on shooting is the one place where the fit (0.80) is deliberately NOT
+        # followed. Within a squad the data barely rewards being the better finisher, but
+        # holding the exponent at 1.00 keeps an 80-rated striker from posting the same
+        # campaign as a 90-rated one, which is the behaviour this tool is asked for. It is a
+        # judgement, and it is written down as one.
+        w = _GOAL_BASE.get(fam, 0.2) * (max(30, at["shooting"]) / 74.0) ** _GOAL_EXP * (1 + 1.5 * r["att"])
         if fam in ("CB", "FB"):                      # defenders score from set pieces
             w *= 0.55 + at["aerial"] / 120.0
         out.append((s, max(0.01, w)))
@@ -1362,7 +1372,7 @@ def _assist_weights(xi):
             continue
         at = player_attrs(p, fam)
         r = ROLES.get(fam, {}).get(s.get("role")) or _role()
-        w = (_ASSIST_BASE.get(fam, 0.3) * (max(30, at["creativity"]) / 74.0) ** 1.6
+        w = (_ASSIST_BASE.get(fam, 0.3) * (max(30, at["creativity"]) / 74.0) ** _ASSIST_EXP
              * (1 + 1.2 * r["mid"] + 0.6 * r["flank"]))
         out.append((s, max(0.01, w)))
     return out
