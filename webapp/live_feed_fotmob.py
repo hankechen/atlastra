@@ -390,11 +390,62 @@ def player_heatmap(eid: int, pid: int) -> dict:
 
 
 # ---- prediction: an Atlastra MODEL (FotMob has no 1X2 odds market) -----------
-# Poisson goals model. Each side gets a rating -- FIFA rank for national teams,
-# recent form (PPG + goal diff) for clubs -- turned into expected goals with a small
-# home edge (near-neutral for WC venues), then a 0-8 x 0-8 grid gives 1X2 + the most
-# likely scoreline. Self-contained: no external odds feed, can't be blocked.
+# Club fixtures are predicted by the SAME fitted engine the Tactics Lab uses: a Poisson GLM
+# estimated on 3,358 real team-matches, drawn over-dispersed, and scored against every top-5
+# result of three seasons (log loss 1.00 against a 1.07 baseline). Before this, match pages
+# ran a separate hand-set model — supremacy over 230, a 1.35 base, a 0.65 weight, a 0.20 home
+# edge, all chosen rather than measured, and a plain Poisson that we have since measured as
+# the worse distribution. National teams keep the rating path below: their squads are thin in
+# our data, and FIFA rank is the better signal there. That rating path reads FIFA rank for
+# national teams and recent form (PPG + goal diff) for clubs, blended with squad market value
+# where the lineup is published. Either way a 0-8 x 0-8 grid gives 1X2 + the likeliest
+# scoreline. Self-contained: no external odds feed, can't be blocked.
 import math as _math   # noqa: E402
+
+_PRED_UNITS: dict = {}
+
+
+def _strict_card(name: str):
+    """fifa.match without its surname-only fallback. That third tier is right for the
+    Tactics Lab, where a user types "Mandi" and means the Betis defender -- but here it
+    silently hands a Gibraltar squad LaLiga cards. Full name or initial+surname only."""
+    from webapp import fifa
+    d, f = fifa._load(), fifa._fold(name)
+    t = f.split()
+    return d["full"].get(f) or (d["il"].get(t[0][0] + "|" + t[-1]) if len(t) >= 2 else None)
+
+
+def _squad_units(team_id):
+    """Unit strengths for a club from its live FotMob roster, cached 6h. None if we can't
+    build a credible XI — the caller then falls back to the rating model."""
+    key = str(team_id)
+    hit = _PRED_UNITS.get(key)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    units = None
+    try:
+        from webapp import tactics as _T
+        roster = fotmob_squad(team_id) or []
+        squad = []
+        for m in roster:
+            c = _strict_card(m.get("name") or "")
+            if not c or not c.get("o"):
+                continue
+            squad.append({"player": m["name"], "position": c.get("pos") or "CM",
+                          "rating": c["o"], "per90": {}, "pct": {},
+                          "fifa": {k: c[k] for k in ("o", "pac", "sho", "pas", "dri",
+                                                     "def", "phy", "hea")}})
+        # Coverage gate, not just a count. A Gibraltar or Faroese side reaches 11 cards only
+        # by matching loosely, so a low carded share means the XI we would build is fiction --
+        # fall back to the rating model rather than predict off phantom players.
+        if len(squad) >= 11 and roster and len(squad) / len(roster) >= 0.6:
+            xi = _T.build_xi(squad, "4-3-3")
+            if xi and sum(1 for x in xi if x.get("player")) >= 11:
+                units = _T._units(xi)
+    except Exception:                                      # noqa: BLE001
+        units = None
+    _PRED_UNITS[key] = (time.time() + 6 * 3600, units)
+    return units
 
 
 def _rank_elo(rank):
@@ -461,18 +512,31 @@ def _model(eid):
     hq, aq = _quality_elos(eid, h["home_id"], h["away_id"])
     if hq is not None:
         hr, ar = 0.6 * hr + 0.4 * hq, 0.6 * ar + 0.4 * aq
-    adv = 0.20 * (0.4 if h["home_national"] else 1.0)     # WC venues ~neutral
-    # Stronger supremacy (wider clamp + 0.65 weight vs the old 0.5) so lopsided games push
-    # the favourite's expected goals up to ~3-4 -> 3-0/4-0 scorelines become likely, not
-    # just 2-0. Even games stay ~1.4 each.
-    sup = max(-3.0, min(3.0, (hr - ar) / 230.0))
-    hx = max(0.2, 1.35 + sup * 0.65 + adv)
-    ax = max(0.2, 1.35 - sup * 0.65)
+    # The fitted engine where we can build both squads; the rating model where we can't.
+    shape = None
+    hu = au = None
+    if not h["home_national"] and not h["away_national"]:
+        hu, au = _squad_units(h["home_id"]), _squad_units(h["away_id"])
+    if hu and au:
+        from webapp import tactics as _T
+        hx = max(0.2, _T._base_xg(hu, au) * _T._UCL_HOME_XG)
+        ax = max(0.2, _T._base_xg(au, hu) * _T._UCL_AWAY_XG)
+        shape = _T._XG_SHAPE                               # over-dispersed, as validated
+        pmf = _T._goal_pmf
+    else:
+        adv = 0.20 * (0.4 if h["home_national"] else 1.0)     # WC venues ~neutral
+        # Stronger supremacy (wider clamp + 0.65 weight vs the old 0.5) so lopsided games push
+        # the favourite's expected goals up to ~3-4 -> 3-0/4-0 scorelines become likely, not
+        # just 2-0. Even games stay ~1.4 each.
+        sup = max(-3.0, min(3.0, (hr - ar) / 230.0))
+        hx = max(0.2, 1.35 + sup * 0.65 + adv)
+        ax = max(0.2, 1.35 - sup * 0.65)
+        pmf = (lambda k, lam, _s=None: _pois(k, lam))
     ph = pd = pa = 0.0
     grid = []
     for i in range(9):
         for j in range(9):
-            p = _pois(i, hx) * _pois(j, ax)
+            p = pmf(i, hx, shape) * pmf(j, ax, shape)
             grid.append(((i, j), p))
             if i > j:
                 ph += p
@@ -508,7 +572,8 @@ def _model(eid):
     scores = [{"home": i, "away": j, "pct": round(p / tot * 100)} for (i, j), p in score_grid[:3]]
     best = score_grid[0][0]
     return {"consensus": cons, "predicted": predicted, "score": best, "scores": scores,
-            "result": predicted, "conf": round(max(ph, pd, pa) / tot * 100)}
+            "result": predicted, "conf": round(max(ph, pd, pa) / tot * 100),
+            "source": "fitted" if shape else "rating"}
 
 
 def prediction(eid: int) -> dict:
@@ -516,7 +581,7 @@ def prediction(eid: int) -> dict:
     if not m:
         return {"available": False, "consensus": None, "books": []}
     return {"available": True, "consensus": m["consensus"], "predicted": m["predicted"],
-            "books": [], "n_books": 0, "source": "model"}
+            "books": [], "n_books": 0, "source": m.get("source", "model")}
 
 
 def score_prediction(eid: int, consensus=None):

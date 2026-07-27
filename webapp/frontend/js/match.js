@@ -200,15 +200,18 @@ async function loadPrediction() {
       <div class="asp-note">🔮 Most likely${s.live ? ' final' : ''}: <b>${esc(teams.home)} ${scores[0].home}–${scores[0].away} ${esc(teams.away)}</b></div>
     </section>` : '';
   // Atlastra model (no bookmaker feed) vs bookmaker-consensus rendering
-  const isModel = d.source === 'model' || !(d.books && d.books.length);
-  const srcLabel = isModel ? 'Atlastra model' : `${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}`;
+  const isModel = !(d.books && d.books.length);
+  const fitted = d.source === 'fitted';
+  const srcLabel = isModel ? (fitted ? 'Atlastra model · fitted' : 'Atlastra model') : `${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}`;
   const oddsSection = (d.books && d.books.length) ? `
       <div class="card-h" style="margin-top:18px"><h3>Bookmaker odds <span class="muted" style="font-weight:400">(decimal)</span></h3></div>
       <div class="ltbl-wrap"><table class="ltbl">
         <thead><tr><th class="tl">Source</th><th>${esc(teams.home)}</th><th>Draw</th><th>${esc(teams.away)}</th></tr></thead>
         <tbody>${oddsRows}</tbody></table></div>
       <div class="placeholder-note" style="margin-top:10px">Win probabilities are implied from bookmaker 1X2 odds with the margin removed, averaged across sources. Not betting advice.</div>`
-    : `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: win probabilities from each side's strength — FIFA ranking for nations, recent form (results + goal difference) for clubs — with a small home edge, run through a Poisson goals model. Not betting advice.</div>`;
+    : fitted
+    ? `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: each side's squad is scored into attack, midfield, defence and goalkeeping strength, and a goals model <b>fitted on 3,358 real team-matches</b> turns the two into expected goals. Scored against three full seasons of results, it beats a home-advantage-only baseline (log loss 1.00 vs 1.07). Same engine as the Tactics Lab. Not betting advice.</div>`
+    : `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: win probabilities from each side's strength — FIFA ranking for nations, recent form (results + goal difference) for clubs — with a small home edge, run through a Poisson goals model. Used where we don't hold enough squad data to run the fitted engine. Not betting advice.</div>`;
   body().innerHTML = aspCard + `<section class="card">
       <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live</span> · ' : ''}${srcLabel}</span></div>
       <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% ${isModel ? 'modelled' : 'implied'}</span></div>
