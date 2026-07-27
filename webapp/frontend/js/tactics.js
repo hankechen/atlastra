@@ -101,12 +101,12 @@ function chipHTML(s) {
   const p = s.player, nm = p ? surname(p.player) : '—';
   const yr = p ? seasonOf(p.player) : '';
   const ph = p && p.photo ? `<img src="${esc(p.photo)}" alt="" loading="lazy" draggable="false">` : '';
-  // Form badge, both ways: ⚡ a breakout season the EA FC card underrates, ↓ a season
+  // Form badge, both ways: ⚡ a breakout season his base rating underrates, ↓ a season
   // running below what the card promises (capped at half the upside — see _breakout_boost).
   const brk = p && p.breakout
     ? (p.breakout > 0
-      ? `<i class="tl-brk" title="Breakout season — Atlas rating above FIFA, rating boosted +${p.breakout}">⚡</i>`
-      : `<i class="tl-brk down" title="Below his card — Atlas rating under FIFA, rating cut ${p.breakout}">↓</i>`)
+      ? `<i class="tl-brk" title="Breakout season — this season's form is ahead of his base rating, boosted +${p.breakout}">⚡</i>`
+      : `<i class="tl-brk down" title="Below his usual level this season — rating cut ${p.breakout}">↓</i>`)
     : '';
   return `<button class="tl-chip" style="left:${s.x}%;bottom:${s.y}%" data-slot="${s.id}">
       <span class="tl-phwrap"><span class="tl-ph">${ph}</span><i class="tl-rt">${p ? p.rating : '-'}</i>${brk}</span>
@@ -605,7 +605,7 @@ function renderResults(r) {
     ${vizCard(r.viz)}
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Projected Metrics</h3>${prev ? '<span class="muted">Δ vs last run</span>' : ''}</div><div class="tl-metrics">${metrics}</div></section>
-      <section class="card tl-card"><div class="card-h"><h3>Unit Strengths</h3></div>${units}<div class="tl-foot">Ratings &amp; attributes are EA FC / FIFA 26 player cards (stable, ability-based) — pace, shooting, passing &amp; defending are real card values, not season stats.</div></section>
+      <section class="card tl-card"><div class="card-h"><h3>Unit Strengths</h3></div>${units}<div class="tl-foot">Units aggregate each player's ability ratings — pace, shooting, passing, defending — which are ability-based rather than season-dependent, so a good player in a poor season still rates as one. Past-season players are priced from their own output that year.</div></section>
     </div>
     ${chemCard(r.chemistry)}
     ${subsCard()}

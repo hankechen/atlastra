@@ -52,8 +52,10 @@ Phase One use cases are live in a web UI (**Atlastra**), alongside the following
 
 ## Tactics Lab
 The largest single feature (`/tactics.html`, `webapp/tactics.py`) — a tactical sandbox that is
-deliberately **not** a black box: every projected number is a documented function of real player
-attributes and the settings you chose, so it can explain *why* a setup works.
+deliberately **not** a black box: every projected number is either **fitted to real results and scored
+against them** (`tools/backtest.py`) or a documented judgement, and the interface says which is which.
+Expected goals come from a Poisson model fitted to thousands of real matches; player ability, twelve
+seasons of per-90 output, real league tables and the real Champions League field all feed it.
 
 - **Build an XI** — pick a club or a national side, or start from an empty pitch and build your own
   team from the whole player universe. Both your side and the opposition are fully editable: drag
@@ -88,9 +90,11 @@ The suggested APIs (Football API, Sportmonks, RapidAPI) were not used; the data 
   server-side with no scraper on a home machine (`ATLASTRA_FOTMOB=1`).
 - **SofaScore** — Champions League player stats (back to 08/09) and season heatmaps. It blocks
   datacentre IPs, so it is no longer used for anything live.
-- **EA FC / FIFA 26 player cards** — ability-based ratings and attributes that drive the Tactics Lab
-  (`data/fifa_ratings.json`), chosen over our own percentile rating because it is stable rather than
-  season-dependent
+- **Player ability ratings** — a stable, ability-based rating and attribute set per player
+  (`data/fifa_ratings.json`, derived from the EA FC 26 dataset), used as ONE input to the Tactics Lab
+  alongside twelve seasons of per-90 output, real match results and the real league tables. Preferred
+  over our own percentile rating for the squad-strength inputs because it is stable rather than
+  season-dependent; every number the Lab actually predicts with is fitted to real results on top of it
 - **datamb (Wyscout)** — current-season advanced per-90 metrics (progressive actions, signature actions)
 - **Transfermarkt** — market values · **Wikimedia Commons** — licensed player photos
 - **Claude API (Opus 4.8)** — optional, powers the Scout Report when a key is set
