@@ -98,6 +98,13 @@ Predicted probabilities track reality closely across the range (of the matches c
 two-thirds finish that way), and the season card shows its own error bar — "79 ± 8 pts" — because the
 backtest knows what that number is worth.
 
+`python -m tools.fit` is the other half: it re-derives those constants from the warehouse and prints
+each one beside the value currently in the source. The backtest can tell you a constant is wrong; the
+fitter tells you what it should be. It writes nothing — a fit worth adopting is worth reading first,
+and a few constants are deliberately held away from their fitted value for reasons the data cannot
+see. It also reports what it *cannot* re-derive (the unit weights, the role and chemistry constants),
+so the boundary between measured and chosen stays visible rather than implied.
+
 **What is fitted, and what is judgement.** The interface says so on the page, and so does this:
 
 - **fitted to real results** — expected goals (a Poisson GLM on 3,358 team-matches, the Maher /
@@ -142,6 +149,8 @@ python -m webapp.server                    # → http://localhost:8000
 ATLASTRA_FOTMOB=1 python -m webapp.server  # with the live feed + Tactics Lab club squads
 python -m tools.backtest                   # score the engine against real results
 python -m tools.backtest --season 2425 --weaknesses
+python -m tools.fit                        # re-derive the fitted constants, print a diff
+python -m tools.fit --only xg --season 2425
 ```
 The Scout Report's AI mode is optional: `ANTHROPIC_API_KEY=sk-ant-... python -m webapp.server` (without it, the offline report engine is used).
 
