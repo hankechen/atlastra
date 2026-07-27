@@ -516,6 +516,11 @@ _XG_OPP_DEFENSE = -1.0831
 _XG_OPP_GK = -0.9979
 _XG_OPP_AERIAL = -0.7580
 _XG_HOME = 0.2250            # the fitted venue split: x1.12 at home, x0.89 away
+# Pressing, measured. _PPDA_MID is the real median PPDA across 21,464 team-matches; the
+# exponent is the fitted coefficient on log(PPDA) for goals scored, squad quality held
+# constant. Positive means pressing harder scores slightly LESS.
+_PPDA_MID = 11.3
+_PPDA_XG_B = 0.1288
 
 
 def _base_xg(u: dict, ou: dict) -> float:
@@ -560,6 +565,15 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
                   - 5 * (d("tempo") - o("tempo")), 26, 76)
     terr = round(_clamp(50 + (poss - 50) * 0.6 + 30 * d("line_height") * 0.5
                         - 10 * d("counter"), 12, 88))
+    # PPDA: the slider sets the intent, the ROLES supply the legs — a side full of
+    # ball-winners and pressing forwards gets after it harder than the same slider with a
+    # free 10 and a deep-lying playmaker standing off. Calibrated to the real distribution
+    # across 21,464 team-matches: median 11.3, 5th percentile 5.3, 95th 25.5. The old
+    # formula sat at 13.5 in the middle, i.e. it called a neutral setup more passive than
+    # four out of five real teams.
+    ppda = round(_clamp_f(_PPDA_MID - (t.get("press", 50) - 50) / 6.4
+                          - (t.get("line_height", 50) - 50) / 14.0
+                          - 3.5 * u.get("press_roles", 0.0), 4.5, 26), 1)
     # attack: the fitted core, then the tactical adjustments on top of it
     att = _base_xg(u, ou)
     att *= (1
@@ -569,8 +583,13 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
             - 0.07 * max(0.0, d("counter"))                        # ...but you attack less often
             + 0.06 * d("directness") * o("line_height")            # hit the space early
             - 0.04 * max(0.0, d("directness"))                     # ...or hand it straight back
-            + 0.09 * d("press")                                    # turnovers high up the pitch
             + 0.07 * d("tempo"))                                   # more sequences per game
+    # Pressing, as measured rather than as assumed. Fitted on 2025/26 with squad quality
+    # held constant, the coefficient on log(PPDA) for goals SCORED is +0.129 — a side that
+    # presses hard (PPDA 6) scores about 8% FEWER goals than one at the median, not more.
+    # The raw correlation says the opposite (-0.19) purely because good teams both press and
+    # score; controlling for the squad reverses it. The engine used to hand out +9% here.
+    att *= (ppda / _PPDA_MID) ** _PPDA_XG_B
     att *= 1 - 0.12 * o("compactness")            # their block, on top of their squad
     # where the game is played: a side pinned in its own half simply gets fewer goes at it
     att *= 1 + 0.16 * ((terr - 50) / 50.0)
@@ -582,19 +601,15 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
     xga *= 1 - 0.16 * d("compactness")                       # a compact block denies the pockets
     xga *= 1 - 0.08 * max(0.0, d("counter"))                 # sitting in cedes territory, not chances
     xga *= 1 + 0.06 * d("tempo")                             # an end-to-end game runs both ways
-    # pressing high wins it back closer to their goal — worth most with legs up front, and
-    # a liability against a side comfortable playing through it
-    xga *= 1 - 0.14 * d("press") * (0.6 + 0.5 * _clamp_f((u["att_pace"] - 72) / 14.0, -1.0, 1.0))
-    risk_press = 1 + 0.14 * d("press") * (0.5 + 0.5 * _clamp_f((ou["press_resist"] - 74) / 12.0,
-                                                               -1.0, 1.0))
+    # Pressing and what you concede: fitted at -0.0007 on log(PPDA), which is nothing, and
+    # adding it made out-of-fold prediction very slightly WORSE. So the two terms that used
+    # to live here — a 14% bonus for winning the ball high and a 14% penalty against a
+    # press-resistant side — are gone. Pressing costs a little going forward and saves
+    # nothing at the back, which is what the data says whether or not it is what we expect.
+    # The line-height risk below is NOT measured (nothing records how high a side pushed
+    # its line); it stays as a documented judgement.
     risk_line = 1 + 0.16 * d("line_height") * _clamp_f((73 - u["def_pace"]) / 30.0, -0.5, 1.0)
-    xga = round(_clamp_f(xga * risk_line * risk_press, 0.20, 3.6), 2)
-    # PPDA: the slider sets the intent, the ROLES supply the legs — a side full of
-    # ball-winners and pressing forwards gets after it harder than the same slider with a
-    # free 10 and a deep-lying playmaker standing off.
-    ppda = round(_clamp_f(13.5 - (t.get("press", 50) - 50) / 7.0
-                          - (t.get("line_height", 50) - 50) / 15.0
-                          - 3.5 * u.get("press_roles", 0.0), 5, 20), 1)
+    xga = round(_clamp_f(xga * risk_line, 0.20, 3.6), 2)
     prog = round(_clamp(0.7 * u["midfield"] + 0.3 * u["press_resist"] + 8 * d("directness")))
     return {"possession": round(poss), "xg": xg, "xga": xga, "ppda": ppda,
             "progression": prog, "territory": terr}
