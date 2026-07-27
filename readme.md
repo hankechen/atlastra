@@ -68,7 +68,8 @@ seasons of per-90 output, real league tables and the real Champions League field
   width against a narrow block, counter-attacking against a high line, pressing against a side that
   plays through it.
 - **Output** — projected xG/xGA, possession, PPDA, progression and territory; unit strengths; ranked
-  tactical weaknesses with reasons; closest famous-side style match; a passing-network and average-
+  tactical weaknesses with reasons; the real club-seasons whose measured profile is closest to your
+  setup; a passing-network and average-
   position map; playstyle **chemistry** listing every synergy and clash by name; and an AI analyst read.
 - **Simulations** — a full-season projection with the real league table, a single match played out of
   the matchup's own odds (scorers, assists, bookings, timeline, man of the match), and a complete
@@ -80,6 +81,38 @@ seasons of per-90 output, real league tables and the real Champions League field
   synthesised from that season's output.
 - **Share a setup** — one link reopens the exact build: formation, sliders, every slot, both sides,
   added players and past seasons. It encodes only what you changed, so links stay short.
+
+### How good it is, and how we know
+`python -m tools.backtest` scores the engine against real results — every top-5 match of a season for
+the odds, every final table for the projection, and the weakness rules for whether they hold up. It is
+in the repo precisely so a change gets measured instead of argued about. Current standing:
+
+| | Tactics Lab | baseline (season base rates) |
+|---|---|---|
+| 1X2 log loss, 2025/26 (1,679 matches) | **1.0003** | 1.0696 |
+| 1X2 log loss, 2024/25 · 2023/24 | **1.0135 · 1.0057** | 1.0783 · 1.0729 |
+| top-pick accuracy | **51.5%** | 44.4% |
+| season points | **MAE 7.8, unbiased** | — |
+
+Predicted probabilities track reality closely across the range (of the matches called 60-70%, about
+two-thirds finish that way), and the season card shows its own error bar — "79 ± 8 pts" — because the
+backtest knows what that number is worth.
+
+**What is fitted, and what is judgement.** The interface says so on the page, and so does this:
+
+- **fitted to real results** — expected goals (a Poisson GLM on 3,358 team-matches, the Maher /
+  Dixon-Coles form), the strength→points line (fitted to real final tables), the pressing effect
+  (fitted to real PPDA — and it reversed the sign the engine had assumed), who takes a team's goals
+  and assists (fitted to 1,108 players' real shares), and the attacking unit's attribute weights
+- **measured, not invented** — the style comparison runs against real club-seasons' xG and PPDA
+  profiles; one weakness rule is confirmed against a season of results and carries a badge
+- **editorial** — roles, role fit and chemistry. Nothing in the warehouse records which role a player
+  was actually given, so they can be neither fitted nor falsified; they are labelled as judgement in
+  the UI and only ever nudge the numbers
+
+Roughly 60% of what the Lab tells you is now fitted or measured, and ~75% of the part that makes
+predictions. Getting past that needs event or tracking data with player positions, not more of the
+same data.
 
 ## Data sources
 The suggested APIs (Football API, Sportmonks, RapidAPI) were not used; the data is assembled by scraping/ingesting public sources into the DuckDB warehouse:
@@ -107,6 +140,8 @@ The suggested APIs (Football API, Sportmonks, RapidAPI) were not used; the data 
 ```
 python -m webapp.server                    # → http://localhost:8000
 ATLASTRA_FOTMOB=1 python -m webapp.server  # with the live feed + Tactics Lab club squads
+python -m tools.backtest                   # score the engine against real results
+python -m tools.backtest --season 2425 --weaknesses
 ```
 The Scout Report's AI mode is optional: `ANTHROPIC_API_KEY=sk-ant-... python -m webapp.server` (without it, the offline report engine is used).
 
