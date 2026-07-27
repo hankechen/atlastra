@@ -476,6 +476,45 @@ def _league_ctx(d, team):
     return ctx
 
 
+# ---- what real sides actually play like ------------------------------------------- #
+# The style comparison used to run against hand-typed vectors for famous teams. This builds
+# the real thing instead: every club-season's average xG for, xG against and PPDA, turned
+# into percentiles of all club-seasons, so "your setup plays like X" is a measurement rather
+# than somebody's impression of Guardiola. Cached for the process — it is a static query.
+_STYLE_REF: dict = {}
+
+
+def _style_catalogue(d):
+    """{'teams': [(label, [pct_xg, pct_xga_inv, pct_press]), ...], 'xg': [...], ...}"""
+    if _STYLE_REF.get("teams"):
+        return _STYLE_REF
+    try:
+        rows = d.con.execute("""
+            SELECT m.season, t.team_name, avg(m.xg_for), avg(m.xg_against), avg(m.ppda),
+                   count(*) n
+            FROM team_match_stats m JOIN teams t ON t.team_id = m.team_id
+            WHERE m.xg_for IS NOT NULL AND m.ppda IS NOT NULL
+            GROUP BY 1, 2 HAVING count(*) >= 25""").fetchall()
+    except Exception:                                     # noqa: BLE001
+        return {}
+    if not rows:
+        return {}
+    xg = sorted(r[2] for r in rows)
+    xga = sorted(r[3] for r in rows)
+    ppda = sorted(r[4] for r in rows)
+
+    def pct(v, arr, invert=False):
+        lo = sum(1 for x in arr if x < v)
+        p = 100.0 * lo / len(arr)
+        return 100.0 - p if invert else p
+    teams = []
+    for season, name, a, b, c, _n in rows:
+        label = f"{season[:2]}/{season[2:]} {name}"
+        teams.append((label, [pct(a, xg), pct(b, xga, True), pct(c, ppda, True)]))
+    _STYLE_REF.update({"teams": teams, "xg": xg, "xga": xga, "ppda": ppda})
+    return _STYLE_REF
+
+
 _TAC_ADVISOR: dict = {}                                   # cache: prompt-hash -> text
 
 
@@ -1134,7 +1173,8 @@ class Handler(BaseHTTPRequestHandler):
                     fh, fa = fh_info.get("form"), fa_info.get("form")
                 res = tactics.simulate(xi, b.get("tactics"), opponent=opp, team=team,
                                        form_home=fh, form_away=fa,
-                                       league_ctx=_league_ctx(d, team))
+                                       league_ctx=_league_ctx(d, team),
+                                       style_ref=_style_catalogue(d))
                 if opp:
                     res["form"] = {"home": fh_info, "away": fa_info}
             self._json(res)

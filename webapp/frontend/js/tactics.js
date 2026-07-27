@@ -611,7 +611,7 @@ function renderResults(r) {
     ${subsCard()}
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Tactical Weaknesses</h3></div>${weak}</section>
-      <section class="card tl-card"><div class="card-h"><h3>Style Match</h3><span class="muted">closest famous sides</span></div>${style}
+      <section class="card tl-card"><div class="card-h"><h3>Style Match</h3><span class="muted">real sides with the closest profile</span></div>${style}
         <div class="tl-measured">📏 <b>What's measured, what's judged.</b> Expected goals, the points line,
           the pressing effect and who takes the goals are <b>fitted to real results</b> and scored by
           <code>tools/backtest.py</code>. Roles, role fit and chemistry are <b>editorial</b> — nothing

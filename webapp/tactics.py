@@ -753,15 +753,47 @@ def _weaknesses(xi, u, t, m) -> list[dict]:
 
 
 # ---------------------------------------------------------- style + battles -- #
-def _style_match(t: dict, m: dict) -> list[dict]:
-    # Distance-based similarity over the tactical fingerprint (cosine is too flat when
-    # every dimension is a positive 0-100 value). Closer vector = higher %.
-    vec = [m["possession"], t.get("press", 50), t.get("line_height", 50),
-           t.get("directness", 50), t.get("width", 50), t.get("counter", 50)]
+def _pct_in(value, sorted_vals, invert=False):
+    """Where a number falls in a real distribution, 0-100."""
+    if not sorted_vals:
+        return 50.0
+    n = len(sorted_vals)
+    lo = 0
+    for v in sorted_vals:                                # small lists; a scan is fine
+        if v < value:
+            lo += 1
+    p = 100.0 * lo / n
+    return 100.0 - p if invert else p
+
+
+def _style_match(t: dict, m: dict, ref: dict | None = None) -> list[dict]:
+    """Which real side does this setup play like?
+
+    The comparison used to run against nineteen hand-typed vectors for famous teams —
+    "Guardiola City '23" as [82, 74, 72, 30, 66, 20], a number somebody chose. It now runs
+    against MEASURED team-seasons: every club's real xG for, xG against and PPDA, averaged
+    over a season and expressed as a percentile of all of them. The three axes are the ones
+    where the engine's own output is on the same scale as the warehouse's measurement, so
+    the two sides of the comparison mean the same thing.
+
+    `ref` is supplied by the server (see _style_catalogue). Without it the old fingerprints
+    are used, so the engine still runs standalone."""
+    if not ref or not ref.get("teams"):
+        vec = [m["possession"], t.get("press", 50), t.get("line_height", 50),
+               t.get("directness", 50), t.get("width", 50), t.get("counter", 50)]
+        out = []
+        for name, r in STYLES.items():
+            dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(vec, r)) / len(vec))
+            out.append({"name": name, "pct": round(_clamp_f(1 - dist / 55.0, 0, 1) * 100)})
+        out.sort(key=lambda x: -x["pct"])
+        return out[:4]
+    mine = [_pct_in(m["xg"], ref["xg"]),
+            _pct_in(m["xga"], ref["xga"], invert=True),      # fewer conceded = higher
+            _pct_in(m["ppda"], ref["ppda"], invert=True)]    # lower PPDA = presses more
     out = []
-    for name, ref in STYLES.items():
-        dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(vec, ref)) / len(vec))
-        out.append({"name": name, "pct": round(_clamp_f(1 - dist / 55.0, 0, 1) * 100)})
+    for name, vec in ref["teams"]:
+        dist = math.sqrt(sum((a - b) ** 2 for a, b in zip(mine, vec)) / len(mine))
+        out.append({"name": name, "pct": round(_clamp_f(1 - dist / 60.0, 0, 1) * 100)})
     out.sort(key=lambda x: -x["pct"])
     return out[:4]
 
@@ -1202,7 +1234,7 @@ def _project(u, t, team, chem_mult=1.0, ctx=None):
 
 # ------------------------------------------------------------------ main ----- #
 def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=None,
-             league_ctx=None) -> dict:
+             league_ctx=None, style_ref=None) -> dict:
     """xi: list of slots each {family,line,role,player}. tactics: slider dict.
     opponent (optional): {'units': {...}, 'tactics': {...}, 'name': str}.
     form_home/form_away (optional): signed recent-form ratings (~-1..+1, see
@@ -1223,7 +1255,7 @@ def simulate(xi, tactics, opponent=None, team=None, form_home=None, form_away=No
     chem_mult = _clamp_f(1 + 0.006 * (chem["score"] - _CHEM_BASE), 0.90, 1.10)
     m["xg"] = round(m["xg"] * chem_mult, 2)
     res = {"units": {k: round(v) for k, v in u.items()}, "metrics": m, "chemistry": chem,
-           "weaknesses": _weaknesses(xi, u, t, m), "style": _style_match(t, m),
+           "weaknesses": _weaknesses(xi, u, t, m), "style": _style_match(t, m, style_ref),
            "viz": _viz(xi, t, m)}
     if team:
         res["projection"] = _project(u, t, team, chem_mult, league_ctx)
