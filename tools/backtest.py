@@ -155,17 +155,67 @@ def backtest_points(db, season):
     print("  biggest misses: " + ", ".join(f"{t} {p} vs {a}" for p, a, t in worst))
 
 
+def backtest_weaknesses(db, season):
+    """Each squad-keyed weakness rule is a claim that a flagged side concedes more than the
+    model expects. Test it: mean residual (actual goals against minus expected) for flagged
+    clubs versus the rest."""
+    import math as _math
+    rows = db.con.execute("""
+        SELECT th.team_name, ta.team_name, m.goals_against, lh.fotmob_team_id, la.fotmob_team_id
+        FROM team_match_stats m
+        JOIN teams th ON th.team_id = m.team_id
+        JOIN teams ta ON ta.team_id = m.opponent_team_id
+        JOIN team_logos lh ON lh.team_id = m.team_id
+        JOIN team_logos la ON la.team_id = m.opponent_team_id
+        WHERE m.season = ? AND m.goals_against IS NOT NULL
+          AND lh.fotmob_team_id IS NOT NULL AND la.fotmob_team_id IS NOT NULL""", [season]).fetchall()
+    units = {}
+    for h, a, _ga, hid, aid in rows:
+        for name, fid in ((h, hid), (a, aid)):
+            if name not in units:
+                squad = server._tac_squad(db, name, tid=int(fid))
+                xi = T.build_xi(squad, "4-3-3") if squad else []
+                units[name] = T._units(xi) if xi and any(s.get("player") for s in xi) else None
+    resid = {}
+    for h, a, ga, _hid, _aid in rows:
+        u, ou = units.get(h), units.get(a)
+        if not u or not ou:
+            continue
+        resid.setdefault(h, []).append(ga - T._base_xg(ou, u) * T._UCL_AWAY_XG)
+    rules = {"aerial < 68": lambda u: u["aerial"] < 68,
+             "def_pace < 68": lambda u: u["def_pace"] < 68,
+             "press_resist < 72": lambda u: u["press_resist"] < 72,
+             "midfield < 75": lambda u: u["midfield"] < 75,
+             "gk < 75": lambda u: u["gk"] < 75}
+    print(f"\n=== weakness rules, {season} ===")
+    print("  a rule earns its place if flagged clubs concede MORE than the model expects\n")
+    print(f"  {'rule':<24}{'flagged':>9}{'flagged':>10}{'others':>9}{'z':>7}")
+    for name, fn in rules.items():
+        f = [st.mean(resid[t]) for t in resid if units.get(t) and fn(units[t])]
+        o = [st.mean(resid[t]) for t in resid if units.get(t) and not fn(units[t])]
+        if len(f) < 5 or len(o) < 5:
+            print(f"  {name:<24}{len(f):>9}{'too few to test':>26}")
+            continue
+        se = _math.sqrt(st.pvariance(f) / len(f) + st.pvariance(o) / len(o)) or 1e-9
+        z = (st.mean(f) - st.mean(o)) / se
+        print(f"  {name:<24}{len(f):>9}{st.mean(f):>+10.3f}{st.mean(o):>+9.3f}{z:>+7.1f}"
+              + ("   supported" if z > 1.6 else ("   BACKWARDS" if z < -1.6 else "   no signal")))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Score the Tactics Lab engine against real results.")
     ap.add_argument("--season", default="2526")
     ap.add_argument("--skip-odds", action="store_true")
     ap.add_argument("--skip-points", action="store_true")
+    ap.add_argument("--weaknesses", action="store_true", help="also test the weakness rules")
     args = ap.parse_args()
     with SoccerDB(read_only=True) as db:
         if not args.skip_odds:
             backtest_odds(db, args.season)
         if not args.skip_points:
             backtest_points(db, args.season)
+        if args.weaknesses:
+            backtest_weaknesses(db, args.season)
 
 
 if __name__ == "__main__":

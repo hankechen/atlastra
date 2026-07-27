@@ -582,7 +582,7 @@ function renderResults(r) {
     }
     return `<div class="tl-metric"><span class="tl-mk">${lbl}</span><b>${val}</b>${delta}</div>`;
   }).join('');
-  const weak = (r.weaknesses || []).length ? r.weaknesses.map((w) => `<div class="tl-weak sev-${w.severity}"><div class="tl-wt">⚠ ${esc(w.title)}</div><div class="tl-wr">${esc(w.reason)}</div></div>`).join('')
+  const weak = (r.weaknesses || []).length ? r.weaknesses.map((w) => `<div class="tl-weak sev-${w.severity}"><div class="tl-wt">⚠ ${esc(w.title)}${w.tested ? '<i class="tl-tested" title="Tested against a full season of results: clubs flagged by this rule do concede more than the model expects">measured</i>' : ''}</div><div class="tl-wr">${esc(w.reason)}</div></div>`).join('')
     : '<div class="tl-noweak">✓ No major structural weaknesses flagged for this setup.</div>';
   const style = (r.style || []).map((s) => `<div class="tl-styl"><span>${esc(s.name)}</span><span class="tl-utrack sm"><i style="width:${s.pct}%"></i></span><b>${s.pct}%</b></div>`).join('');
 

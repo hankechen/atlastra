@@ -671,6 +671,21 @@ def _find(xi, sid=None, fam=None):
     return None
 
 
+# Which of these rules survive contact with the results. Each one keyed on the SQUAD is a
+# falsifiable claim — a flagged side should concede more than the model expects — and
+# tools/backtest.py --weaknesses tests exactly that over a full season:
+#
+#     press-resistance under 72   flagged concede +0.17 vs +0.05   z = +2.2   SUPPORTED
+#     midfield under 75                          +0.19 vs +0.14    z = +1.0   no signal
+#     defensive pace under 68                    +0.20 vs +0.15    z = +1.0   no signal
+#     keeper under 75                            +0.19 vs +0.16    z = +0.4   no signal
+#     aerial under 68                            +0.10 vs +0.17    z = -1.5   points BACKWARDS
+#
+# Only the first is carried as measured. The rest are kept because they describe a real
+# structural feature of a side and users act on them, but they are flagged `tested: False`
+# in the payload so the interface can say which is which — and the aerial one is on notice.
+# The rules keyed on SLIDER settings can't be tested at all: nothing records how compact a
+# real team actually was.
 def _weaknesses(xi, u, t, m) -> list[dict]:
     out = []
     # miscast players: a starter asked to play a role his attributes don't support. The
@@ -732,6 +747,7 @@ def _weaknesses(xi, u, t, m) -> list[dict]:
         gk_role = gk.get("role") if gk else ""
         if gk_role != "Sweeper Keeper":
             out.append({"title": "Vulnerable building out under pressure", "severity": "med",
+                    "tested": True,
                         "reason": f"You've set a patient, short build-up but the back line's passing "
                         f"under pressure is modest (press-resistance {round(u['press_resist'])}). A "
                         f"high press can force turnovers in dangerous areas."})
