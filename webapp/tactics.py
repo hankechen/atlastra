@@ -432,7 +432,13 @@ def _units(xi: list[dict]) -> dict:
             continue
         # attacking contribution (front + creative mids)
         if line == "ATT" or fam in ("AM",):
-            val = 0.50 * at["shooting"] + 0.34 * at["creativity"] + 0.16 * at["dribbling"]
+            # Weights derived from a Poisson fit of real goals on the raw squad attributes
+            # (2025/26, 3,358 team-matches), normalised. The hand-set version was
+            # 0.50 shooting + 0.34 creativity + 0.16 dribbling and left passing and
+            # progression out of the attack entirely; the fit says an attacking line's
+            # CREATION matters at least as much as its finishing.
+            val = (0.17 * at["shooting"] + 0.22 * at["creativity"] + 0.19 * at["dribbling"]
+                   + 0.21 * at["passing"] + 0.21 * at["progression"])
             A["attack"].append(_clamp(val * (1 + r["att"]) * fit))
             A["att_pace"].append(at["pace"])
         # A wide midfielder feeds BOTH units — he is the flank's attacking outlet and an
@@ -508,13 +514,13 @@ _BASE_OPP = {"attack": 78, "midfield": 77, "defense": 77, "press_resist": 75,
 #
 # What the fit says that the hand-written version had backwards: midfield matters slightly
 # MORE than attack, and the opponent's defence matters more than either.
-_XG_INTERCEPT = 0.6482
-_XG_ATTACK = 0.8279
-_XG_MIDFIELD = 0.8718
-_XG_PRESS_RESIST = 0.5608
-_XG_OPP_DEFENSE = -1.0831
-_XG_OPP_GK = -0.9979
-_XG_OPP_AERIAL = -0.7580
+_XG_INTERCEPT = 0.6291
+_XG_ATTACK = 0.8889
+_XG_MIDFIELD = 0.8468
+_XG_PRESS_RESIST = 0.5497
+_XG_OPP_DEFENSE = -1.0679
+_XG_OPP_GK = -1.0086
+_XG_OPP_AERIAL = -0.7634
 _XG_HOME = 0.2250            # the fitted venue split: x1.12 at home, x0.89 away
 # Pressing, measured. _PPDA_MID is the real median PPDA across 21,464 team-matches; the
 # exponent is the fitted coefficient on log(PPDA) for goals scored, squad quality held
