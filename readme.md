@@ -15,7 +15,7 @@ defenders - tackles, interceptions, aerial/ground duels, recoveries)
 6. Team Performance/League Standing
 7. Team Information (Squad, Manager, Venue)
 8. Search by Player, Team, or Match (Two Teams, Resulted sorted by recency)
-9. Player techniques (most commonly used techniques from a player) — implemented as **Signature Actions**: the on-ball actions a player performs most relative to position peers (take-ons, through balls, crosses, carries, key passes, aerials…), since literal move-recognition needs event/video data the warehouse doesn't have
+9. Player techniques (most commonly used techniques from a player) — answered two ways: **Signature Actions**, the on-ball actions a player performs most relative to position peers (take-ons, through balls, crosses, carries, key passes, aerials…) straight from the warehouse; and **Signature Skills** (below), the named moves themselves, which needed video rather than event data
 10. Player Archetypes (rule-based scouting roles per position — e.g. Poacher, Deep-Lying Playmaker, Ball-Playing Defender — with a fit %, signature traits, and most-similar players)
 
 ## Phase Two — Web App & Advanced Features
@@ -40,6 +40,15 @@ Phase One use cases are live in a web UI (**Atlastra**), alongside the following
 27. **Team Styles** — each club placed on the same style axes as the Tactics Lab's fingerprints (possession, press, line height, directness, width, counter).
 28. **Blog, highlights, comments** — written pieces, a top-highlights feed, and threaded comments on players and matches.
 29. **Games** — Daily Challenge, Draft Battle, Guess the Rating, Higher or Lower and Guess the Player, all built off the same ratings.
+30. **Signature Skills** — the *named moves* a player is known for, on his profile. Gemini watches his
+    YouTube highlight reel (`webapp/gemini.py::analyze_youtube`) and returns his five signature
+    techniques with a one-line description each — concrete named moves like "La Croqueta to Escape
+    Pressure", "Outside of Foot Trivela Cross" or "Byline Cutback After Body Feint", not vague labels
+    like "great dribbling". Every skill carries a **▶ example clip cut from that player's own reel**
+    (Gemini timestamps the moment, yt-dlp + ffmpeg cut it), falling back to a generic demonstration of
+    the move where no own-clip exists. Cached per player in SQLite (`webapp/signature_skills.py`), with
+    the biggest stars prewarmed. This is what closes use case 9 properly: the stats say a player takes
+    a lot of people on, the video says *how*.
 
 ## Tactics Lab
 The largest single feature (`/tactics.html`, `webapp/tactics.py`) — a tactical sandbox that is
@@ -85,7 +94,10 @@ The suggested APIs (Football API, Sportmonks, RapidAPI) were not used; the data 
 - **datamb (Wyscout)** — current-season advanced per-90 metrics (progressive actions, signature actions)
 - **Transfermarkt** — market values · **Wikimedia Commons** — licensed player photos
 - **Claude API (Opus 4.8)** — optional, powers the Scout Report when a key is set
-- **Gemini (flash)** — optional, powers the Tactics Lab's analyst read and the scout-report fallback
+- **Gemini (flash)** — reads YouTube highlight reels for **Signature Skills** (the one source of
+  video-derived data in the app), and optionally powers the Tactics Lab's analyst read and the
+  scout-report fallback
+- **YouTube** — player highlight reels, the source behind Signature Skills and its example clips
 
 ## Running it
 ```
