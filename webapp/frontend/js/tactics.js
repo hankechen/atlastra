@@ -612,6 +612,11 @@ function renderResults(r) {
     <div class="tl-rgrid">
       <section class="card tl-card"><div class="card-h"><h3>Tactical Weaknesses</h3></div>${weak}</section>
       <section class="card tl-card"><div class="card-h"><h3>Style Match</h3><span class="muted">closest famous sides</span></div>${style}
+        <div class="tl-measured">📏 <b>What's measured, what's judged.</b> Expected goals, the points line,
+          the pressing effect and who takes the goals are <b>fitted to real results</b> and scored by
+          <code>tools/backtest.py</code>. Roles, role fit and chemistry are <b>editorial</b> — nothing
+          records which role a player was actually given, so they can't be fitted or falsified, and they
+          only ever nudge.</div>
         <div class="tl-adv"><div class="tl-advhdr">🧠 AI analyst read</div>
           <div id="advOut">${_lastAdvText || '<div class="tl-loading sm">Reading your setup…</div>'}</div></div></section>
     </div>`;
@@ -645,9 +650,10 @@ function projCard(p) {
   // the bar is what makes the finish explainable: 86 points wins the Bundesliga and
   // finishes second in the Premier League, and the card should say so.
   const bar = p.title_bar ? ` · title needs ~${Math.round(p.title_bar)}` : '';
+  const err = p.points_err ? ` ± ${p.points_err}` : '';
   const league = p.kind === 'club'
     ? `<div class="tl-projrow"><span class="tl-pbadge">🏆 ${esc(p.league)}</span><b>${ordinal(p.position)}</b>
-        <span class="muted">projected · ${p.points} pts${bar}</span></div>` : '';
+        <span class="muted">projected · ${p.points}${err} pts${bar}</span></div>` : '';
   const cup = `<div class="tl-projrow"><span class="tl-pbadge">${p.kind === 'club' ? '⭐ ' : '🌍 '}${esc(p.comp)}</span>
       <b>${esc(p.likely)}</b><span class="muted">most likely · ${p.win_pct}% to win it</span></div>`;
   // an XI you built yourself gets the European campaign too — it takes the last-placed
@@ -658,7 +664,9 @@ function projCard(p) {
       <span class="tl-projbtns"><button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button>${uclBtn}</span></div>
     ${league}${cup}
     <div class="tl-pstages">${stages}</div>
-    <div class="tl-foot">Model projection from squad quality + your tactics (xG→expected points). Knockout ties carry realistic variance.</div></section>`;
+    <div class="tl-foot">Expected goals come from a Poisson model <b>fitted</b> to 3,358 real matches; the
+      points line is fitted to real final tables and typically lands within ${p.points_err || 8} points
+      (<code>tools/backtest.py</code> scores both against every top-5 result). Knockout ties carry realistic variance.</div></section>`;
 }
 
 // ---- full season simulation modal: standings table + cup run + team stat leaders ----

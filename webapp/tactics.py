@@ -1102,6 +1102,7 @@ LEAGUE_INFO = {
 #     2025/26     11.20 / -6.27              8.00 / +1.09      (fitted here)
 #     2024/25     10.93 / -7.69              6.63 / -1.64      (out of sample)
 #     2023/24     10.62 / -6.58              7.75 / -0.57      (out of sample)
+_PPG_ERR = 8             # typical miss in points, measured (see tools/backtest.py)
 _PPG_A = 0.908           # points per game for a league-average squad (S = 50)
 _PPG_B = 0.0354          # per point of strength above/below that
 # (re-fitted after the xG core was replaced, since S is computed from it. The
@@ -1187,6 +1188,10 @@ def _project(u, t, team, chem_mult=1.0, ctx=None):
         pos = (1 + sum(1 for r in rivals if r > pts)) if rivals else _pos_for(pts, n)
         return {"kind": "club", "league": lg, "games": games, "n_teams": n,
                 "points": pts, "position": min(pos, n), "ppg": round(ppg, 2),
+                # what the projection is actually worth, measured by tools/backtest.py over
+                # three seasons (mean absolute error 7.8, 6.7 and 7.8 points). A number
+                # without its error bar invites more confidence than it has earned.
+                "points_err": _PPG_ERR,
                 "title_bar": (round(rivals[0]) if rivals else None),
                 "comp": "Champions League", "run": run, "likely": likely, "win_pct": win}
     run, likely, win = _run(S, [("Group stage", 54), ("Round of 16", 66), ("Quarter-final", 74),
