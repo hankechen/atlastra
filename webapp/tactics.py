@@ -482,6 +482,55 @@ def _units(xi: list[dict]) -> dict:
 _BASE_OPP = {"attack": 78, "midfield": 77, "defense": 77, "press_resist": 75,
              "def_pace": 73, "aerial": 73, "att_pace": 74, "gk": 78}
 
+# ---------------------------------------------------------------- fitted core --- #
+# How many goals a side is expected to score. These coefficients are FITTED, not chosen:
+# a Poisson GLM with a log link — the standard Maher / Dixon-Coles form, and the same
+# distribution the simulators draw from — estimated on 3,358 team-matches of 2025/26 with
+# each club's real squad and EA FC cards.
+#
+# It replaces two hand-written formulas (one for scoring, one for conceding) that between
+# them carried about 25 invented constants and ran systematically hot: they had Manchester
+# City v Arsenal at 2.07 expected goals against a fitted 1.46, which is why the Champions
+# League campaign needed a 14% damper bolted on to look sane.
+#
+# Scored out of fold BY CLUB, so no club's own matches ever trained its own predictions:
+#
+#     model                          log loss    Brier    top-pick
+#     hand-written formulas            1.0127   0.6049      50.1%
+#     THIS (Poisson on goals)          1.0053   0.5999      50.8%
+#     least squares on xG              1.0321   0.6180      49.3%   <- see the note below
+#     baseline: season base rates      1.0696   0.6468      44.4%
+#
+# The least-squares row is kept as a warning: fitting real match xG directly gave a far
+# better xG predictor (R² 0.028 -> 0.134) and WORSE match odds, because squared error on a
+# noisy target shrinks everything toward the mean and 1X2 skill needs separation. Fit the
+# thing you actually do — draw goals — not the thing that looks like the target.
+#
+# What the fit says that the hand-written version had backwards: midfield matters slightly
+# MORE than attack, and the opponent's defence matters more than either.
+_XG_INTERCEPT = 0.6482
+_XG_ATTACK = 0.8279
+_XG_MIDFIELD = 0.8718
+_XG_PRESS_RESIST = 0.5608
+_XG_OPP_DEFENSE = -1.0831
+_XG_OPP_GK = -0.9979
+_XG_OPP_AERIAL = -0.7580
+_XG_HOME = 0.2250            # the fitted venue split: x1.12 at home, x0.89 away
+
+
+def _base_xg(u: dict, ou: dict) -> float:
+    """Venue-neutral expected goals for `u` against `ou` — the fitted core, before any
+    tactical adjustment. Conceding is just this function run the other way round, which is
+    why there is no longer a second formula for it."""
+    return math.exp(_XG_INTERCEPT
+                    + _XG_ATTACK * u["attack"] / 100.0
+                    + _XG_MIDFIELD * u["midfield"] / 100.0
+                    + _XG_PRESS_RESIST * u["press_resist"] / 100.0
+                    + _XG_OPP_DEFENSE * ou["defense"] / 100.0
+                    + _XG_OPP_GK * ou["gk"] / 100.0
+                    + _XG_OPP_AERIAL * ou["aerial"] / 100.0
+                    + _XG_HOME * 0.5)
+
 
 def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
     """Project match metrics for a side (units u, tactics t) vs opponent (ou, ot).
@@ -511,8 +560,8 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
                   - 5 * (d("tempo") - o("tempo")), 26, 76)
     terr = round(_clamp(50 + (poss - 50) * 0.6 + 30 * d("line_height") * 0.5
                         - 10 * d("counter"), 12, 88))
-    # attack (centred on 77 = an average side on the FIFA-attribute scale)
-    att = 1.35 + (u["attack"] - 77) / 32.0 + (u["midfield"] - 77) / 70.0
+    # attack: the fitted core, then the tactical adjustments on top of it
+    att = _base_xg(u, ou)
     att *= (1
             + 0.10 * d("width") * (0.6 + 0.6 * o("compactness"))   # stretch a narrow block
             + 0.08 * d("patience")                                 # work it, wait for the ball
@@ -522,13 +571,14 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
             - 0.04 * max(0.0, d("directness"))                     # ...or hand it straight back
             + 0.09 * d("press")                                    # turnovers high up the pitch
             + 0.07 * d("tempo"))                                   # more sequences per game
-    att *= 1 - (ou["defense"] - 77) / 150.0 - 0.12 * o("compactness")
+    att *= 1 - 0.12 * o("compactness")            # their block, on top of their squad
     # where the game is played: a side pinned in its own half simply gets fewer goes at it
     att *= 1 + 0.16 * ((terr - 50) / 50.0)
-    xg = round(_clamp_f(att, 0.3, 3.3), 2)
-    # concede
-    xga = 1.35 + (ou["attack"] - 77) / 32.0 + (ou["midfield"] - 77) / 70.0
-    xga *= 1 - (u["defense"] - 77) / 150.0
+    xg = round(_clamp_f(att, 0.2, 3.6), 2)
+    # concede: the same fitted model with the sides swapped, then OUR out-of-possession
+    # settings applied to it. The squad half of this — their attack and midfield against our
+    # defence, keeper and aerial ability — is entirely inside _base_xg now.
+    xga = _base_xg(ou, u)
     xga *= 1 - 0.16 * d("compactness")                       # a compact block denies the pockets
     xga *= 1 - 0.08 * max(0.0, d("counter"))                 # sitting in cedes territory, not chances
     xga *= 1 + 0.06 * d("tempo")                             # an end-to-end game runs both ways
@@ -538,7 +588,7 @@ def _metrics(u: dict, t: dict, ou: dict, ot: dict) -> dict:
     risk_press = 1 + 0.14 * d("press") * (0.5 + 0.5 * _clamp_f((ou["press_resist"] - 74) / 12.0,
                                                                -1.0, 1.0))
     risk_line = 1 + 0.16 * d("line_height") * _clamp_f((73 - u["def_pace"]) / 30.0, -0.5, 1.0)
-    xga = round(_clamp_f(xga * risk_line * risk_press, 0.30, 3.2), 2)
+    xga = round(_clamp_f(xga * risk_line * risk_press, 0.20, 3.6), 2)
     # PPDA: the slider sets the intent, the ROLES supply the legs — a side full of
     # ball-winners and pressing forwards gets after it harder than the same slider with a
     # free 10 and a deep-lying playmaker standing off.
@@ -1037,8 +1087,12 @@ LEAGUE_INFO = {
 #     2025/26     11.20 / -6.27              8.00 / +1.09      (fitted here)
 #     2024/25     10.93 / -7.69              6.63 / -1.64      (out of sample)
 #     2023/24     10.62 / -6.58              7.75 / -0.57      (out of sample)
-_PPG_A = 0.929           # points per game for a league-average squad (S = 50)
-_PPG_B = 0.0341          # per point of strength above/below that
+_PPG_A = 0.908           # points per game for a league-average squad (S = 50)
+_PPG_B = 0.0354          # per point of strength above/below that
+# (re-fitted after the xG core was replaced, since S is computed from it. The
+#  alternative of reading expected points straight off the fitted xG was tried and
+#  lost on all three seasons — 8.07/6.90/8.71 against 7.77/6.68/7.80 — so the
+#  strength line stays.)
 # projected points → finishing position (top-5-league distribution)
 _POS_CURVE = [(88, 1), (82, 2), (75, 3), (69, 4), (64, 5), (59, 6), (55, 7), (51, 8),
               (47, 9), (43, 11), (39, 13), (35, 15), (32, 17), (28, 18)]
@@ -1497,11 +1551,13 @@ def simulate_match(xi, tactics, opp_xi, opponent, team=None, opp_name="Opponent"
 #     aggregates go to extra time and then penalties — no away goals, as in the real thing
 # Opponents are the real clubs with their real squads, so the scorers are real too, and
 # each leg's goals come from the same Poisson (xG) the matchup odds are built on.
-_UCL_HOME_XG = 1.10          # home sides in Europe score ~10% more...
-_UCL_AWAY_XG = 0.93          # ...and their visitors ~7% less. A neutral final gets neither.
+# The venue split is the fitted home coefficient (_XG_HOME) split either side of neutral,
+# rather than the ~10%/~7% pair that was set by hand: exp(+0.225/2) and exp(-0.225/2).
+_UCL_HOME_XG = 1.119
+_UCL_AWAY_XG = 0.894
 _UCL_ET_RATE = 0.30          # extra time: 30 cagier minutes, so well under a third of the 90
-_UCL_GAP_K = 0.028           # squad-quality amplifier: a 15-point rating gulf ~1.5x the xG
-_UCL_XG_SCALE = 0.86         # campaign scoring damper — see the note above _ucl_xg
+_UCL_GAP_K = 0.040           # squad-quality amplifier: a 15-point rating gulf ~1.8x the xG
+_UCL_XG_SCALE = 1.10         # campaign scoring LIFT — see the note above _ucl_xg
 # A final is a tighter game than the rounds that lead to it — one match, no second leg to
 # fix it in, and both sides start by making sure they don't lose it. In the last eighteen
 # the real ones averaged 2.72 goals against 2.99 in the quarters and last 16, and 3.09 in
@@ -1582,10 +1638,12 @@ def _ucl_xg(A, B, venue):
         xg, oxg = xg * _UCL_HOME_XG, oxg * _UCL_AWAY_XG
     elif venue == "A":
         xg, oxg = xg * _UCL_AWAY_XG, oxg * _UCL_HOME_XG
-    # European nights are tighter than the domestic model expects: sides are better matched,
-    # more of the games matter, and a campaign of them ran hot — an elite side was averaging
-    # 2.7 goals a game and its striker 14 a campaign, when only about two players in the
-    # whole competition reach 12 in a real season.
+    # The core is fitted on domestic matches, where nobody is as weak as the bottom of a
+    # Champions League field — so a campaign needs a small lift, and the quality-gap term
+    # has to stretch further than the fitted model has ever seen. Both re-tuned against the
+    # real competition after the fitted core landed: an elite side scores ~2.5 a game and
+    # concedes ~0.9 in the league phase (Arsenal really managed 2.9 and 0.5, Real Madrid
+    # 2.6 and 1.5), and takes 17-18 points.
     xg, oxg = xg * _UCL_XG_SCALE, oxg * _UCL_XG_SCALE
     return round(_clamp_f(xg, 0.2, 3.6), 2), round(_clamp_f(oxg, 0.2, 3.6), 2), m["possession"]
 
