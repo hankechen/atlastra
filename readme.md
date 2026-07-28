@@ -22,25 +22,27 @@ defenders - tackles, interceptions, aerial/ground duels, recoveries)
 Phase One use cases are live in a web UI (**Atlastra**), alongside the following:
 
 11. **Live Matches** — live scores, fixtures and results across the top-5 leagues, the Champions League, and international tournaments; match pages with a formation-pitch lineup (goal/assist icons, click a player for their match stats + club), two-tone stats, and a "Today" tab.
-12. **Match Predictions** — 1X2 win probabilities from Atlastra's own fitted goals model: each squad is scored into attack/midfield/defence/goalkeeping strength and run through the same Poisson core the Tactics Lab uses (estimated on 3,358 real team-matches, validated on three full seasons). Falls back to a form-and-ranking model where squad data is too thin — national teams, and clubs outside our player coverage. Updates live as a match progresses.
-13. **Custom Rating System** — a position-weighted composite player rating + classification, plus separate common-metric **League** and **Champions League** ratings (back-filled across 12 seasons) shown as dual gauges.
-14. **Rankings & Awards** — per-position top-20 (League / UCL scope toggle) and the best individual seasons of all time (Combined / League / UCL).
-15. **National Teams** — every national team with roster, recent results/fixtures, and a latest starting XI; match heroes link through to team pages.
-16. **Per-season analysis** — a season selector on the player profile, percentile radars, SofaScore heatmaps, and a "Former Players" directory of notable ex-top-5 stars.
-17. **Scout Report** — a scout-style written report per player from their ratings, percentiles, archetype and trend. Powered by the **Claude API** when an `ANTHROPIC_API_KEY` is configured, with a built-in offline rule-based engine as the default/fallback. Cached per player.
-18. **Best XI on a Budget** — set a transfer budget and a formation; a knapsack optimiser returns the highest-rated legal XI it can afford, on a pitch.
-19. **Find the Next X** — pick a legend (Xavi, Pirlo, Bergkamp…) and find the current players whose statistical style is the closest match (cosine similarity in the radar space).
-20. **Player Cards** — a shareable, downloadable FUT-style collectible card (rating, archetype, top-5 percentile stats) rendered to an image.
-21. **Football DNA Map** — every outfielder placed on a 2D style map (PCA on z-scored per-90 features) where distance = dissimilarity; pan/zoom and spotlight a player's nearest matches.
-22. **User profile, follows & optional accounts** — follow players and teams, a watchlist and saved comparisons, an editable identity profile (picture, bio, favourite clubs/players, location, member-since), and in-app/desktop **notifications** when followed teams/players kick off, go live, score, or finish. Everything works as a **guest** (stored locally in the browser); signing in is **optional** and just **syncs** that data across devices — a lightweight account system (salted/PBKDF2 passwords, HttpOnly session cookie, standalone SQLite store; `webapp/auth.py`).
-23. **Match Previews** — auto-generated previews for every upcoming fixture in the live feed (national teams included): recent form, key players matched to our ratings, head-to-head, and a model projection. Appears as a **Preview tab on each match page** (the default tab for not-yet-started matches) and as a standalone fixtures-list page. (A two-club xG/Poisson engine — `web_match_preview` — also exists for in-season league fixtures.)
-24. **Big Game Index** — each player's goal involvements per 90 split by opponent quality (vs top-half "big games" vs bottom-half sides), flagging **Big-Game Players** who step up against the best vs **Flat-Track Bullies** who feast on weak sides. Built from a per-player per-match log (`player_match_log`, scraped from Understat); shown as a leaderboard and a per-profile badge.
-25. **Fair Value** — a trained market-value model (`ml/train_market_value.py`) that prices every player from his output, age and minutes, and flags who the market over- and under-rates against his Transfermarkt valuation.
-26. **World Cup hub** — group tables, bracket, fixtures/results and stat leaders for the current edition, refreshed server-side.
-27. **Team Styles** — each club placed on the same style axes as the Tactics Lab's fingerprints (possession, press, line height, directness, width, counter).
-28. **Blog, highlights, comments** — written pieces, a top-highlights feed, and threaded comments on players and matches.
-29. **Games** — Daily Challenge, Draft Battle, Guess the Rating, Higher or Lower and Guess the Player, all built off the same ratings.
-30. **Signature Skills** — the *named moves* a player is known for, on his profile. Gemini watches his
+12. **Live Win Probability** — on any match under way, 1X2 updated from the score and the clock, with the swing through the match drawn as a curve. Goals do not arrive evenly — the last quarter of an hour carries nearly twice the goals of the first — so a lead is worth more at 80' than at 20'. Validated at half-time against 10,955 historical matches: 0.844 log loss and 59% top-pick against 1.060 and 47% for the same model before kick-off, calibrated to within two points at every confidence level.
+13. **Measured Roles** — where a player actually stands, clustered from ~10k player-seasons of positional heatmaps rather than read off his listed position (`tools/roles.py`). Surfaces the players being used somewhere other than their label says — wingers playing as wing-backs, centre-backs playing full-back. The clusters are fitted on 2020-23 and hold on 2023-26 with under 4% drift, and what they do *not* support is written down too: DM and CM are one cluster, and no wide-midfield role separates at any k.
+14. **Match Predictions** — 1X2 win probabilities from Atlastra's own fitted goals model: each squad is scored into attack/midfield/defence/goalkeeping strength and run through the same Poisson core the Tactics Lab uses (estimated on 3,358 real team-matches, validated on three full seasons). Falls back to a form-and-ranking model where squad data is too thin — national teams, and clubs outside our player coverage. Updates live as a match progresses.
+15. **Custom Rating System** — a position-weighted composite player rating + classification, plus separate common-metric **League** and **Champions League** ratings (back-filled across 12 seasons) shown as dual gauges.
+16. **Rankings & Awards** — per-position top-20 (League / UCL scope toggle) and the best individual seasons of all time (Combined / League / UCL).
+17. **National Teams** — every national team with roster, recent results/fixtures, and a latest starting XI; match heroes link through to team pages.
+18. **Per-season analysis** — a season selector on the player profile, percentile radars, SofaScore heatmaps, and a "Former Players" directory of notable ex-top-5 stars.
+19. **Scout Report** — a scout-style written report per player from their ratings, percentiles, archetype and trend. Powered by the **Claude API** when an `ANTHROPIC_API_KEY` is configured, with a built-in offline rule-based engine as the default/fallback. Cached per player.
+20. **Best XI on a Budget** — set a transfer budget and a formation; a knapsack optimiser returns the highest-rated legal XI it can afford, on a pitch.
+21. **Find the Next X** — pick a legend (Xavi, Pirlo, Bergkamp…) and find the current players whose statistical style is the closest match (cosine similarity in the radar space).
+22. **Player Cards** — a shareable, downloadable FUT-style collectible card (rating, archetype, top-5 percentile stats) rendered to an image.
+23. **Football DNA Map** — every outfielder placed on a 2D style map (PCA on z-scored per-90 features) where distance = dissimilarity; pan/zoom and spotlight a player's nearest matches.
+24. **User profile, follows & optional accounts** — follow players and teams, a watchlist and saved comparisons, an editable identity profile (picture, bio, favourite clubs/players, location, member-since), and in-app/desktop **notifications** when followed teams/players kick off, go live, score, or finish. Everything works as a **guest** (stored locally in the browser); signing in is **optional** and just **syncs** that data across devices — a lightweight account system (salted/PBKDF2 passwords, HttpOnly session cookie, standalone SQLite store; `webapp/auth.py`).
+25. **Match Previews** — auto-generated previews for every upcoming fixture in the live feed (national teams included): recent form, key players matched to our ratings, head-to-head, and a model projection. Appears as a **Preview tab on each match page** (the default tab for not-yet-started matches) and as a standalone fixtures-list page. (A two-club xG/Poisson engine — `web_match_preview` — also exists for in-season league fixtures.)
+26. **Big Game Index** — each player's goal involvements per 90 split by opponent quality (vs top-half "big games" vs bottom-half sides), flagging **Big-Game Players** who step up against the best vs **Flat-Track Bullies** who feast on weak sides. Built from a per-player per-match log (`player_match_log`, scraped from Understat); shown as a leaderboard and a per-profile badge.
+27. **Fair Value** — a trained market-value model (`ml/train_market_value.py`) that prices every player from his output, age and minutes, and flags who the market over- and under-rates against his Transfermarkt valuation.
+28. **World Cup hub** — group tables, bracket, fixtures/results and stat leaders for the current edition, refreshed server-side.
+29. **Team Styles** — each club placed on the same style axes as the Tactics Lab's fingerprints (possession, press, line height, directness, width, counter).
+30. **Blog, highlights, comments** — written pieces, a top-highlights feed, and threaded comments on players and matches.
+31. **Games** — Daily Challenge, Draft Battle, Guess the Rating, Higher or Lower and Guess the Player, all built off the same ratings.
+32. **Signature Skills** — the *named moves* a player is known for, on his profile. Gemini watches his
     YouTube highlight reel (`webapp/gemini.py::analyze_youtube`) and returns his five signature
     techniques with a one-line description each — concrete named moves like "La Croqueta to Escape
     Pressure", "Outside of Foot Trivela Cross" or "Byline Cutback After Body Feint", not vague labels
@@ -93,6 +95,7 @@ in the repo precisely so a change gets measured instead of argued about. Current
 | 1X2 log loss, 2024/25 · 2023/24 | **1.0135 · 1.0057** | 1.0783 · 1.0729 |
 | top-pick accuracy | **51.5%** | 44.4% |
 | season points | **MAE 7.8, unbiased** | — |
+| in-play 1X2 at half-time (10,955 matches) | **0.8436** | 1.0596 (same model pre-kick-off) |
 
 Predicted probabilities track reality closely across the range (of the matches called 60-70%, about
 two-thirds finish that way), and the season card shows its own error bar — "79 ± 8 pts" — because the
@@ -151,6 +154,8 @@ python -m tools.backtest                   # score the engine against real resul
 python -m tools.backtest --season 2425 --weaknesses
 python -m tools.fit                        # re-derive the fitted constants, print a diff
 python -m tools.fit --only xg --season 2425
+python -m tools.roles                      # learn positional roles from heatmaps
+python -m tools.roles --write              # persist player_learned_role
 ```
 The Scout Report's AI mode is optional: `ANTHROPIC_API_KEY=sk-ant-... python -m webapp.server` (without it, the offline report engine is used).
 

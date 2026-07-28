@@ -236,6 +236,32 @@ def _apply_breakout(p, atlas):
             f[k] = clamp(f[k] + boost)
 
 
+def _measured_roles_bulk(d, squad):
+    """Attach the measured role to a whole squad in one query. Per-player lookups would be
+    25 round trips for a screen that already does plenty."""
+    names = [p.get("player") for p in squad if p.get("player")]
+    if not names:
+        return
+    try:
+        rows = d.con.execute(
+            f"""SELECT lower(pl.player_name), r.role, r.confidence, r.depth, r.width,
+                       r.position_group, r.season
+                FROM player_learned_role r JOIN players pl ON pl.player_id = r.player_id
+                WHERE lower(pl.player_name) IN ({','.join('?' * len(names))})""",
+            [n.lower() for n in names]).fetchall()
+    except Exception:                                      # noqa: BLE001
+        return                                              # table absent until tools.roles runs
+    best = {}
+    for nm, role, cf, dep, wid, listed, season in rows:
+        if cf and cf >= 0.30 and (nm not in best or season > best[nm][1]):
+            best[nm] = ({"role": role, "conf": round(float(cf), 2), "depth": dep,
+                         "width": wid, "listed": listed}, season)
+    for p in squad:
+        m = best.get((p.get("player") or "").lower())
+        if m:
+            p["measured"] = m[0]
+
+
 def _tac_squad(d, team, tid=None):
     """Squad for the Tactics Lab. `tid` forces a FotMob team id, so any club in Europe
     (e.g. a Champions League opponent outside our own dropdown) can be built too."""
@@ -272,6 +298,7 @@ def _tac_squad(d, team, tid=None):
     atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
     for p in sq:
         _apply_breakout(p, atlas)
+    _measured_roles_bulk(d, sq)
     _TAC_SQUAD[team.lower()] = (_t.time() + 600, sq)
     return sq
 
@@ -289,6 +316,40 @@ def _split_season(name):
     if not m:
         return name, None
     return m.group(1).strip(), m.group(3) + m.group(4)
+
+
+_LEARNED_ROLE: dict = {}
+
+
+def _measured_role(d, name, season=None):
+    """Where this player ACTUALLY stood, from his heatmap — see tools/roles.py. Independent
+    of every listed position and of the engine's own role taxonomy, so it is the one part of
+    the player card that cannot be argued with: it is 38 matches of occupancy.
+
+    Returned only above a confidence floor. Positions are a continuum and a player sitting
+    between two clusters gets an arbitrary winner; showing that as fact would be worse than
+    showing nothing."""
+    if not name:
+        return None
+    key = f"{name.lower()}|{season or ''}"
+    if key in _LEARNED_ROLE:
+        return _LEARNED_ROLE[key]
+    out = None
+    try:
+        row = d.con.execute(
+            """SELECT r.role, r.confidence, r.depth, r.width, r.position_group
+               FROM player_learned_role r JOIN players pl ON pl.player_id = r.player_id
+               WHERE lower(pl.player_name) = ?""" +
+            (" AND r.season = ?" if season else "") +
+            " ORDER BY r.season DESC LIMIT 1",
+            [name.lower()] + ([season] if season else [])).fetchone()
+        if row and row[1] and row[1] >= 0.30:
+            out = {"role": row[0], "conf": round(float(row[1]), 2),
+                   "depth": row[2], "width": row[3], "listed": row[4]}
+    except Exception:                                      # noqa: BLE001
+        out = None                                          # table absent until tools.roles runs
+    _LEARNED_ROLE[key] = out
+    return out
 
 
 def _tac_player(d, name, season=None):
@@ -319,6 +380,7 @@ def _tac_player(d, name, season=None):
     # right back. The client picks the entry matching the slot it drops him into.
     p["best_role"] = tactics._best_role(p["family"], p)
     p["best_roles"] = {fam: tactics._best_role(fam, p) for fam in tactics.ROLES}
+    p["measured"] = _measured_role(d, p.get("player"), season)
     _TAC_PLAYER[key] = p
     return p
 
@@ -709,6 +771,8 @@ def match_api(path: str, q: dict) -> dict:
         return d
     if path == "/api/match/heatmap":
         return live_feed.player_heatmap(eid, int(q.get("player_id", [0])[0]))
+    if path == "/api/match/winprob":          # in-play 1X2 from score + clock
+        return live_feed.win_probability(eid)
     if path == "/api/match/prediction":
         d = live_feed.prediction(eid)
         if d.get("available"):

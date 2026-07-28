@@ -10,6 +10,8 @@ that no player could reach survived in the card synthesiser, and how the points 
 under-projected every club in Europe by six points a season without anyone noticing.
 
 What it measures
+  in-play odds     the same, for the win probability shown on a live match page, scored at
+                   half-time against every historical match whose half-time score we hold.
   1X2 match odds   log loss / Brier / top-pick accuracy against every top-5 result of the
                    season, with two baselines: the season's own outcome base rates (what you
                    score knowing nothing but the home-advantage split) and always-pick-home.
@@ -155,6 +157,52 @@ def backtest_points(db, season):
     print("  biggest misses: " + ", ".join(f"{t} {p} vs {a}" for p, a, t in worst))
 
 
+def backtest_live(db):
+    """The in-play model, tested where we can actually test it: half-time.
+
+    matches_history holds the half-time score for 10,955 matches, which is the one historical
+    snapshot of a match IN PROGRESS the warehouse has. Feeding the model league-average rates
+    isolates what it adds over knowing nothing — the score-and-clock arithmetic — since no
+    squad information from 2008-14 reaches it.
+    """
+    rows = db.con.execute(
+        """SELECT home_goals, away_goals, home_goals_ht, away_goals_ht
+           FROM matches_history
+           WHERE home_goals IS NOT NULL AND home_goals_ht IS NOT NULL""").fetchall()
+    if not rows:
+        print("\n=== in-play win probability ===\n  no half-time scores in the warehouse")
+        return
+    hg = sum(r[0] for r in rows) / len(rows)
+    ag = sum(r[1] for r in rows) / len(rows)
+    live, pre, acts = [], [], []
+    for h, a, hh, ah in rows:
+        act = "H" if h > a else ("D" if h == a else "A")
+        acts.append(act)
+        w = T.live_win_probs(hg, ag, 45, int(hh), int(ah))
+        live.append((w["home"] / 100, w["draw"] / 100, w["away"] / 100, act))
+        w0 = T.live_win_probs(hg, ag, 0, 0, 0)
+        pre.append((w0["home"] / 100, w0["draw"] / 100, w0["away"] / 100, act))
+    c, n = Counter(acts), len(acts)
+    base = [(c["H"] / n, c["D"] / n, c["A"] / n, a) for a in acts]
+    print(f"\n=== in-play win probability, at half-time ===")
+    print(f"  {n} matches · league-average rates {hg:.2f}-{ag:.2f}\n")
+    print(f"  {'model':<36}{'log loss':>10}{'Brier':>9}{'top-pick':>10}")
+    for label, preds in (("at half-time (score + clock)", live),
+                         ("same model before kick-off", pre),
+                         ("baseline: base rates", base)):
+        ll, br, acc = _score(preds)
+        print(f"  {label:<36}{ll:>10.4f}{br:>9.4f}{acc:>9.1f}%")
+    buckets = defaultdict(list)
+    for ph, _pd, _pa, act in live:
+        buckets[min(9, int(ph * 10))].append(1 if act == "H" else 0)
+    print("\n  calibration — predicted home win vs actual:")
+    for b in sorted(buckets):
+        v = buckets[b]
+        if len(v) < 40:
+            continue
+        print(f"     {b*10:>2}-{b*10+10:>3}%   n={len(v):>5}   actual {100*sum(v)/len(v):>5.1f}%")
+
+
 def backtest_weaknesses(db, season):
     """Each squad-keyed weakness rule is a claim that a flagged side concedes more than the
     model expects. Test it: mean residual (actual goals against minus expected) for flagged
@@ -208,12 +256,15 @@ def main():
     ap.add_argument("--skip-odds", action="store_true")
     ap.add_argument("--skip-points", action="store_true")
     ap.add_argument("--weaknesses", action="store_true", help="also test the weakness rules")
+    ap.add_argument("--skip-live", action="store_true")
     args = ap.parse_args()
     with SoccerDB(read_only=True) as db:
         if not args.skip_odds:
             backtest_odds(db, args.season)
         if not args.skip_points:
             backtest_points(db, args.season)
+        if not args.skip_live:
+            backtest_live(db)
         if args.weaknesses:
             backtest_weaknesses(db, args.season)
 

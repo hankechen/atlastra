@@ -2608,3 +2608,13 @@ a.hl-scorer:hover{color:var(--accent);text-decoration:underline}
 .tl-measured code{font-size:11px;padding:1px 4px;border-radius:4px;background:rgba(127,138,163,.16)}
 .tl-tested{font-style:normal;margin-left:7px;padding:1px 6px;border-radius:20px;font-size:9.5px;
   font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#2fbf71;background:rgba(47,191,113,.14)}
+
+/* ---- in-play win probability (match page) ---------------------------------- */
+.wp-chart { width: 100%; height: 90px; display: block; margin-top: 12px;
+            border-radius: 8px; overflow: hidden; }
+.wp-chart .wp-h { fill: #6b64f2; }        /* same three colours as the 1X2 bar above it, */
+.wp-chart .wp-d { fill: #56607e; }        /* so the chart and the bar read as one thing   */
+.wp-chart .wp-a { fill: #e0556f; }
+.wp-chart .wp-mid { stroke: rgba(255, 255, 255, .28); stroke-width: 1; stroke-dasharray: 4 4; }
+.wp-axis { display: flex; justify-content: space-between; font-size: 11px;
+           color: var(--muted, #8b949e); margin-top: 4px; }

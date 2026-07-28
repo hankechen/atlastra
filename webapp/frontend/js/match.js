@@ -171,9 +171,53 @@ function loadPredict() {
 }
 
 // ---- Prediction (from bookmaker odds) ----
+// In-play win probability. Only shown once a match is under way — before kick-off it is
+// identical to the prediction above, and two cards saying the same thing is noise.
+function winProbCard(wp, teams) {
+  if (!wp || !wp.available || (!wp.live && !wp.finished)) return '';
+  const n = wp.now, c = wp.curve || [];
+  const noDraw = (n.draw || 0) === 0;
+  const seg = (k, cls) => `<div class="pr-seg ${cls}" style="width:${n[k]}%" title="${esc(teams[k])} ${n[k]}%">${n[k] >= 10 ? n[k] + '%' : ''}</div>`;
+  // The curve, drawn as stacked bands: home on the bottom, away on top, draw is what's left.
+  let chart = '';
+  if (c.length > 2) {
+    const W = 600, H = 90, x = i => (c[i].minute / 90) * W;
+    // Stacked bands, painted back to front: away fills the whole plot, then home+draw covers
+    // it from the bottom, then home covers that. What stays visible is each band's share.
+    const area = upto => c.map((p, i) => `${x(i).toFixed(1)},${(H - (upto(p) / 100) * H).toFixed(1)}`)
+      .join(' ') + ` ${W.toFixed(1)},${H} 0,${H}`;
+    chart = `<svg class="wp-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+        aria-label="Win probability through the match">
+      <rect class="wp-a" x="0" y="0" width="${W}" height="${H}"/>
+      <polygon class="wp-d" points="${area(p => p.home + p.draw)}"/>
+      <polygon class="wp-h" points="${area(p => p.home)}"/>
+      <line class="wp-mid" x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}"/>
+    </svg>
+    <div class="wp-axis"><span>KO</span><span>45'</span><span>FT</span></div>`;
+  }
+  const reds = (wp.reds && (wp.reds.home || wp.reds.away))
+    ? ` · 🟥 ${wp.reds.home ? esc(teams.home) : esc(teams.away)}` : '';
+  return `<section class="card">
+    <div class="card-h"><h3>Win Probability</h3>
+      <span class="see">${wp.finished ? 'full time' : `<span class="live">● ${wp.minute}'</span>`}
+        · ${wp.score.home}–${wp.score.away}${reds}</span></div>
+    <div class="pr-bar">${seg('home', 'h')}${noDraw ? '' : seg('draw', 'd')}${seg('away', 'a')}</div>
+    <div class="pr-legend">
+      <span><i class="h"></i>${esc(teams.home)} ${n.home}%</span>
+      ${noDraw ? '' : `<span><i class="d"></i>Draw ${n.draw}%</span>`}
+      <span><i class="a"></i>${esc(teams.away)} ${n.away}%</span></div>
+    ${chart}
+    <div class="placeholder-note" style="margin-top:10px">Updates on the score and the clock — the
+      last quarter of an hour carries nearly twice the goals of the first, so a lead is worth more
+      at 80' than at 20'. Replayed against 10,955 past matches at half-time it calls the right
+      result 59% of the time against 47% before kick-off, and lands within two points of the truth
+      at every confidence level. Not betting advice.</div>
+  </section>`;
+}
+
 async function loadPrediction() {
   const live = tabGuard();
-  const d = await A('/api/match/prediction');
+  const [d, wp] = await Promise.all([A('/api/match/prediction'), A('/api/match/winprob').catch(() => null)]);
   if (!live()) return;
   if (!d.available) { body().innerHTML = empty('No betting odds available for this match yet.'); return; }
   const c = d.consensus;
@@ -212,7 +256,7 @@ async function loadPrediction() {
     : fitted
     ? `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: each side's squad is scored into attack, midfield, defence and goalkeeping strength, and a goals model <b>fitted on 3,358 real team-matches</b> turns the two into expected goals. Scored against three full seasons of results, it beats a home-advantage-only baseline (log loss 1.00 vs 1.07). Same engine as the Tactics Lab. Not betting advice.</div>`
     : `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: win probabilities from each side's strength — FIFA ranking for nations, recent form (results + goal difference) for clubs — with a small home edge, run through a Poisson goals model. Used where we don't hold enough squad data to run the fitted engine. Not betting advice.</div>`;
-  body().innerHTML = aspCard + `<section class="card">
+  body().innerHTML = winProbCard(wp, teams) + aspCard + `<section class="card">
       <div class="card-h"><h3>Match Prediction</h3><span class="see">${liveOdds ? '<span class="live">● live</span> · ' : ''}${srcLabel}</span></div>
       <div class="pr-head">${liveOdds ? 'In-play' : 'Most likely'}: <b>${esc(predLabel)}</b> <span class="muted">· ${c[d.predicted]}% ${isModel ? 'modelled' : 'implied'}</span></div>
       <div class="pr-bar">${seg('home', 'h')}${noDraw ? '' : seg('draw', 'd')}${seg('away', 'a')}</div>
