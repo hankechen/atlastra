@@ -563,7 +563,10 @@ def _reprice_national(d, squad):
     from webapp import fifa
     season = (d.con.execute("SELECT max(season) FROM wc_player_stats").fetchone() or [None])[0]
     for p in squad:
-        card = fifa.match(p.get("player") or "")
+        # Full names here, so the mononym tier is wanted: World Cup data lists "Mikel
+        # Oyarzabal" and his card is filed as "Oyarzabal", which without it fell through to
+        # a tournament rating of 64 against a real 82.
+        card = fifa.match(p.get("player") or "", mononyms=True)
         if card and card.get("o"):
             p["rating"] = card["o"]
             p["fifa"] = {k: card[k] for k in ("o", "pac", "sho", "pas", "dri",
