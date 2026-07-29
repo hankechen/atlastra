@@ -509,6 +509,9 @@ def _wc_field(d, season="2026"):
                WHERE s.season = ? AND s.group_name LIKE 'Group%'
                ORDER BY s.group_name, s.position""", [season]).fetchall()
     except Exception:                                      # noqa: BLE001
+        # Transient on startup: the World Cup refresher holds a write on wc_standings while
+        # it runs, so a request landing in that window reads nothing. Not cached on failure,
+        # so the next one succeeds — which is why this stays quiet rather than erroring.
         return []
     out = []
     for team, cc, grp, pos, rank in rows:
