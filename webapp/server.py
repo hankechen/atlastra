@@ -755,6 +755,50 @@ def _last_used_xi(squad, tid):
     return laid or tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names)
 
 
+_TEAM_TACTICS: dict = {}
+
+
+def _team_tactics(d, team, season="2526"):
+    """A club's own tactical defaults, from how it actually played last season.
+
+    Only ONE of the eight sliders is derivable from what the warehouse holds, and it is the
+    one that matters most: press, from the club's real PPDA. The mapping is the exact inverse
+    of the engine's own (see _metrics), so a side loaded with these defaults is simulated at
+    the PPDA it really posted — Barcelona's 7.3 comes back as press 76 and simulates to 7.24.
+
+    The other seven are left at 50 and that is deliberate. Tempo, width, directness,
+    patience, counter, line height and compactness would need possession, pass length and
+    defensive-line data, none of which we warehouse; deriving them from what we do hold would
+    mean inventing a relationship and calling it a measurement. The one that IS measured
+    moves the model directly, since press feeds PPDA which feeds expected goals.
+
+    National teams get nothing here — World Cup data carries no PPDA.
+    """
+    key = f"{(team or '').lower()}|{season}"
+    if key in _TEAM_TACTICS:
+        return _TEAM_TACTICS[key]
+    out: dict = {}
+    try:
+        row = d.con.execute(
+            """SELECT avg(m.ppda), count(*)
+               FROM team_match_stats m JOIN teams t ON t.team_id = m.team_id
+               WHERE m.season = ? AND lower(t.team_name) = lower(?)
+                 AND m.ppda IS NOT NULL AND m.ppda > 0""", [season, team]).fetchone()
+        if row and row[1] and row[1] >= 15:
+            press = 50 + (tactics._PPDA_MID - float(row[0])) * 6.4
+            out["press"] = int(round(max(0, min(100, press))))
+    except Exception:                                      # noqa: BLE001
+        out = {}
+    _TEAM_TACTICS[key] = out
+    return out
+
+
+def _side_tactics(d, team):
+    """The full slider set for a side: the stock defaults with whatever we can measure for
+    that club laid over them."""
+    return {**tactics.DEFAULT_TACTICS, **_team_tactics(d, team)}
+
+
 def _ucl_opponent(d, row):
     """Materialise one club from the field — its real current squad, an auto XI in a stock
     shape, unit strengths and recent form. Only the clubs actually drawn are ever built
@@ -765,9 +809,9 @@ def _ucl_opponent(d, row):
     xi = _last_used_xi(squad, row.get("id")) or tactics.build_xi(squad, "4-3-3")
     if not any(s.get("player") for s in xi):
         return None
+    t = _side_tactics(d, row["name"])
     return {"name": row["name"], "logo": row.get("logo"), "xi": xi,
-            "units": tactics.team_units(xi, tactics.DEFAULT_TACTICS),
-            "tactics": tactics.DEFAULT_TACTICS,
+            "units": tactics.team_units(xi, t), "tactics": t,
             "form": (_team_form(d, row["name"]) or {}).get("form") or 0.0}
 
 
@@ -1190,7 +1234,9 @@ def api(path: str, q: dict) -> dict | list:
                     "squad": squad, "xi": _xi_wire(xi),
                     "formations": list(tactics.FORMATIONS.keys()),
                     "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,
-                    "tactic_keys": tactics.TACTIC_KEYS, "tactic_defaults": tactics.DEFAULT_TACTICS}
+                    "tactic_keys": tactics.TACTIC_KEYS,
+                    "tactic_defaults": (tactics.DEFAULT_TACTICS if blank
+                                        else _side_tactics(d, team))}
         if path == "/api/tactics/find":        # search any player to add to a squad (what-if)
             return {"results": d.tactics_search(q.get("q", [""])[0])}
         if path == "/api/tactics/seasons":     # which years of a player the Lab can field
