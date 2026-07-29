@@ -1035,7 +1035,9 @@ function uclHTML(r) {
       <div class="tl-mfoot"><button class="tl-seasonbtn" id="reuclBtn">🔄 Run it again</button>
         <button class="tl-seasonbtn ghost" id="uclSwitch">${UC.mode === 'live' ? '⚡ Instant' : '▶ Follow along'}</button>${tally}</div>
       <div class="tl-foot">The field, its points and the qualification bands are the real 2025/26 Champions League;
-        your eight matchdays replace your own row in it. Each match's goals are drawn from the same Poisson (xG) the
+        your eight matchdays replace your own row in it. Every opponent lines up in the eleven and the shape
+        they last used <i>in this competition</i> — not their league or cup side, which is usually a rotated one —
+        with anyone since transferred out replaced from the current squad. Each match's goals are drawn from the same Poisson (xG) the
         matchup odds use — scaled by the squad-quality gap, home advantage and recent form — with each match
         drawing its own xG around that projection, so the campaign has its flat nights and its 4-1s. Scorers are
         weighted by the same attributes, roles and tactics. Level ties go to extra time, then penalties.</div></div>`;

@@ -754,6 +754,48 @@ _SQUAD_POS = {"keepers": "Goalkeeper", "defenders": "Defender",
               "midfielders": "Midfielder", "attackers": "Forward"}
 
 
+_LAST_XI: dict = {}
+
+
+def last_xi(team_id) -> dict | None:
+    """The eleven a club actually last started, and the shape they started in.
+
+    Walks back from the most recent finished match until it finds one with a published
+    lineup — a game can finish without FotMob ever carrying the teamsheet, and taking only
+    the latest fixture would silently return nothing for those clubs. Cached for six hours,
+    because a campaign meets a dozen opponents and each lookup is a fixture list plus up to
+    four match fetches.
+    """
+    key = str(team_id)
+    hit = _LAST_XI.get(key)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    out = None
+    try:
+        ov = (_team(team_id) or {}).get("overview") or {}
+        fin = [f for f in (ov.get("overviewFixtures") or [])
+               if (f.get("status") or {}).get("finished")]
+        for f in sorted(fin, key=lambda x: (x.get("status") or {}).get("utcTime") or "",
+                        reverse=True)[:4]:
+            lu = lineups(f.get("id"))
+            if not lu.get("available"):
+                continue
+            is_home = (f.get("home") or {}).get("id") == team_id
+            side = lu["home"] if is_home else lu["away"]
+            names = [p.get("name") for p in ((side or {}).get("starting_xi") or [])
+                     if p.get("name")]
+            if len(names) >= 11:
+                other = (f.get("away") if is_home else f.get("home")) or {}
+                out = {"formation": side.get("formation"), "names": names[:11],
+                       "opponent": other.get("name"),
+                       "ts": _iso_ts((f.get("status") or {}).get("utcTime"))}
+                break
+    except Exception:                                      # noqa: BLE001
+        out = None
+    _LAST_XI[key] = (time.time() + 6 * 3600, out)
+    return out
+
+
 def national_team(team_id: int) -> dict:
     t = _team(team_id)
     det = (t or {}).get("details") or {}

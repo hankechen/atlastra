@@ -584,6 +584,72 @@ def _wc_opponent(d, row):
             "tactics": tactics.DEFAULT_TACTICS, "form": 0.0}
 
 
+_UCL_LAST: dict = {}
+
+
+def _ucl_last_matches():
+    """team id -> the event id of that club's most recent finished CHAMPIONS LEAGUE match.
+
+    Built from the competition's own fixture list rather than each club's recent form, which
+    is the whole point: a club's genuinely last teamsheet is usually a league or cup game,
+    and Bayern's was a 4-2-3-1 of reserves against Wehen Wiesbaden. What a side puts out in
+    this competition is a different question from what it puts out on a Tuesday in the cup.
+    """
+    import time as _t
+    hit = _UCL_LAST.get("rows")
+    if hit and hit[0] > _t.time():
+        return hit[1]
+    out: dict = {}
+    try:
+        auth = getattr(_fotmob_mod(), "_auth", None)
+        raw = auth.get(f"/api/data/leagues?id={_UCL_LEAGUE_ID}&season={_UCL_SEASON}") if auth else {}
+        for m in ((raw or {}).get("fixtures") or {}).get("allMatches") or []:
+            if not (m.get("status") or {}).get("finished"):
+                continue
+            ts = (m.get("status") or {}).get("utcTime") or ""
+            for side in ("home", "away"):
+                tid = str((m.get(side) or {}).get("id") or "")
+                if not tid:
+                    continue
+                if tid not in out or ts > out[tid][1]:
+                    out[tid] = (m.get("id"), ts, side)
+    except Exception:                                      # noqa: BLE001
+        out = {}
+    if out:
+        _UCL_LAST["rows"] = (_t.time() + 6 * 3600, out)
+    return out
+
+
+def _last_used_xi(squad, tid):
+    """The eleven this club last started IN THE CHAMPIONS LEAGUE, mapped onto our squad.
+
+    None sends the caller back to the auto XI — when the club played no match in the
+    competition, when FotMob never published the teamsheet, or when fewer than eleven of the
+    names resolve against our squad (a side with holes in it is worse than a built one).
+
+    No rotation guard: a side that rested players in a dead-rubber league-phase game still
+    chose that eleven for this competition, and second-guessing it would put back exactly the
+    made-up judgement that using the real teamsheet removes.
+    """
+    if not tid:
+        return None
+    rec = _ucl_last_matches().get(str(tid))
+    if not rec:
+        return None
+    eid, _ts, side = rec
+    try:
+        lu = live_feed.lineups(int(eid))
+    except Exception:                                      # noqa: BLE001
+        return None
+    if not lu.get("available"):
+        return None
+    sd = lu.get(side) or {}
+    names = [p.get("name") for p in (sd.get("starting_xi") or []) if p.get("name")]
+    if len(names) < 11:
+        return None
+    return tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names[:11])
+
+
 def _ucl_opponent(d, row):
     """Materialise one club from the field — its real current squad, an auto XI in a stock
     shape, unit strengths and recent form. Only the clubs actually drawn are ever built
@@ -591,7 +657,7 @@ def _ucl_opponent(d, row):
     squad = _tac_squad(d, row["name"], tid=row.get("id"))
     if not squad:
         return None
-    xi = tactics.build_xi(squad, "4-3-3")
+    xi = _last_used_xi(squad, row.get("id")) or tactics.build_xi(squad, "4-3-3")
     if not any(s.get("player") for s in xi):
         return None
     return {"name": row["name"], "logo": row.get("logo"), "xi": xi,

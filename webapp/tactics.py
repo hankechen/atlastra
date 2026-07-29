@@ -408,6 +408,124 @@ def build_xi(squad: list[dict], formation: str) -> list[dict]:
     return xi
 
 
+def _name_key(n: str) -> str:
+    return " ".join((n or "").lower().replace(".", " ").replace("-", " ").split())
+
+
+# Placing a known eleven is a different problem from choosing one, and wants a looser idea
+# of what a player can do. A holding midfielder listed CDM plainly can fill a central
+# midfield slot — Declan Rice does it — but widening FAMILY_POS itself to say so made the
+# auto XI measurably worse (log loss 1.0004 -> 1.0019, points MAE 7.80 -> 8.09), because
+# build_xi then had more ways to fill a slot with someone who was not the right answer. So
+# the looser map lives here, where the player is already chosen and only his slot is in
+# question.
+_PLACE_ALSO = {"CM": {"CDM"}, "DM": {"LCM", "RCM"}, "WM": {"LB", "RB", "LWB", "RWB"}}
+
+
+def _fits(pos, family):
+    return pos in FAMILY_POS[family] or pos in _PLACE_ALSO.get(family, ())
+
+
+def _assign(picked, slots):
+    """Best pairing of these players to these slots, and how good it is. Greedy on fit:
+    take the strongest player/slot pair, remove both, repeat."""
+    pairs = []
+    for pi, p in enumerate(picked):
+        pos = (p.get("position") or "").upper()
+        for si, sl in enumerate(slots):
+            # A player in a slot he cannot play has to COST, not merely fail to score. At
+            # zero it ties with leaving the slot empty, and three shapes then scored within
+            # 0.04 of each other for Arsenal's eleven — so the reported formation won on its
+            # tie-break and put a centre-back at attacking midfield.
+            fit = 2.0 if _fits(pos, sl["family"]) else -1.5
+            if sl["family"] == "GK" or pos in ("GK", "G"):  # never guess at the keeper
+                fit = 3.0 if (sl["family"] == "GK" and pos in ("GK", "G")) else -5.0
+            pairs.append((fit + _side_bonus(p, sl) / 100.0, pi, si))
+    pairs.sort(reverse=True)
+    used_p, used_s, score = set(), {}, 0.0
+    for fit, pi, si in pairs:
+        if pi in used_p or si in used_s:
+            continue
+        used_p.add(pi)
+        used_s[si] = picked[pi]
+        score += fit
+        if len(used_s) == len(slots):
+            break
+    return used_s, score
+
+
+def build_named_xi(squad: list[dict], formation: str, names: list[str],
+                   max_missing: int = 3) -> list[dict] | None:
+    """Field THESE eleven players, rather than the best eleven.
+
+    build_xi() answers "who should play"; this answers "who did". Each named starter is
+    resolved against the squad (full name, then initial+surname, then surname) and the
+    eleven are assigned to slots by how well each player's listed position fits each one.
+
+    The shape follows the PERSONNEL, not the label. A reported formation is how the
+    broadcast described it, and the two disagree often enough to matter: Arsenal's last
+    Champions League eleven is filed as a 4-2-3-1 and contains three centre-backs, so forcing
+    it into our four-slot back line put William Saliba at attacking midfield. Every shape we
+    hold is tried and the best-fitting one wins, with the reported formation preferred when
+    it is as good — which it usually is.
+
+    Squads move on and teamsheets do not: the eleven a club last put out routinely contains
+    someone since sold. Up to `max_missing` unresolved names are allowed and their slots are
+    filled the way build_xi() would fill them. Beyond that the teamsheet is too far out of
+    date to be the side we mean, and None sends the caller back to the auto XI.
+    """
+    idx: dict = {}
+    for p in squad:
+        n = _name_key(p.get("player") or "")
+        if not n:
+            continue
+        t = n.split()
+        for k in (n, (t[0][0] + "|" + t[-1]) if len(t) >= 2 else None, t[-1]):
+            if k and k not in idx:
+                idx[k] = p
+    picked, seen = [], set()
+    for nm in names:
+        n = _name_key(nm)
+        t = n.split()
+        for k in (n, (t[0][0] + "|" + t[-1]) if len(t) >= 2 else None, t[-1] if t else None):
+            if k and idx.get(k) and idx[k]["player"] not in seen:
+                seen.add(idx[k]["player"])
+                picked.append(idx[k])
+                break
+    if len(picked) < 11 - max_missing:
+        return None
+    best = None
+    for name, slots in FORMATIONS.items():
+        if len(slots) != 11:
+            continue
+        used_s, score = _assign(picked, slots)
+        score += 0.5 if name == formation else 0.0        # tie-break toward the reported shape
+        if best is None or score > best[0]:
+            best = (score, slots, used_s)
+    if not best:
+        return None
+    _score, slots, used_s = best
+    # Whoever has left the club since: fill their slot from the squad as usual.
+    taken = {p["player"] for p in used_s.values()}
+    pool = sorted(squad, key=lambda p: -(p.get("rating") or 0))
+    for si, sl in enumerate(slots):
+        if si in used_s:
+            continue
+        elig = FAMILY_POS[sl["family"]]
+        cands = [p for p in pool if p["player"] not in taken
+                 and (p.get("position") or "").upper() in elig]
+        pick = max(cands, key=lambda p: (p.get("rating") or 0) + _side_bonus(p, sl),
+                   default=None) or next((p for p in pool if p["player"] not in taken), None)
+        if pick:
+            taken.add(pick["player"])
+            used_s[si] = pick
+    out = [{**sl, "player": used_s.get(si),
+            "role": _best_role(sl["family"], used_s[si]) if used_s.get(si)
+            else DEFAULT_ROLE[sl["family"]]}
+           for si, sl in enumerate(slots)]
+    return out if all(x["player"] for x in out) else None
+
+
 # --------------------------------------------------------------- the model --- #
 def _units(xi: list[dict]) -> dict:
     """Aggregate the XI into team unit strengths (0-99), applying each player's role."""

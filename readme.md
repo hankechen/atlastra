@@ -75,7 +75,9 @@ seasons of per-90 output, real league tables and the real Champions League field
   position map; playstyle **chemistry** listing every synergy and clash by name; and an AI analyst read.
 - **Simulations** — a full-season projection with the real league table, a single match played out of
   the matchup's own odds (scorers, assists, bookings, timeline, man of the match), and a complete
-  **Champions League campaign**: the real 36-club league phase, your points slotted into the real
+  **Champions League campaign**: the real 36-club league phase, with every opponent fielding the eleven and
+  shape they last used *in that competition* (a club's genuinely last teamsheet is usually a rotated league or
+  cup side, which is a different team), your points slotted into the real
   table, then the bracket — two legs, extra time, penalties — either resolved instantly or played out
   match by match with the goals landing as the clock runs. Ends with campaign leaderboards.
 - **World Cup** — the same idea in the 2026 format, which is a different tournament rather than a
