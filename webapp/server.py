@@ -493,6 +493,11 @@ _WC_ALIAS = {"czechia": "Czech Republic", "turkiye": "Turkey",
              "cape verde": "Cape Verde Islands", "dr congo": "Congo DR",
              "south korea": "Korea Republic"}
 _WC_HOSTS = ("United States", "Mexico", "Canada")          # 2026 is played across all three
+# Six nations carry no country code anywhere in the warehouse — the same spellings that need
+# the alias map above. Without these they draw no flag, which in a 48-team tournament is
+# noticeable. ISO 3166-1 alpha-2.
+_WC_CC = {"bosnia and herzegovina": "BA", "haiti": "HT", "turkiye": "TR",
+          "curacao": "CW", "cape verde": "CV", "dr congo": "CD"}
 _WC_FIELD: dict = {}
 
 
@@ -502,10 +507,19 @@ def _wc_field(d, season="2026"):
     if _WC_FIELD.get("rows"):
         return _WC_FIELD["rows"]
     try:
+        # A handful of sides have no country code on their standings row, so fall back to
+        # the one their own matches carry — without it those nations draw no flag at all.
         rows = d.con.execute(
-            """SELECT s.team, s.cc, s.group_name, s.position, f.ranking
+            """SELECT s.team, coalesce(s.cc, mh.home_cc, ma.away_cc),
+                      s.group_name, s.position, f.ranking
                FROM wc_standings s
                LEFT JOIN fifa_rankings f ON f.team_name = s.team
+               LEFT JOIN (SELECT DISTINCT season, home_name, home_cc FROM wc_matches
+                          WHERE home_cc IS NOT NULL) mh
+                 ON mh.season = s.season AND mh.home_name = s.team
+               LEFT JOIN (SELECT DISTINCT season, away_name, away_cc FROM wc_matches
+                          WHERE away_cc IS NOT NULL) ma
+                 ON ma.season = s.season AND ma.away_name = s.team
                WHERE s.season = ? AND s.group_name LIKE 'Group%'
                ORDER BY s.group_name, s.position""", [season]).fetchall()
     except Exception:                                      # noqa: BLE001
@@ -516,7 +530,8 @@ def _wc_field(d, season="2026"):
     out = []
     for team, cc, grp, pos, rank in rows:
         out.append({"name": team, "squad_name": _WC_ALIAS.get((team or "").lower(), team),
-                    "cc": cc, "group": grp, "pos": pos,
+                    "cc": cc or _WC_CC.get((team or "").lower()),
+                    "group": grp, "pos": pos,
                     "rank": int(rank) if rank else 100})
     if out:
         _WC_FIELD["rows"] = out
@@ -579,7 +594,10 @@ def _wc_opponent(d, row):
     xi = tactics.build_xi(squad, "4-3-3")
     if not any(s.get("player") for s in xi):
         return None
-    return {"name": row["name"], "logo": row.get("logo"), "xi": xi,
+    # Nations have no crest URL — the site draws them as a flag from the ISO country code,
+    # so that is what has to travel with the side. Passing `logo` alone left every team in
+    # the tournament with no image at all.
+    return {"name": row["name"], "logo": row.get("logo"), "cc": row.get("cc"), "xi": xi,
             "units": tactics.team_units(xi, tactics.DEFAULT_TACTICS),
             "tactics": tactics.DEFAULT_TACTICS, "form": 0.0}
 

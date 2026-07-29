@@ -931,7 +931,7 @@ async function playMatch(fx, play) {
       <div class="tl-ulteams">
         <span class="tl-ulteam you">${esc(cur().team)}</span>
         <span class="tl-ulscore" id="ulScore">0<i>–</i>0</span>
-        <span class="tl-ulteam opp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}${esc(m.opponent)}</span>
+        <span class="tl-ulteam opp">${wcCrest(m)}${esc(m.opponent)}</span>
       </div>
       <div class="tl-ulclock"><i id="ulBar" style="width:0%"></i><b id="ulMin">0'</b></div>
       <div class="tl-ulfeed" id="ulFeed"><div class="tl-ulnil">Kick-off…</div></div>
@@ -1043,6 +1043,19 @@ function uclHTML(r) {
         weighted by the same attributes, roles and tactics. Level ties go to extra time, then penalties.</div></div>`;
 }
 
+// Nations have no crest, so the World Cup draws them the way every other national-team
+// screen does: a flag emoji from the ISO country code (api.js), with the home nations
+// special-cased because they have no ISO code of their own. Falls back to a crest for a
+// club side that entered the tournament, and to nothing at all rather than a broken image.
+function wcCrest(t) {
+  const cc = t && t.cc;
+  if (cc || (t && HOME_NATION[t.name || t.opponent])) {
+    const f = (HOME_NATION[t.name || t.opponent] ? flagEmoji(HOME_NATION[t.name || t.opponent]) : flagISO2(cc)) || '';
+    if (f) return `<span class="wc-flag">${f}</span>`;
+  }
+  return t && t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : '';
+}
+
 // ---- World Cup: the 48-team tournament, group stage then five single matches ----
 // Structurally different from the Champions League run above, and the difference is the
 // point: every knockout round is ONE match, so a weaker side survives far more often than
@@ -1147,7 +1160,7 @@ function wcMatchRow(m) {
   return `<div class="tl-umrow ${res}">
       <span class="tl-umlbl">${esc(m.label || m.round || '')}</span>
       <span class="tl-umven ${m.venue === 'H' ? 'h' : 'n'}">${m.venue === 'H' ? 'H' : 'N'}</span>
-      <span class="tl-umopp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}<span>${esc(m.opponent)}</span></span>
+      <span class="tl-umopp">${wcCrest(m)}<span>${esc(m.opponent)}</span></span>
       <span class="tl-umsc">${m.score.us}<i>–</i>${m.score.them}${m.extra_time ? '<em>aet</em>' : ''}${pens}</span>
       ${uclGoals(m)}</div>`;
 }
@@ -1156,12 +1169,12 @@ function wcHTML(r) {
   const fixtures = (g.matches || []).map(wcMatchRow).join('');
   const table = (g.table || []).map((t, i) => `<tr class="${t.is_user ? 'you' : ''} ${i < 2 ? 'q8' : (i === 2 ? 'q16' : '')}">
       <td class="tl-stpos">${i + 1}</td>
-      <td class="tl-stteam">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span>${esc(t.name)}</span></td>
+      <td class="tl-stteam">${wcCrest(t)}<span>${esc(t.name)}</span></td>
       <td class="tl-stpts">${t.pts}</td>
       <td class="tl-stpts">${t.gf}–${t.ga}</td></tr>`).join('');
   const ties = (r.ties || []).map((m) => `<div class="tl-utie ${m.won ? 'won' : 'lost'}">
       <div class="tl-utieh"><span class="tl-utier">${esc(m.round)}</span>
-        <span class="tl-umopp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}<b>${esc(m.opponent)}</b></span>
+        <span class="tl-umopp">${wcCrest(m)}<b>${esc(m.opponent)}</b></span>
         <span class="tl-utiebadge">${m.won ? 'Through' : 'Out'}</span></div>
       ${wcMatchRow({ ...m, label: '' })}</div>`).join('');
   const leaders = (r.leaders || []).map((cat) => `<div class="tl-lcat">

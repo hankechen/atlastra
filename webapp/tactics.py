@@ -2223,6 +2223,7 @@ def _wc_match(rng, A, B, venue, rnd, label=None, knockout=False):
     evs.sort(key=lambda e: e["minute"])
     won = (gf > ga) if not pens else (pens["us"] > pens["them"])
     return {"round": rnd, "label": label, "opponent": B["name"], "logo": B.get("logo"),
+            "cc": B.get("cc"),                             # nations are drawn as a flag
             "venue": venue, "score": {"us": gf, "them": ga},
             "xg": {"us": xg, "them": oxg}, "possession": poss,
             "extra_time": extra, "pens": pens,
@@ -2274,6 +2275,7 @@ def simulate_wc(xi, tactics, team, field, build_opp, form_home=None, seed=None,
     A = {"name": team, "xi": xi, "tactics": t, "units": u, "form": form_home or 0.0,
          "chem_mult": _clamp_f(1 + 0.006 * (chem["score"] - _CHEM_BASE), 0.90, 1.10)}
     rows = [{**r} for r in field]
+    A["cc"] = next((r.get("cc") for r in rows if _ucl_same(r["name"], team)), None)
 
     # A side that is not in the real field takes the lowest-ranked qualifier's place, so the
     # tournament is still played against the real 48 — the same substitution the Champions
@@ -2375,6 +2377,7 @@ def simulate_wc(xi, tactics, team, field, build_opp, form_home=None, seed=None,
     outcome["line"] = _wc_story(team, outcome, place, my_group, ties)
     return {
         "available": True, "team": team, "seed": seed, "chemistry": chem["score"],
+        "cc": A.get("cc"), "team_logo": team_logo,
         "group": {"name": my_group, "matches": group_matches, "record": rec,
                   "table": my_table, "place": place, "path": path,
                   "through": through, "substituted_for": substituted},
