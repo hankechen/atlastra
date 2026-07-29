@@ -169,9 +169,15 @@ _POS_LINE = {11: "G"}                                 # positionId 11 = goalkeep
 def _lineup_side(team: dict, subs_evts: dict) -> dict:
     def row(p, starter):
         pid = p.get("id")
+        # FotMob places every starter on a normalised pitch — verticalLayout.x across the
+        # width, .y from own goal to opponent's. That is where the player ACTUALLY lined up,
+        # which is better positional truth than any label, and it was being thrown away.
+        lay = p.get("verticalLayout") or {}
         return {"id": pid, "name": p.get("name"),
                 "number": p.get("shirtNumber"),
                 "position": "G" if p.get("positionId") == 11 else None,
+                "pos_id": p.get("positionId"),
+                "lx": lay.get("x"), "ly": lay.get("y"),
                 "captain": bool(p.get("isCaptain")),
                 "rating": (p.get("performance") or {}).get("rating"),
                 "subbed_in": subs_evts.get(pid, {}).get("in"),

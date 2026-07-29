@@ -678,10 +678,16 @@ def _last_used_xi(squad, tid):
     if not lu.get("available"):
         return None
     sd = lu.get(side) or {}
-    names = [p.get("name") for p in (sd.get("starting_xi") or []) if p.get("name")]
+    starters = (sd.get("starting_xi") or [])[:11]
+    names = [p.get("name") for p in starters if p.get("name")]
     if len(names) < 11:
         return None
-    return tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names[:11])
+    # Where each of them stood, if FotMob published it. That reproduces the real shape rather
+    # than the nearest preset — and it settles the players a card's listed position gets
+    # wrong, like a winger who played the match as a centre-forward.
+    laid = tactics.build_layout_xi(
+        squad, [{"name": p.get("name"), "x": p.get("lx"), "y": p.get("ly")} for p in starters])
+    return laid or tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names)
 
 
 def _ucl_opponent(d, row):
@@ -1108,7 +1114,7 @@ def api(path: str, q: dict) -> dict | list:
             squad = [] if blank else _tac_squad(d, team)
             real = _last_used_xi(squad, _club_tid(team)) if (squad and auto) else None
             if real:
-                formation = tactics.formation_of(real) or formation
+                formation = tactics.formation_of(real) or "Custom"
             xi = real or tactics.build_xi(squad, formation) if squad else (
                 [{"id": s["id"], "family": s["family"], "line": s["line"], "x": s["x"],
                   "y": s["y"], "role": tactics.DEFAULT_ROLE.get(s["family"], ""),

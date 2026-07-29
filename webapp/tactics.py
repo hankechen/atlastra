@@ -434,6 +434,90 @@ def _fits(pos, family):
     return pos in FAMILY_POS[family] or pos in _PLACE_ALSO.get(family, ())
 
 
+# Where a player stood, turned into what he was doing. FotMob puts every starter on a
+# normalised pitch, so the line comes from how far up he is and the lane from how wide —
+# which beats mapping thirty-odd position ids by hand, and beats his card's listed position
+# outright. A winger who played as a false nine is a false nine.
+_WIDE = 0.22             # inside this of either touchline is a wide role, not a central one
+
+
+def _family_at(x, y):
+    wide = x < _WIDE or x > 1 - _WIDE
+    if y < 0.20:
+        return "GK", "GK"
+    if y < 0.42:
+        return ("FB" if wide else "CB"), "DEF"
+    if y < 0.55:
+        return ("WM" if wide else "DM"), "MID"
+    if y < 0.72:
+        return ("W" if wide else ("AM" if y > 0.62 else "CM")), "MID"
+    return ("W" if wide else "ST"), "ATT"
+
+
+def build_layout_xi(squad, players):
+    """An XI laid out where the eleven actually stood.
+
+    `players` is [{'name', 'x', 'y'}] on FotMob's 0-1 pitch. Each becomes a slot at those
+    coordinates with the family its position on the pitch implies, so the shape is the real
+    one rather than the nearest preset — a back three with wing-backs high, a false nine, a
+    lone holder behind two eights. Names that no longer resolve (sold since) are filled from
+    the current squad by the same rule build_xi uses.
+
+    None if the layout is unusable, which sends the caller back to a preset.
+    """
+    pl = [p for p in (players or []) if p.get("x") is not None and p.get("y") is not None]
+    if len(pl) != 11:
+        return None
+    # FotMob's width runs the other way from ours: its x=0 is the side our x=100 is. Left
+    # unflipped, every right-sided player came out on the left — Saka, Yamal and
+    # Alexander-Arnold all lined up on the wrong flank, which also mis-set their side bonus.
+    pl = [{**p, "x": 1.0 - float(p["x"])} for p in pl]
+    idx = {}
+    for p in squad:
+        n = _name_key(p.get("player") or "")
+        if not n:
+            continue
+        t = n.split()
+        for k in (n, (t[0][0] + "|" + t[-1]) if len(t) >= 2 else None, t[-1]):
+            if k and k not in idx:
+                idx[k] = p
+    out, used = [], set()
+    for i, p in enumerate(sorted(pl, key=lambda q: (q["y"], q["x"]))):
+        fam, line = _family_at(float(p["x"]), float(p["y"]))
+        n = _name_key(p.get("name") or "")
+        t = n.split()
+        who = None
+        for k in (n, (t[0][0] + "|" + t[-1]) if len(t) >= 2 else None, t[-1] if t else None):
+            if k and idx.get(k) and idx[k]["player"] not in used:
+                who = idx[k]
+                break
+        if who:
+            used.add(who["player"])
+        out.append({"id": f"{fam}{i}", "family": fam, "line": line,
+                    "x": round(float(p["x"]) * 100), "y": round(float(p["y"]) * 100),
+                    "player": who,
+                    "role": _best_role(fam, who) if who else DEFAULT_ROLE[fam]})
+    missing = [s for s in out if not s["player"]]
+    if len(missing) > 3:
+        return None
+    pool = sorted(squad, key=lambda q: -(q.get("rating") or 0))
+    for s in missing:
+        elig = FAMILY_POS[s["family"]]
+        gk = s["family"] == "GK"
+        cands = [q for q in pool if q["player"] not in used
+                 and (q.get("position") or "").upper() in elig]
+        pick = max(cands, key=lambda q: (q.get("rating") or 0) + _side_bonus(q, s),
+                   default=None) or next(
+            (q for q in pool if q["player"] not in used
+             and ((q.get("position") or "").upper() in ("GK", "G")) == gk), None)
+        if not pick:
+            return None
+        used.add(pick["player"])
+        s["player"] = pick
+        s["role"] = _best_role(s["family"], pick)
+    return out
+
+
 def formation_of(xi):
     """Which of our shapes this XI is in, by its slot ids. build_named_xi picks the shape
     that fits the personnel, so the caller has to be told what it chose."""

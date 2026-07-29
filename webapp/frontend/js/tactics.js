@@ -85,6 +85,12 @@ async function loadAll() {
   if (cur().error) { document.getElementById('tlBody').innerHTML = `<div class="empty-state">No squad data for “${esc(cur().team)}”. Try a top-5-league team.</div>`; return; }
   const fs = document.getElementById('formSel');
   fs.innerHTML = S.formations.map((f) => `<option${f === cur().formation ? ' selected' : ''}>${f}</option>`).join('');
+  // A real teamsheet is laid out where the eleven actually stood, which is rarely one of our
+  // five presets — so the selector has to be able to show that it is a shape of its own.
+  if (cur().formation === 'Custom') {
+    if (!Array.from(fs.options).some((o) => o.value === 'Custom')) fs.add(new Option('Custom', 'Custom'));
+    fs.value = 'Custom';
+  }
   // Say where the eleven came from, so a lineup that isn't the strongest available reads as
   // a real selection rather than as the picker getting it wrong.
   const ls = document.getElementById('tlLineupSrc');
