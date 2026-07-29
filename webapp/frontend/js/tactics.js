@@ -95,8 +95,10 @@ async function loadAll() {
   // a real selection rather than as the picker getting it wrong.
   const ls = document.getElementById('tlLineupSrc');
   if (ls) {
-    ls.textContent = cur().lineupSource === 'last-ucl' ? 'last Champions League XI' : '';
-    ls.hidden = cur().lineupSource !== 'last-ucl';
+    const src = cur().lineupSource;
+    ls.textContent = src === 'last-ucl' ? 'last Champions League XI'
+      : (src === 'last-wc' ? 'last World Cup XI' : '');
+    ls.hidden = !ls.textContent;
   }
   S.lastMetrics = { A: null, B: null };
   render(); runSim();

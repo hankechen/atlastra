@@ -588,13 +588,78 @@ def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+_WC_LAST: dict = {}
+
+
+def _wc_last_matches(d, season="2026"):
+    """nation -> the event id of its most recent finished World Cup match, and which side it
+    was. The tournament's own fixtures, for the same reason the club version uses the
+    Champions League's: what a side puts out in this competition is its own question."""
+    if _WC_LAST.get("rows"):
+        return _WC_LAST["rows"]
+    out: dict = {}
+    try:
+        rows = d.con.execute(
+            """SELECT event_id, match_date, home_name, away_name
+               FROM wc_matches
+               WHERE season = ? AND home_goals IS NOT NULL AND event_id IS NOT NULL
+               ORDER BY match_date""", [season]).fetchall()
+    except Exception:                                      # noqa: BLE001
+        return {}
+    for eid, _dt, home, away in rows:                      # ascending, so the last write wins
+        for name, side in ((home, "home"), (away, "away")):
+            if name:
+                out[(name or "").lower()] = (eid, side)
+    if out:
+        _WC_LAST["rows"] = out
+    return out
+
+
+def _wc_last_xi(d, team, squad):
+    """The eleven this nation last started at the World Cup, laid out where they stood."""
+    rec = _wc_last_matches(d).get((team or "").lower())
+    if not rec or not squad:
+        return None
+    eid, side = rec
+    try:
+        lu = live_feed.lineups(int(eid))
+    except Exception:                                      # noqa: BLE001
+        return None
+    sd = (lu.get(side) or {}) if lu.get("available") else {}
+    starters = (sd.get("starting_xi") or [])[:11]
+    names = [p.get("name") for p in starters if p.get("name")]
+    if len(names) < 11:
+        return None
+    laid = tactics.build_layout_xi(
+        squad, [{"name": p.get("name"), "x": p.get("lx"), "y": p.get("ly")} for p in starters])
+    return laid or tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names)
+
+
+def _default_xi(d, team, squad):
+    """A side's own lineup, and where it came from: its last Champions League eleven for a
+    club, its last World Cup eleven for a nation. (None, None) means we hold no teamsheet for
+    it and the caller should auto-pick.
+
+    The source travels with the XI because the interface says which it is — a lineup that
+    isn't the strongest available has to read as a real selection, and "last World Cup XI"
+    explains a choice that "last Champions League XI" would not."""
+    if not squad:
+        return None, None
+    from webapp import fifa as _fifa
+    if not _fifa.is_club(team):
+        xi = _wc_last_xi(d, team, squad)
+        if xi:
+            return xi, "last-wc"
+    return _last_used_xi(squad, _club_tid(team)), "last-ucl"
+
+
 def _wc_opponent(d, row):
     """Materialise one nation — its World Cup squad, an auto XI and unit strengths. Built
     lazily and cached, so a tournament costs only the sides actually met."""
     squad = _national_squad(d, row.get("squad_name") or row["name"])
     if not squad:
         return None
-    xi = tactics.build_xi(squad, "4-3-3")
+    xi = _wc_last_xi(d, row["name"], squad) or tactics.build_xi(squad, "4-3-3")
     if not any(s.get("player") for s in xi):
         return None
     # Nations have no crest URL — the site draws them as a flag from the ISO country code,
@@ -1112,7 +1177,7 @@ def api(path: str, q: dict) -> dict | list:
             # past seasons included. Nothing is pre-picked, so every slot is yours.
             blank = team in ("__custom__", "Custom XI")
             squad = [] if blank else _tac_squad(d, team)
-            real = _last_used_xi(squad, _club_tid(team)) if (squad and auto) else None
+            real, real_src = _default_xi(d, team, squad) if (squad and auto) else (None, None)
             if real:
                 formation = tactics.formation_of(real) or "Custom"
             xi = real or tactics.build_xi(squad, formation) if squad else (
@@ -1121,7 +1186,7 @@ def api(path: str, q: dict) -> dict | list:
                   "player": None} for s in tactics.FORMATIONS[formation]] if blank else [])
             return {"available": bool(squad) or blank, "custom": blank,
                     "team": "Custom XI" if blank else team, "formation": formation,
-                    "lineup_source": "last-ucl" if real else "auto",
+                    "lineup_source": real_src if real else "auto",
                     "squad": squad, "xi": _xi_wire(xi),
                     "formations": list(tactics.FORMATIONS.keys()),
                     "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,
