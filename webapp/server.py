@@ -295,6 +295,12 @@ def _tac_squad(d, team, tid=None):
     # Breakout boost: if a player's current-season Atlas league/UCL rating clears their FIFA
     # overall, they over-performed the market's assessment — nudge their effective rating and
     # attributes up so the sim rewards it. FIFA remains the base (Atlas is season-dependent).
+    # A national side comes back on the tournament-performance scale, which is not the scale
+    # the engine reads. Re-price it here so the user's own country is measured exactly the
+    # way its opponents are — before this, only the opponents were corrected.
+    from webapp import fifa as _fifa
+    if not tid and not _fifa.is_club(team):
+        _reprice_national(d, sq)
     atlas = d.atlas_rating_index() if hasattr(d, "atlas_rating_index") else {}
     for p in sq:
         _apply_breakout(p, atlas)
@@ -475,6 +481,104 @@ def _ucl_field():
     if rows:
         _UCL_FIELD["rows"] = (_t.time() + 6 * 3600, rows)
     return rows
+
+
+# ---- World Cup field -------------------------------------------------------------- #
+# The 2026 tournament as it was actually drawn: 48 nations, twelve groups of four. Names in
+# wc_standings do not always match the ones our player data is keyed on — six of the 48
+# differ (Czechia/Czech Republic, Turkiye/Turkey, Ivory Coast/Côte d'Ivoire, and so on) —
+# and without this map those sides silently drop out of the tournament.
+_WC_ALIAS = {"czechia": "Czech Republic", "turkiye": "Turkey",
+             "ivory coast": "Côte d'Ivoire", "curacao": "Curaçao",
+             "cape verde": "Cape Verde Islands", "dr congo": "Congo DR",
+             "south korea": "Korea Republic"}
+_WC_HOSTS = ("United States", "Mexico", "Canada")          # 2026 is played across all three
+_WC_FIELD: dict = {}
+
+
+def _wc_field(d, season="2026"):
+    """The 48-team field with each side's group and FIFA ranking. Cached — it is a fixed
+    tournament, not a live table."""
+    if _WC_FIELD.get("rows"):
+        return _WC_FIELD["rows"]
+    try:
+        rows = d.con.execute(
+            """SELECT s.team, s.cc, s.group_name, s.position, f.ranking
+               FROM wc_standings s
+               LEFT JOIN fifa_rankings f ON f.team_name = s.team
+               WHERE s.season = ? AND s.group_name LIKE 'Group%'
+               ORDER BY s.group_name, s.position""", [season]).fetchall()
+    except Exception:                                      # noqa: BLE001
+        return []
+    out = []
+    for team, cc, grp, pos, rank in rows:
+        out.append({"name": team, "squad_name": _WC_ALIAS.get((team or "").lower(), team),
+                    "cc": cc, "group": grp, "pos": pos,
+                    "rank": int(rank) if rank else 100})
+    if out:
+        _WC_FIELD["rows"] = out
+    return out
+
+
+def _national_squad(d, team):
+    """A national squad on the scale the ENGINE speaks.
+
+    tactics_squad() builds nations from wc_player_stats, whose `atlas_rating` measures how a
+    player performed across seven tournament matches. That is the right number for the World
+    Cup directory and the wrong one here: the engine's units, roles and card attributes are
+    all calibrated on EA FC overalls, which measure ABILITY. Feeding it tournament form put
+    Argentina's keeper at 36 and gave Haiti a better defence than Brazil, so a simulated
+    Brazil went out bottom of its group to Scotland and Haiti.
+
+    So each player is re-priced: his real EA FC card where he has one — most of a World Cup
+    is top-5 club players — and his Atlas rating mapped onto the EA FC scale by rank where he
+    does not, which is the same conversion the Lab already uses for historical seasons.
+    """
+    squad = d.tactics_squad(team) or []
+    return _reprice_national(d, squad)
+
+
+def _reprice_national(d, squad):
+    """Put a national squad on the EA FC scale in place. See _national_squad for why."""
+    if not squad:
+        return squad
+    from webapp import fifa
+    season = (d.con.execute("SELECT max(season) FROM wc_player_stats").fetchone() or [None])[0]
+    for p in squad:
+        card = fifa.match(p.get("player") or "")
+        if card and card.get("o"):
+            p["rating"] = card["o"]
+            p["fifa"] = {k: card[k] for k in ("o", "pac", "sho", "pas", "dri",
+                                              "def", "phy", "hea")}
+            if card.get("pos"):
+                p["position"] = card["pos"]
+        else:
+            # No card: put the tournament rating on the EA FC scale by rank, so a nation of
+            # uncapped players is weak rather than absurd.
+            try:
+                p["rating"] = d.atlas_to_fifa(p.get("rating") or 50, season,
+                                              tactics.family_for_position(p.get("position")))
+            except Exception:                              # noqa: BLE001
+                p["rating"] = int(_clamp(p.get("rating") or 50, 45, 80))
+    return squad
+
+
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+def _wc_opponent(d, row):
+    """Materialise one nation — its World Cup squad, an auto XI and unit strengths. Built
+    lazily and cached, so a tournament costs only the sides actually met."""
+    squad = _national_squad(d, row.get("squad_name") or row["name"])
+    if not squad:
+        return None
+    xi = tactics.build_xi(squad, "4-3-3")
+    if not any(s.get("player") for s in xi):
+        return None
+    return {"name": row["name"], "logo": row.get("logo"), "xi": xi,
+            "units": tactics.team_units(xi, tactics.DEFAULT_TACTICS),
+            "tactics": tactics.DEFAULT_TACTICS, "form": 0.0}
 
 
 def _ucl_opponent(d, row):
@@ -1277,6 +1381,27 @@ class Handler(BaseHTTPRequestHandler):
                     xi, b.get("tactics"), team, field, lambda row: _ucl_opponent(d, row),
                     form_home=_team_form(d, team).get("form"),
                     seed=_int(b.get("seed")) or None,
+                    team_logo=(f"https://images.fotmob.com/image_resources/logo/teamlogo/{own}.png"
+                               if own else None))
+            self._json(res)
+            return
+        if u.path == "/api/tactics/wc":                # Tactics Lab: play a World Cup
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                team = b.get("team", "")
+                field = _wc_field(d)
+                if not field:
+                    self._json({"available": False, "error": "World Cup field unavailable."})
+                    return
+                xi, _ = _tac_rebuild(d, team, b.get("xi"))
+                if not any(s.get("player") for s in xi):
+                    self._json({"available": False, "error": "Load a squad first."})
+                    return
+                own = _FOTMOB_TEAM_ID.get(team)
+                res = tactics.simulate_wc(
+                    xi, b.get("tactics"), team, field, lambda row: _wc_opponent(d, row),
+                    form_home=(_team_form(d, team) or {}).get("form"),
+                    seed=_int(b.get("seed")) or None,
+                    host=next((h for h in _WC_HOSTS if h.lower() == team.lower()), None),
                     team_logo=(f"https://images.fotmob.com/image_resources/logo/teamlogo/{own}.png"
                                if own else None))
             self._json(res)

@@ -1778,7 +1778,7 @@ def _ucl_fixtures(rng, rows, team, build):
     return fx
 
 
-def _ucl_xg(A, B, venue):
+def _ucl_xg(A, B, venue, gap_k=None):
     """The expected-goals pair for one match — the same metrics the matchup odds use,
     with squad-quality gap, playstyle chemistry, recent form and home advantage on top."""
     m = _metrics(A["units"], A["tactics"], B["units"], B["tactics"])
@@ -1790,7 +1790,7 @@ def _ucl_xg(A, B, venue):
     # amplifies the squad-quality gap — the same move the season projection makes — which
     # is what turns a 15-point rating gulf into the 4-0 those ties actually tend to be.
     gap = _clamp_f(A["units"].get("avg_rating", 74) - B["units"].get("avg_rating", 74), -15, 15)
-    edge = math.exp(_UCL_GAP_K * gap)
+    edge = math.exp((_UCL_GAP_K if gap_k is None else gap_k) * gap)
     xg, oxg = xg * edge, oxg / edge
     diff = (A.get("form") or 0.0) - (B.get("form") or 0.0)
     if diff:
@@ -1829,10 +1829,10 @@ def _ucl_match(rng, A, B, venue, rnd, label=None, damp=1.0):
             "contrib": _match_contrib(rng, A["xi"], xg)}
 
 
-def _ucl_extra_time(rng, A, B, venue, used, damp=1.0):
+def _ucl_extra_time(rng, A, B, venue, used, damp=1.0, gap_k=None):
     """Thirty more minutes when a tie is level — played at a fraction of the 90's rate,
     because sides that reach extra time are usually the ones afraid to lose it."""
-    exg, eoxg, _ = _ucl_xg(A, B, venue)
+    exg, eoxg, _ = _ucl_xg(A, B, venue, gap_k=gap_k)
     gf = _pois_draw(rng, _xg_draw(rng, exg * _UCL_ET_RATE * damp))
     ga = _pois_draw(rng, _xg_draw(rng, eoxg * _UCL_ET_RATE * damp))
     evs = (_goal_events(rng, A["xi"], gf, "us", used, et=True)
@@ -1983,6 +1983,372 @@ def _ord(n):
     if 10 <= n % 100 <= 20:
         return f"{n}th"
     return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+# ---------------------------------------------------- World Cup campaign ----- #
+# The 2026 format, which is not the old one: 48 teams in 12 groups of four, the top two of
+# each plus the eight best third-placed sides going through to a round of THIRTY-TWO, and
+# every knockout round a single match rather than two legs. That last difference matters more
+# than it sounds — a one-off is far more forgiving of a weaker side than a 180-minute tie, so
+# the tournament produces upsets the Champions League campaign never would.
+_WC_GROUPS = 12
+_WC_THIRDS = 8               # best third-placed sides that also qualify
+# A World Cup is played at neutral venues, so nobody gets the home leg the club campaign
+# hands out — except the hosts. Scoring also runs lower than a Champions League night: the
+# 2022 tournament averaged 2.69 goals a game against the UCL's 3.2, because international
+# sides defend deeper and have had a fortnight together rather than a season.
+_WC_XG_SCALE = 0.79
+_WC_HOST_XG = 1.06           # the hosts' crowd, well short of a true home leg
+# International football is a far greater leveller than the club game, and the numbers say
+# so: across 356 matches of the last five World Cups the better-ranked side wins only 43.8%
+# of the time when the two are within ten places, and even a 51-place gulf converts just
+# 71.9%. The club campaign's quality amplifier is much too sure of itself at that spread, so
+# the World Cup runs its own, calibrated against exactly those buckets (see tools/backtest).
+_WC_GAP_K = 0.070
+
+
+def _wc_group_table(rows):
+    """Order a group on points, then goal difference, then goals scored — FIFA's tiebreak
+    order down to the head-to-head, which we stop short of because a simulated group rarely
+    needs it and pretending otherwise would be false precision."""
+    return sorted(rows, key=lambda r: (-r["pts"], -(r["gf"] - r["ga"]), -r["gf"], r["name"]))
+
+
+def _wc_group_stage(rng, A, group_rows, opp, host=None):
+    """Every match in the user's group, including the three they are not in — a group table
+    is meaningless without them, and the third-place race needs all twelve groups scored the
+    same way."""
+    table = {r["name"]: {"name": r["name"], "logo": r.get("logo"), "cc": r.get("cc"),
+                         "pts": 0, "gf": 0, "ga": 0, "w": 0, "d": 0, "l": 0,
+                         "is_user": bool(_ucl_same(r["name"], A["name"]))}
+             for r in group_rows}
+    mine, others = [], []
+    names = [r["name"] for r in group_rows]
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            a, b = names[i], names[j]
+            if _ucl_same(a, A["name"]) or _ucl_same(b, A["name"]):
+                them = b if _ucl_same(a, A["name"]) else a
+                B = opp(next(r for r in group_rows if r["name"] == them))
+                if not B:
+                    continue
+                venue = "H" if host and _ucl_same(A["name"], host) else "N"
+                m = _wc_match(rng, A, B, venue, "Group stage",
+                              f"Match {len(mine) + 1}")
+                mine.append(m)
+                _wc_apply(table, A["name"], them, m["score"]["us"], m["score"]["them"])
+            else:
+                # The other fixture in the group. Simulated from the two sides' units so the
+                # table is played rather than assumed, but not stored as a match report —
+                # nobody wants a scorer list for a game they were not in.
+                X, Y = opp(next(r for r in group_rows if r["name"] == a)), \
+                    opp(next(r for r in group_rows if r["name"] == b))
+                if not X or not Y:
+                    continue
+                gf, ga = _wc_neutral(rng, X, Y, host)
+                others.append({"home": a, "away": b, "gf": gf, "ga": ga})
+                _wc_apply(table, a, b, gf, ga)
+    return mine, others, _wc_group_table(list(table.values()))
+
+
+def _wc_apply(table, a, b, gf, ga):
+    ta, tb = table.get(a), table.get(b)
+    if not ta or not tb:
+        return
+    ta["gf"] += gf; ta["ga"] += ga
+    tb["gf"] += ga; tb["ga"] += gf
+    if gf > ga:
+        ta["pts"] += 3; ta["w"] += 1; tb["l"] += 1
+    elif gf < ga:
+        tb["pts"] += 3; tb["w"] += 1; ta["l"] += 1
+    else:
+        ta["pts"] += 1; tb["pts"] += 1; ta["d"] += 1; tb["d"] += 1
+
+
+def _wc_sides(A, B, venue):
+    """xG for a neutral-venue international. The club campaign's home/away split is dropped
+    (only the hosts get anything) and the whole thing is scaled down to international rates."""
+    exg, eoxg, poss = _ucl_xg({**A, "form": A.get("form")}, B, "N", gap_k=_WC_GAP_K)
+    exg = exg / _UCL_XG_SCALE * _WC_XG_SCALE
+    eoxg = eoxg / _UCL_XG_SCALE * _WC_XG_SCALE
+    if venue == "H":                                       # hosts only
+        exg, eoxg = exg * _WC_HOST_XG, eoxg / _WC_HOST_XG
+    return exg, eoxg, poss
+
+
+def _wc_neutral(rng, X, Y, host=None):
+    """A match between two sides that are not the user's — scoreline only."""
+    venue = "H" if host and _ucl_same(X["name"], host) else "N"
+    exg, eoxg, _ = _wc_sides(X, Y, venue)
+    return (_pois_draw(rng, _xg_draw(rng, exg)),
+            _pois_draw(rng, _xg_draw(rng, eoxg)))
+
+
+def _wc_match(rng, A, B, venue, rnd, label=None, knockout=False):
+    """One World Cup match for the user's side. In the knockout rounds it cannot end level:
+    thirty minutes of extra time, then penalties."""
+    exg, eoxg, poss = _wc_sides(A, B, venue)
+    xg, oxg = _xg_draw(rng, exg), _xg_draw(rng, eoxg)
+    gf, ga = _pois_draw(rng, xg), _pois_draw(rng, oxg)
+    used: set = set()
+    evs = (_goal_events(rng, A["xi"], gf, "us", used)
+           + _goal_events(rng, B["xi"], ga, "them", used))
+    extra = pens = None
+    if knockout and gf == ga:
+        egf, ega, eevs = _ucl_extra_time(rng, A, B, venue, used, gap_k=_WC_GAP_K)
+        gf, ga = gf + egf, ga + ega
+        evs += eevs
+        extra = {"us": egf, "them": ega}
+        if gf == ga:
+            pa, pb = _shootout(rng, A["xi"], B["xi"])
+            pens = {"us": pa, "them": pb}
+    evs.sort(key=lambda e: e["minute"])
+    won = (gf > ga) if not pens else (pens["us"] > pens["them"])
+    return {"round": rnd, "label": label, "opponent": B["name"], "logo": B.get("logo"),
+            "venue": venue, "score": {"us": gf, "them": ga},
+            "xg": {"us": xg, "them": oxg}, "possession": poss,
+            "extra_time": extra, "pens": pens,
+            "result": "W" if gf > ga else ("D" if gf == ga else "L"),
+            "won": won if knockout else None,
+            "goals": evs, "contrib": _match_contrib(rng, A["xi"], xg)}
+
+
+def _wc_seed_strength(row, built):
+    """How strong a side is for the purpose of drawing knockout opponents. Uses the built
+    squad where we have one and the FIFA ranking where we do not, so a nation missing from
+    our player data still takes a sensible place in the bracket rather than a random one."""
+    b = built.get(_ucl_fold(row["name"]))
+    if b and b.get("units"):
+        return b["units"].get("avg_rating", 74)
+    rank = row.get("rank") or 100
+    return _clamp_f(84 - 0.09 * rank, 62, 84)
+
+
+def _wc_qualifiers(groups):
+    """Who goes through: the top two of each group, plus the eight best third-placed sides
+    ranked against each other on points, then goal difference, then goals — FIFA's rule."""
+    through, thirds = [], []
+    for g, table in groups.items():
+        for i, row in enumerate(table):
+            if i < 2:
+                through.append({**row, "group": g, "place": i + 1})
+            elif i == 2:
+                thirds.append({**row, "group": g, "place": 3})
+    thirds.sort(key=lambda r: (-r["pts"], -(r["gf"] - r["ga"]), -r["gf"], r["name"]))
+    return through + thirds[:_WC_THIRDS], thirds
+
+
+def simulate_wc(xi, tactics, team, field, build_opp, form_home=None, seed=None,
+                team_logo=None, host=None) -> dict:
+    """Play a full World Cup for this XI, in the 48-team format.
+
+    field:     the real tournament field — [{'name','group','pos','rank','logo','cc'}], 48 rows.
+    build_opp: (row) -> {'name','xi','units','tactics','logo'}; called lazily, so only the
+               nations actually met are ever built.
+    host:      the host nation, which is the only side that gets anything like a home edge.
+    """
+    if not field or len(field) < 8:
+        return {"available": False, "error": "No World Cup field available."}
+    rng = random.Random(seed)
+    t = {**DEFAULT_TACTICS, **(tactics or {})}
+    u = _units(xi)
+    chem = _chemistry(xi, t)
+    A = {"name": team, "xi": xi, "tactics": t, "units": u, "form": form_home or 0.0,
+         "chem_mult": _clamp_f(1 + 0.006 * (chem["score"] - _CHEM_BASE), 0.90, 1.10)}
+    rows = [{**r} for r in field]
+
+    # A side that is not in the real field takes the lowest-ranked qualifier's place, so the
+    # tournament is still played against the real 48 — the same substitution the Champions
+    # League campaign makes.
+    substituted = None
+    if not any(_ucl_same(r["name"], team) for r in rows):
+        worst = max(rows, key=lambda r: r.get("rank") or 999)
+        substituted = worst["name"]
+        worst.update({"name": team, "logo": team_logo, "cc": None})
+
+    built: dict = {}
+
+    def opp(row):
+        key = _ucl_fold(row["name"])
+        if key not in built:
+            o = build_opp(row) or {}
+            o.setdefault("name", row["name"])
+            o.setdefault("logo", row.get("logo"))
+            o.setdefault("tactics", DEFAULT_TACTICS)
+            built[key] = o if o.get("xi") else None
+        return built[key]
+
+    # ---- group stage ----
+    by_group: dict = {}
+    for r in rows:
+        by_group.setdefault(r.get("group") or "Group A", []).append(r)
+    my_group = next((g for g, rs in by_group.items()
+                     if any(_ucl_same(x["name"], team) for x in rs)), None)
+    group_matches, tables = [], {}
+    for g, rs in sorted(by_group.items()):
+        if g == my_group:
+            mine, _others, table = _wc_group_stage(rng, A, rs, opp, host)
+            group_matches = mine
+        else:
+            # Groups the user is not in still have to be played, because the third-place
+            # race is decided across all twelve of them.
+            table = _wc_other_group(rng, rs, opp, host)
+        tables[g] = table
+    if not group_matches:
+        return {"available": False, "error": "Could not build the group."}
+
+    rec = {"w": sum(1 for m in group_matches if m["result"] == "W"),
+           "d": sum(1 for m in group_matches if m["result"] == "D"),
+           "l": sum(1 for m in group_matches if m["result"] == "L"),
+           "gf": sum(m["score"]["us"] for m in group_matches),
+           "ga": sum(m["score"]["them"] for m in group_matches)}
+    rec["pts"] = rec["w"] * 3 + rec["d"]
+    rec["played"] = len(group_matches)
+
+    my_table = tables[my_group]
+    place = next(i + 1 for i, r in enumerate(my_table) if r.get("is_user"))
+    qualified, thirds = _wc_qualifiers(tables)
+    through = any(_ucl_same(q["name"], team) for q in qualified)
+    if place <= 2:
+        path = f"Through as {_ord(place)} in {my_group}"
+    elif through:
+        path = f"Through as one of the best third-placed sides"
+    else:
+        path = f"Out in the group stage — {_ord(place)} in {my_group}"
+
+    # ---- knockout: five single matches, from the round of 32 to the final ----
+    ties, taken, stage = [], [team], "Group stage"
+    if through:
+        pool = [r for r in rows if any(_ucl_same(q["name"], r["name"]) for q in qualified)]
+        for rnd, sharp in (("Round of 32", 9.0), ("Round of 16", 8.0), ("Quarter-final", 7.0),
+                           ("Semi-final", 5.5), ("Final", 4.5)):
+            row = _wc_pick(rng, pool, taken, sharp, opp, built,
+                           avoid_group=my_group if rnd == "Round of 32" else None)
+            B = opp(row) if row else None
+            if not B:
+                break
+            taken.append(B["name"])
+            venue = "H" if host and _ucl_same(team, host) else "N"
+            m = _wc_match(rng, A, B, venue, rnd, knockout=True)
+            ties.append(m)
+            if not m["won"]:
+                stage = rnd
+                break
+            stage = "Champions" if rnd == "Final" else rnd
+
+    won_it = stage == "Champions"
+    if won_it:
+        outcome = {"stage": "Champions", "won_it": True, "title": "🏆 World Champions"}
+    elif stage == "Group stage":
+        outcome = {"stage": "Group stage", "won_it": False,
+                   "title": f"Out in the group stage — {_ord(place)} in {my_group}"}
+    elif stage == "Final":
+        outcome = {"stage": "Final", "won_it": False, "title": "🥈 Runners-up"}
+    else:
+        outcome = {"stage": stage, "won_it": False, "title": f"Eliminated in the {stage}"}
+
+    all_matches = group_matches + ties
+    summary = {"played": len(all_matches),
+               "w": sum(1 for m in all_matches if m["result"] == "W"),
+               "d": sum(1 for m in all_matches if m["result"] == "D"),
+               "l": sum(1 for m in all_matches if m["result"] == "L"),
+               "gf": sum(m["score"]["us"] for m in all_matches),
+               "ga": sum(m["score"]["them"] for m in all_matches)}
+    outcome["line"] = _wc_story(team, outcome, place, my_group, ties)
+    return {
+        "available": True, "team": team, "seed": seed, "chemistry": chem["score"],
+        "group": {"name": my_group, "matches": group_matches, "record": rec,
+                  "table": my_table, "place": place, "path": path,
+                  "through": through, "substituted_for": substituted},
+        "tables": tables, "ties": ties, "outcome": outcome,
+        "scorers": _ucl_scorers(all_matches), "summary": summary,
+        "leaders": _ucl_leaders(all_matches, {_nm(s): _photo(s) for s in xi if s.get("player")}),
+    }
+
+
+# A World Cup has twelve groups and the user is in one of them, but the eight best
+# third-placed sides are decided ACROSS all twelve — so the other eleven have to be played
+# too. Building 44 more full squads to do it would cost more than the result is worth, so
+# those groups are settled from each side's FIFA ranking instead. It is a coarser model than
+# the one the user's own matches get, and deliberately so: it decides who else is in the hat,
+# not what happens when they are met. Any side the user actually plays is built in full.
+_WC_RANK_XG_A = 1.55         # a top-ranked side's expected goals against an average one
+_WC_RANK_XG_K = 0.011        # per place of ranking gap
+
+
+def _wc_rank_xg(ra, rb):
+    """Expected goals for a side ranked `ra` against one ranked `rb`, both FIFA places."""
+    gap = _clamp_f((rb or 100) - (ra or 100), -80, 80)
+    return _clamp_f(_WC_RANK_XG_A * math.exp(_WC_RANK_XG_K * gap) * _WC_XG_SCALE, 0.25, 3.2)
+
+
+def _wc_other_group(rng, rows, opp, host=None):
+    """A group the user is not in, played on rankings alone — see the note above."""
+    table = {r["name"]: {"name": r["name"], "logo": r.get("logo"), "cc": r.get("cc"),
+                         "pts": 0, "gf": 0, "ga": 0, "w": 0, "d": 0, "l": 0, "is_user": False}
+             for r in rows}
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a, b = rows[i], rows[j]
+            xa, xb = _wc_rank_xg(a.get("rank"), b.get("rank")), \
+                _wc_rank_xg(b.get("rank"), a.get("rank"))
+            if host and _ucl_same(a["name"], host):
+                xa *= _WC_HOST_XG
+            elif host and _ucl_same(b["name"], host):
+                xb *= _WC_HOST_XG
+            gf, ga = _pois_draw(rng, _xg_draw(rng, xa)), _pois_draw(rng, _xg_draw(rng, xb))
+            _wc_apply(table, a["name"], b["name"], gf, ga)
+    return _wc_group_table(list(table.values()))
+
+
+def _wc_pick(rng, pool, taken, sharpness, build, built, avoid_group=None):
+    """The next knockout opponent, weighted toward the stronger sides — sharply so late on,
+    because that is who is still there. Weighted on FIFA ranking rather than a bracket:
+    we do not model the real 2026 bracket's fixed paths, and pretending to would be a
+    made-up structure sitting on top of a simulated one."""
+    for _ in range(6):
+        band = [r for r in pool if not any(_ucl_same(r["name"], t) for t in taken)]
+        if avoid_group:                                    # you have just played these three
+            rest = [r for r in band if r.get("group") != avoid_group]
+            band = rest or band
+        if not band:
+            return None
+        pairs = [(r, math.exp(-(r.get("rank") or 100) / (sharpness * 4))) for r in band]
+        tot = sum(w for _, w in pairs) or 1.0
+        x, pick = rng.random() * tot, band[-1]
+        for r, w in pairs:
+            x -= w
+            if x <= 0:
+                pick = r
+                break
+        if build(pick):
+            return pick
+        taken.append(pick["name"])                         # unresolvable → out of the draw
+    return None
+
+
+def _wc_story(team, outcome, place, group, ties):
+    """One line on how it went, in the tournament's own terms."""
+    if outcome["won_it"]:
+        final = ties[-1] if ties else None
+        if final and final.get("pens"):
+            return (f"{team} win the World Cup on penalties against {final['opponent']}, "
+                    f"{final['pens']['us']}-{final['pens']['them']} after "
+                    f"{final['score']['us']}-{final['score']['them']}.")
+        if final:
+            return (f"{team} are world champions, beating {final['opponent']} "
+                    f"{final['score']['us']}-{final['score']['them']} in the final.")
+        return f"{team} win the World Cup."
+    if outcome["stage"] == "Group stage":
+        return f"{team} finish {_ord(place)} in {group} and go home early."
+    last = ties[-1] if ties else None
+    if last and last.get("pens"):
+        return (f"{team} go out to {last['opponent']} on penalties in the "
+                f"{outcome['stage'].lower()}.")
+    if last:
+        return (f"{team} lose {last['score']['us']}-{last['score']['them']} to "
+                f"{last['opponent']} in the {outcome['stage'].lower()}.")
+    return f"{team} are eliminated in the {outcome['stage'].lower()}."
 
 
 def _ucl_scorers(matches):

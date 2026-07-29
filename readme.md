@@ -78,6 +78,14 @@ seasons of per-90 output, real league tables and the real Champions League field
   **Champions League campaign**: the real 36-club league phase, your points slotted into the real
   table, then the bracket — two legs, extra time, penalties — either resolved instantly or played out
   match by match with the goals landing as the clock runs. Ends with campaign leaderboards.
+- **World Cup** — the same idea in the 2026 format, which is a different tournament rather than a
+  reskin: 48 nations in twelve real groups, the top two of each plus the eight best third-placed
+  sides (decided across all twelve, so the other eleven are played too), then five *single* matches
+  to the trophy. A one-off is far kinder to the weaker side than a two-legged tie, and the numbers
+  agree — checked against 356 real World Cup matches, the better-ranked side wins only 44% of the
+  time when the two are within ten places and 72% across a fifty-place gulf, so the campaign
+  engine's quality amplifier is recalibrated rather than reused (`python -m tools.backtest --wc`).
+  Goals per match land on the real 2.67.
 - **Any season since 2014/15** — field a player as he was in a given year (2014/15 Messi is a different
   footballer from the 2021/22 one), with his rating converted onto today's scale and a card
   synthesised from that season's output.

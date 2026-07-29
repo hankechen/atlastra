@@ -626,6 +626,7 @@ function renderResults(r) {
   const ssb = document.getElementById('simSeasonBtn'); if (ssb) ssb.onclick = openSeasonModal;
   const smb = document.getElementById('simMatchBtn'); if (smb) smb.onclick = openMatchModal;
   const ucb = document.getElementById('simUclBtn'); if (ucb) ucb.onclick = openUclModal;
+  const wcb = document.getElementById('simWcBtn'); if (wcb) wcb.onclick = openWcModal;
   scheduleAdvisor();
 }
 
@@ -660,8 +661,11 @@ function projCard(p) {
   // club's slot in the real field, the same way any club outside it does
   const uclBtn = (p.kind === 'club' || cur().custom)
     ? '<button class="tl-seasonbtn" id="simUclBtn">🏆 Simulate UCL run</button>' : '';
+  // Open to everyone: a club side that enters the World Cup takes a qualifier's place, the
+  // same substitution the Champions League run makes for a club that isn't in the field.
+  const wcBtn = '<button class="tl-seasonbtn" id="simWcBtn">🌍 Simulate World Cup</button>';
   return `<section class="card tl-card"><div class="card-h"><h3>Season &amp; Cup Projection</h3>
-      <span class="tl-projbtns"><button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button>${uclBtn}</span></div>
+      <span class="tl-projbtns"><button class="tl-seasonbtn" id="simSeasonBtn">🔮 Simulate full season</button>${uclBtn}${wcBtn}</span></div>
     ${league}${cup}
     <div class="tl-pstages">${stages}</div>
     <div class="tl-foot">Expected goals come from a Poisson model <b>fitted</b> to 3,358 real matches; the
@@ -1035,6 +1039,165 @@ function uclHTML(r) {
         matchup odds use — scaled by the squad-quality gap, home advantage and recent form — with each match
         drawing its own xG around that projection, so the campaign has its flat nights and its 4-1s. Scorers are
         weighted by the same attributes, roles and tactics. Level ties go to extra time, then penalties.</div></div>`;
+}
+
+// ---- World Cup: the 48-team tournament, group stage then five single matches ----
+// Structurally different from the Champions League run above, and the difference is the
+// point: every knockout round is ONE match, so a weaker side survives far more often than
+// it would over 180 minutes. The 2026 format also sends the eight best third-placed teams
+// through, which is why the group table alone does not tell you whether you qualified.
+const WC_ORDER = ['Group stage', 'Round of 32', 'Round of 16', 'Quarter-final', 'Semi-final', 'Final', 'Champions'];
+const WC = { key: '', n: 0, titles: 0, best: -1, stages: {}, mode: 'instant' };
+let WC_PLAY = null;
+function resetWcTally() { Object.assign(WC, { key: cur().team, n: 0, titles: 0, best: -1, stages: {} }); }
+
+async function openWcModal() {
+  closePop();
+  const pop = document.createElement('div'); pop.className = 'tl-pop'; pop.id = 'tlPop';
+  pop.innerHTML = `<div class="tl-pop-bd tl-uclbd">
+      <div class="tl-pop-h"><b>World Cup — ${esc(cur().team)}</b><button class="tl-pop-x">✕</button></div>
+      <div id="wcBody"><div class="tl-loading">Into the draw…</div></div></div>`;
+  document.body.appendChild(pop);
+  pop.querySelector('.tl-pop-x').onclick = closePop;
+  pop.onclick = (e) => { if (e.target === pop) closePop(); };
+  document.addEventListener('keydown', function onEsc(ev) { if (ev.key === 'Escape') { closePop(); document.removeEventListener('keydown', onEsc); } });
+  if (WC.key !== cur().team) resetWcTally();
+  showWcChooser();
+}
+function showWcChooser() {
+  const box = document.getElementById('wcBody'); if (!box) return;
+  box.innerHTML = `<div class="tl-uchoose">
+      <button class="tl-uopt" id="wcInstant"><b>⚡ Instant</b>
+        <span>The whole tournament at once — group table, bracket and scorers.</span></button>
+      <button class="tl-uopt" id="wcLiveBtn"><b>▶ Follow along</b>
+        <span>Play it out match by match, goals landing as the clock runs.</span></button>
+    </div>`;
+  document.getElementById('wcInstant').onclick = () => runWcSim('instant');
+  document.getElementById('wcLiveBtn').onclick = () => runWcSim('live');
+}
+async function runWcSim(mode) {
+  const box = document.getElementById('wcBody'); if (!box) return;
+  WC.mode = mode || WC.mode || 'instant';
+  if (WC_PLAY) { WC_PLAY.cancelled = true; WC_PLAY = null; }
+  box.innerHTML = '<div class="tl-loading">Playing the tournament — three group games, then the knockout…</div>';
+  const a = cur();
+  const payload = { team: a.team, xi: a.xi, tactics: a.tactics, seed: Math.floor(Math.random() * 1e9) };
+  let r; try { r = await fetch('/api/tactics/wc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()); } catch { r = null; }
+  const el = document.getElementById('wcBody'); if (!el) return;
+  if (!r || !r.available) {
+    el.innerHTML = `<div class="empty-state">${esc((r && r.error) || 'Could not simulate the tournament.')}</div>`;
+    return;
+  }
+  WC.n++;
+  const si = WC_ORDER.indexOf(r.outcome.stage);
+  if (r.outcome.won_it) WC.titles++;
+  if (si > WC.best) WC.best = si;
+  WC.stages[r.outcome.stage] = (WC.stages[r.outcome.stage] || 0) + 1;
+  if (WC.mode === 'live') { playWcCampaign(r); return; }
+  showWcResult(r);
+}
+function showWcResult(r) {
+  const el = document.getElementById('wcBody'); if (!el) return;
+  el.innerHTML = wcHTML(r);
+  const bd = el.closest('.tl-uclbd'); if (bd) bd.scrollTop = 0;
+  const rb = document.getElementById('rewcBtn'); if (rb) rb.onclick = () => runWcSim(WC.mode);
+  const sw = document.getElementById('wcSwitch');
+  if (sw) sw.onclick = () => runWcSim(WC.mode === 'live' ? 'instant' : 'live');
+}
+// Playback reuses playMatch() — same card, same elapsed-time clock — since a World Cup match
+// and a Champions League one differ in what they mean, not in how they are watched.
+async function playWcCampaign(r) {
+  const box = document.getElementById('wcBody'); if (!box) return;
+  const play = { cancelled: false };
+  WC_PLAY = play;
+  box.innerHTML = `<div class="tl-uplay">
+      <div id="uclLive"></div>
+      <div class="tl-sechdr" id="wcDoneHdr" hidden>Played so far</div>
+      <div class="tl-umatches" id="wcDone"></div>
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="wcSkip">⏭ Skip to the end</button>
+        <span class="tl-mtally">3 group games, then the knockout</span></div>
+    </div>`;
+  const skip = document.getElementById('wcSkip');
+  if (skip) skip.onclick = () => { play.cancelled = true; showWcResult(r); };
+  const fixtures = [
+    ...(r.group.matches || []).map((m) => ({ round: 'Group stage', m })),
+    ...(r.ties || []).map((m) => ({ round: m.round, m })),
+  ];
+  for (const fx of fixtures) {
+    if (play.cancelled || !document.getElementById('uclLive')) return;
+    await playMatch(fx, play);
+    if (play.cancelled) return;
+    const done = document.getElementById('wcDone');
+    const hdr = document.getElementById('wcDoneHdr');
+    if (done) {
+      done.insertAdjacentHTML('afterbegin', wcMatchRow({ ...fx.m, label: fx.m.label || fx.round }));
+      if (hdr) hdr.hidden = false;
+    }
+    await _sleep(500);
+  }
+  if (!play.cancelled) showWcResult(r);
+}
+// A knockout match can end level after 90 and still be decided, so the row has to carry the
+// shootout — without it a 1-1 that sent you through reads as a draw.
+function wcMatchRow(m) {
+  const res = m.won === true ? 'w' : (m.won === false ? 'l' : (m.result === 'W' ? 'w' : (m.result === 'D' ? 'd' : 'l')));
+  const pens = m.pens ? `<em>pens ${m.pens.us}–${m.pens.them}</em>` : '';
+  return `<div class="tl-umrow ${res}">
+      <span class="tl-umlbl">${esc(m.label || m.round || '')}</span>
+      <span class="tl-umven ${m.venue === 'H' ? 'h' : 'n'}">${m.venue === 'H' ? 'H' : 'N'}</span>
+      <span class="tl-umopp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}<span>${esc(m.opponent)}</span></span>
+      <span class="tl-umsc">${m.score.us}<i>–</i>${m.score.them}${m.extra_time ? '<em>aet</em>' : ''}${pens}</span>
+      ${uclGoals(m)}</div>`;
+}
+function wcHTML(r) {
+  const g = r.group, rec = g.record, o = r.outcome;
+  const fixtures = (g.matches || []).map(wcMatchRow).join('');
+  const table = (g.table || []).map((t, i) => `<tr class="${t.is_user ? 'you' : ''} ${i < 2 ? 'q8' : (i === 2 ? 'q16' : '')}">
+      <td class="tl-stpos">${i + 1}</td>
+      <td class="tl-stteam">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span>${esc(t.name)}</span></td>
+      <td class="tl-stpts">${t.pts}</td>
+      <td class="tl-stpts">${t.gf}–${t.ga}</td></tr>`).join('');
+  const ties = (r.ties || []).map((m) => `<div class="tl-utie ${m.won ? 'won' : 'lost'}">
+      <div class="tl-utieh"><span class="tl-utier">${esc(m.round)}</span>
+        <span class="tl-umopp">${m.logo ? `<img src="${esc(m.logo)}" alt="" loading="lazy">` : ''}<b>${esc(m.opponent)}</b></span>
+        <span class="tl-utiebadge">${m.won ? 'Through' : 'Out'}</span></div>
+      ${wcMatchRow({ ...m, label: '' })}</div>`).join('');
+  const leaders = (r.leaders || []).map((cat) => `<div class="tl-lcat">
+      <div class="tl-lcath">${esc(cat.label)}</div>
+      ${cat.top.map((x, i) => `<div class="tl-lrow"><span class="tl-lrank">${i + 1}</span>
+          <span class="tl-lph">${x.photo ? `<img src="${esc(x.photo)}" alt="" loading="lazy">` : ''}</span>
+          <span class="tl-lnm">${esc(surname(x.player))}</span>
+          <b class="tl-lval">${x.value}</b></div>`).join('')}</div>`).join('');
+  const sm = r.summary;
+  const tally = WC.n > 1
+    ? `<span class="tl-mtally">${WC.n} tournaments · <b>${WC.titles} title${WC.titles === 1 ? '' : 's'}</b> · best: ${esc(WC_ORDER[WC.best] || '—')}</span>` : '';
+  const sub = g.substituted_for
+    ? `<div class="tl-usub">${esc(r.team)} didn't qualify for the real tournament — they take ${esc(g.substituted_for)}'s place in it.</div>` : '';
+  const band = g.through ? (g.place <= 2 ? 'top8' : 'po') : 'out';
+  return `<div class="tl-ucl">
+      <div class="tl-uhero ${o.won_it ? 'win' : band}">
+        <div class="tl-uhtitle">${esc(o.title)}</div>
+        <div class="tl-uhline">${esc(o.line)}</div>
+        <div class="tl-uhstats"><span><b>${sm.played}</b> played</span><span><b>${sm.w}W ${sm.d}D ${sm.l}L</b></span>
+          <span>goals <b>${sm.gf}–${sm.ga}</b></span></div></div>
+      ${sub}
+      <div class="tl-sechdr">⚽ ${esc(g.name)} <span class="muted">three matches · neutral venues</span></div>
+      <div class="tl-umatches">${fixtures}</div>
+      <div class="tl-ufin ${band}"><b>${rec.w}W ${rec.d}D ${rec.l}L · ${rec.pts} pts</b>
+        <span>${ordinal(g.place)} in ${esc(g.name)}</span><span class="tl-upath">${esc(g.path)}</span></div>
+      <div class="tl-sttblwrap tl-utbl"><table class="tl-sttbl"><thead><tr><th></th><th>Team</th><th>Pts</th><th>GF–GA</th></tr></thead><tbody>${table}</tbody></table></div>
+      ${ties ? `<div class="tl-sechdr">🗝 Knockout <span class="muted">one match · extra time · penalties</span></div><div class="tl-uties">${ties}</div>` : ''}
+      ${leaders ? `<div class="tl-sechdr">📊 Tournament leaders <span class="muted">your side · top 5 per category</span></div>
+        <div class="tl-lgrid">${leaders}</div>` : ''}
+      <div class="tl-mfoot"><button class="tl-seasonbtn" id="rewcBtn">🔄 Run it again</button>
+        <button class="tl-seasonbtn ghost" id="wcSwitch">${WC.mode === 'live' ? '⚡ Instant' : '▶ Follow along'}</button>${tally}</div>
+      <div class="tl-foot">The 48-team 2026 field and its real groups. Top two of each group go through, plus the
+        eight best third-placed sides — decided across all twelve groups, which is why the other eleven are played
+        too (those on FIFA rankings, since only the sides you actually meet are built in full). Goals come from the
+        same fitted Poisson the matchup odds use, scaled down to international rates and with the quality gap
+        calibrated against 356 real World Cup matches: the better-ranked side wins 44% of the time when the two are
+        close and only 72% across a fifty-place gulf. Every knockout round is a single match — extra time, then
+        penalties.</div></div>`;
 }
 
 // ---- visualization: shape + passing network + territory heat ----

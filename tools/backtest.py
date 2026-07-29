@@ -203,6 +203,78 @@ def backtest_live(db):
         print(f"     {b*10:>2}-{b*10+10:>3}%   n={len(v):>5}   actual {100*sum(v)/len(v):>5.1f}%")
 
 
+def backtest_wc(db, n=9000):
+    """The World Cup sim against the last five World Cups.
+
+    356 real matches, bucketed by the FIFA-ranking gap between the two sides, because that is
+    the thing the tournament model has to get right: international football is a far greater
+    leveller than the club game, and a campaign engine tuned on Champions League ties is much
+    too sure of the favourite. The check is deliberately on UPSET RATES rather than on who
+    won any particular match — a 48-team tournament is mostly variance, and a model that
+    matched the 2022 bracket exactly would be overfitted to one draw.
+    """
+    real = db.con.execute("""
+        SELECT m.home_goals, m.away_goals, fh.ranking, fa.ranking
+        FROM wc_matches m
+        LEFT JOIN fifa_rankings fh ON fh.team_name = m.home_name
+        LEFT JOIN fifa_rankings fa ON fa.team_name = m.away_name
+        WHERE m.home_goals IS NOT NULL AND fh.ranking IS NOT NULL
+          AND fa.ranking IS NOT NULL""").fetchall()
+    if not real:
+        print("\n=== World Cup ===\n  no historical World Cup matches")
+        return
+
+    def bucket(gap):
+        return "0-10" if gap <= 10 else "11-25" if gap <= 25 else "26-50" if gap <= 50 else "51+"
+    obs = defaultdict(lambda: [0, 0])
+    tot = 0
+    for hg, ag, rh, ra in real:
+        tot += hg + ag
+        fav_home = rh < ra
+        fg, dg = (hg, ag) if fav_home else (ag, hg)
+        b = obs[bucket(abs(rh - ra))]
+        b[0] += fg > dg
+        b[1] += 1
+    from webapp import server as _srv
+    field = _srv._wc_field(db)
+    sides = {}
+    for r in field:
+        o = _srv._wc_opponent(db, r)
+        if o:
+            o["rank"] = r["rank"]
+            sides[r["name"]] = o
+    if len(sides) < 8:
+        print("\n=== World Cup ===\n  could not build the field")
+        return
+    names = list(sides)
+    rng = __import__("random").Random(4)
+    sim = defaultdict(lambda: [0, 0])
+    sgoals = 0
+    for _ in range(n):
+        a, c = rng.sample(names, 2)
+        A, B = sides[a], sides[c]
+        gf, ga = T._wc_neutral(rng, A, B)
+        sgoals += gf + ga
+        fav_a = A["rank"] < B["rank"]
+        fg, dg = (gf, ga) if fav_a else (ga, gf)
+        b = sim[bucket(abs(A["rank"] - B["rank"]))]
+        b[0] += fg > dg
+        b[1] += 1
+    print(f"\n=== World Cup — {len(real)} real matches vs {n} simulated ===")
+    print(f"  goals per match: sim {sgoals / n:.2f} · real {tot / len(real):.2f}\n")
+    print(f"  {'rank gap':<10}{'sim fav%':>10}{'real fav%':>11}{'diff':>8}{'real n':>9}")
+    err = 0.0
+    for k in ("0-10", "11-25", "26-50", "51+"):
+        if not obs[k][1] or not sim[k][1]:
+            continue
+        rp = 100.0 * obs[k][0] / obs[k][1]
+        sp = 100.0 * sim[k][0] / sim[k][1]
+        err += abs(sp - rp)
+        print(f"  {k:<10}{sp:>9.1f}%{rp:>10.1f}%{sp - rp:>+8.1f}{obs[k][1]:>9}")
+    print(f"  mean absolute error {err / 4:.2f} points")
+    print("  (the 51+ bucket holds ~30 real matches, so treat its gap as noise)")
+
+
 def backtest_weaknesses(db, season):
     """Each squad-keyed weakness rule is a claim that a flagged side concedes more than the
     model expects. Test it: mean residual (actual goals against minus expected) for flagged
@@ -257,6 +329,7 @@ def main():
     ap.add_argument("--skip-points", action="store_true")
     ap.add_argument("--weaknesses", action="store_true", help="also test the weakness rules")
     ap.add_argument("--skip-live", action="store_true")
+    ap.add_argument("--wc", action="store_true", help="also check the World Cup sim")
     args = ap.parse_args()
     with SoccerDB(read_only=True) as db:
         if not args.skip_odds:
@@ -265,6 +338,8 @@ def main():
             backtest_points(db, args.season)
         if not args.skip_live:
             backtest_live(db)
+        if args.wc:
+            backtest_wc(db)
         if args.weaknesses:
             backtest_weaknesses(db, args.season)
 
