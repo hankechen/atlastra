@@ -398,8 +398,16 @@ def build_xi(squad: list[dict], formation: str) -> list[dict]:
         # few rating points here, so the natural pairing wins unless the gap is big.
         pick = max(cands, key=lambda p: (p.get("rating") or 0) + _side_bonus(p, s),
                    default=None)
-        if pick is None:                                   # fall back to best remaining
-            pick = next((p for p in pool if p["player"] not in used), None)
+        if pick is None:
+            # Nobody in the squad lists for this slot, so take the best remaining — but a
+            # keeper is never the answer to an outfield slot, and Barcelona carry five of
+            # them. Without this guard their 4-2-3-1 started Joan García at centre-forward,
+            # because their forwards are all listed as wingers and he was the highest-rated
+            # player left in the squad.
+            gk_slot = s["family"] == "GK"
+            pick = next((p for p in pool if p["player"] not in used
+                         and ((p.get("position") or "").upper() in ("GK", "G")) == gk_slot),
+                        None)
         if pick:
             used.add(pick["player"])
             xi.append({**s, "player": pick, "role": _best_role(s["family"], pick)})

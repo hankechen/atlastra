@@ -1405,12 +1405,18 @@ async function loadShared(payload) {
 fillTeams();
 const teamSel = document.getElementById('teamInput'), oppSel = document.getElementById('oppInput');
 // (Re)load ONLY the opponent side, KEEPING the team you've been building (side A) — its
+// A new club is a new default. Its formation has to be cleared, not carried over: a stale
+// one is sent as an explicit choice, and the server then auto-picks in the PREVIOUS club's
+// shape — which is how going from Real Madrid to Barcelona produced a 4-4-2 of Barcelona's
+// highest-rated players instead of the eleven Barcelona actually last put out.
+function resetShape(sd) { sd.formation = null; sd.userFormation = null; }
+
 // custom positions, roles, swaps, added players and tactics. Shared by the opponent
 // dropdown AND the Load button, so neither wipes your work when you set an opponent.
 async function applyOpponent() {
   if (!S.sides.A.xi.length) { S.active = 'A'; return loadAll(); }   // A not built yet → full load
   if (S.sides.B.team) {
-    if (S.sides.B.formation === 'Custom') S.sides.B.formation = null;     // fresh opponent → its own default
+    resetShape(S.sides.B);                           // fresh opponent → its own default
     await loadSide('B');
     if (S.sides.B.error) { S.sides.B.team = ''; S.sides.B.xi = []; S.sides.B.squad = []; ensureOption(oppSel, ''); }
   } else {
@@ -1423,18 +1429,20 @@ async function applyOpponent() {
 document.getElementById('loadBtn').onclick = () => {
   const newA = teamSel.value || 'Real Madrid';
   const aChanged = newA !== S.sides.A.team || !S.sides.A.xi.length;
+  const bChanged = oppSel.value !== S.sides.B.team;
   S.sides.A.team = newA;
   S.sides.B.team = oppSel.value;
+  if (bChanged) resetShape(S.sides.B);               // a new opponent gets its own default too
   if (aChanged) {                                    // switching team A → full (re)load
-    S.sides.A.formation = document.getElementById('formSel').value || null;
+    resetShape(S.sides.A);
     S.active = 'A'; loadAll();
   } else {                                           // same team A → keep its build, just load the opponent
     applyOpponent();
   }
 };
 // team select reloads side A (you're explicitly switching it); opponent select keeps A.
-teamSel.onchange = () => { S.sides.A.team = teamSel.value; S.active = 'A'; loadAll(); };
-oppSel.onchange = () => { S.sides.B.team = oppSel.value; applyOpponent(); };
+teamSel.onchange = () => { S.sides.A.team = teamSel.value; resetShape(S.sides.A); S.active = 'A'; loadAll(); };
+oppSel.onchange = () => { S.sides.B.team = oppSel.value; resetShape(S.sides.B); applyOpponent(); };
 document.getElementById('formSel').onchange = () => {
   const v = document.getElementById('formSel').value;
   if (v === 'Custom') return;                 // custom layout already applied; picking a preset re-loads it
