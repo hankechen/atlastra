@@ -2618,3 +2618,6 @@ a.hl-scorer:hover{color:var(--accent);text-decoration:underline}
 .wp-chart .wp-mid { stroke: rgba(255, 255, 255, .28); stroke-width: 1; stroke-dasharray: 4 4; }
 .wp-axis { display: flex; justify-content: space-between; font-size: 11px;
            color: var(--muted, #8b949e); margin-top: 4px; }
+/* provenance for a pre-filled lineup: shown when the XI is a real teamsheet, not auto-picked */
+.tl-lsrc { display: block; margin-top: 3px; font-size: 11px; font-style: normal;
+           color: var(--muted); opacity: .85; }

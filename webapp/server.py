@@ -641,6 +641,19 @@ def _ucl_last_matches():
     return out
 
 
+def _club_tid(team):
+    """FotMob id for a club — the short hand-kept map first, then the Champions League
+    field, which is where the clubs that HAVE a European teamsheet all are anyway."""
+    tid = _FOTMOB_TEAM_ID.get(team)
+    if tid:
+        return tid
+    key = tactics._ucl_fold(team or "")
+    for r in (_ucl_field() or []):
+        if tactics._ucl_fold(r["name"]) == key:
+            return r.get("id")
+    return None
+
+
 def _last_used_xi(squad, tid):
     """The eleven this club last started IN THE CHAMPIONS LEAGUE, mapped onto our squad.
 
@@ -1083,19 +1096,26 @@ def api(path: str, q: dict) -> dict | list:
     with SoccerDB(read_only=DB_READ_ONLY) as d:
         if path == "/api/tactics/squad":       # Tactics Lab: squad + auto XI for a formation
             team = q.get("team", [""])[0]
-            formation = q.get("formation", ["4-3-3"])[0]
-            if formation not in tactics.FORMATIONS:
-                formation = "4-3-3"
+            # No formation asked for means "give me this club's default", and its default is
+            # the eleven it last put out in Europe — shape included, since that is part of
+            # the setup. An explicit formation is the user choosing, and is obeyed.
+            asked = q.get("formation", [""])[0]
+            auto = asked in ("", "auto")
+            formation = asked if asked in tactics.FORMATIONS else "4-3-3"
             # "Build your own XI": an empty shape to fill from the whole player universe,
             # past seasons included. Nothing is pre-picked, so every slot is yours.
             blank = team in ("__custom__", "Custom XI")
             squad = [] if blank else _tac_squad(d, team)
-            xi = tactics.build_xi(squad, formation) if squad else (
+            real = _last_used_xi(squad, _club_tid(team)) if (squad and auto) else None
+            if real:
+                formation = tactics.formation_of(real) or formation
+            xi = real or tactics.build_xi(squad, formation) if squad else (
                 [{"id": s["id"], "family": s["family"], "line": s["line"], "x": s["x"],
                   "y": s["y"], "role": tactics.DEFAULT_ROLE.get(s["family"], ""),
                   "player": None} for s in tactics.FORMATIONS[formation]] if blank else [])
             return {"available": bool(squad) or blank, "custom": blank,
                     "team": "Custom XI" if blank else team, "formation": formation,
+                    "lineup_source": "last-ucl" if real else "auto",
                     "squad": squad, "xi": _xi_wire(xi),
                     "formations": list(tactics.FORMATIONS.keys()),
                     "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,

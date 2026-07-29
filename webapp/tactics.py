@@ -426,6 +426,16 @@ def _fits(pos, family):
     return pos in FAMILY_POS[family] or pos in _PLACE_ALSO.get(family, ())
 
 
+def formation_of(xi):
+    """Which of our shapes this XI is in, by its slot ids. build_named_xi picks the shape
+    that fits the personnel, so the caller has to be told what it chose."""
+    ids = [s.get("id") for s in (xi or [])]
+    for name, slots in FORMATIONS.items():
+        if [x["id"] for x in slots] == ids:
+            return name
+    return None
+
+
 def _assign(picked, slots):
     """Best pairing of these players to these slots, and how good it is. Greedy on fit:
     take the strongest player/slot pair, remove both, repeat."""

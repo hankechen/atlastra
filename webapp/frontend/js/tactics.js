@@ -9,7 +9,9 @@ const S = {
   roles: {}, roleDefaults: {}, formations: [],
   lastMetrics: { A: null, B: null }, lastChem: { A: null, B: null }, sim: null,
 };
-function blankSide(team) { return { team, formation: '4-3-3', xi: [], squad: [], tactics: {}, subs: [], custom: false }; }
+// formation starts NULL, not '4-3-3': that is what tells loadSide to ask the server for the
+// club's own default shape rather than imposing one. It is filled in from the response.
+function blankSide(team) { return { team, formation: null, xi: [], squad: [], tactics: {}, subs: [], custom: false }; }
 const cur = () => S.sides[S.active];
 const other = () => S.sides[S.active === 'A' ? 'B' : 'A'];
 const hasB = () => !!S.sides.B.team && S.sides.B.xi.length;
@@ -55,13 +57,19 @@ function fillTeams() {
 async function loadSide(key) {
   const sd = S.sides[key];
   if (!sd.team) { sd.xi = []; sd.squad = []; return; }
-  let r; try { r = await api(`/api/tactics/squad?team=${encodeURIComponent(sd.team)}&formation=${encodeURIComponent(sd.formation)}`); } catch { r = null; }
+  // No formation on the first load of a side: that asks the server for the club's own
+  // default, which is the eleven and the shape it last used in Europe. Once the user has
+  // picked a shape, sd.formation is set and gets sent, so their choice sticks.
+  const fq = sd.formation ? `&formation=${encodeURIComponent(sd.formation)}` : '';
+  let r; try { r = await api(`/api/tactics/squad?team=${encodeURIComponent(sd.team)}${fq}`); } catch { r = null; }
   if (!r || !r.available) { sd.xi = []; sd.squad = []; sd.error = true; return; }
   // '__custom__' -> a readable name, and a different one per side so a made-up XI against
   // another made-up XI doesn't read "Custom XI vs Custom XI"
   sd.custom = !!r.custom;
   if (r.custom) sd.team = key === 'B' ? 'Their XI' : 'Your XI';
   sd.xi = r.xi; sd.squad = r.squad; sd.tactics = { ...(r.tactic_defaults || {}) }; sd.error = false;
+  sd.formation = r.formation || sd.formation || '4-3-3';   // adopt whatever shape came back
+  sd.lineupSource = r.lineup_source || 'auto';
   // what the server handed us, kept so a share link can encode only what you CHANGED —
   // an untouched Real Madrid is then five characters, not a wall of base64
   sd.base = { tactics: { ...(r.tactic_defaults || {}) },
@@ -77,6 +85,13 @@ async function loadAll() {
   if (cur().error) { document.getElementById('tlBody').innerHTML = `<div class="empty-state">No squad data for “${esc(cur().team)}”. Try a top-5-league team.</div>`; return; }
   const fs = document.getElementById('formSel');
   fs.innerHTML = S.formations.map((f) => `<option${f === cur().formation ? ' selected' : ''}>${f}</option>`).join('');
+  // Say where the eleven came from, so a lineup that isn't the strongest available reads as
+  // a real selection rather than as the picker getting it wrong.
+  const ls = document.getElementById('tlLineupSrc');
+  if (ls) {
+    ls.textContent = cur().lineupSource === 'last-ucl' ? 'last Champions League XI' : '';
+    ls.hidden = cur().lineupSource !== 'last-ucl';
+  }
   S.lastMetrics = { A: null, B: null };
   render(); runSim();
 }
@@ -351,7 +366,7 @@ function familyFromPos(x, y) {
 }
 // Once a player is freely moved, the side is no longer a stock formation.
 function markCustom() {
-  cur().formation = 'Custom';
+  cur().formation = 'Custom'; cur().userFormation = 'Custom';
   const fs = document.getElementById('formSel');
   if (fs && S.active === 'A') {                              // formSel tracks side A
     if (!Array.from(fs.options).some((o) => o.value === 'Custom')) fs.add(new Option('Custom', 'Custom'));
@@ -1277,7 +1292,11 @@ async function loadAdvisor() {
 // the parts you actually changed travel. No server state, so a link keeps working.
 function sideShare(sd) {
   if (!sd || !sd.team || !sd.xi.length) return null;
-  const o = { t: sd.custom ? '__custom__' : sd.team, f: sd.formation };
+  // Encode the shape only when the user picked it. Encoding the resolved one would turn
+  // "Arsenal's own lineup" into "Arsenal, auto-picked, in a 3-4-3" on the other end — a
+  // different eleven from the one being shared, since the XI diff is stored against the
+  // real teamsheet as its base.
+  const o = { t: sd.custom ? '__custom__' : sd.team, f: sd.userFormation || undefined };
   const base = sd.base || { tactics: {}, xi: [] };
   const tdiff = {};
   Object.keys(sd.tactics || {}).forEach((k) => {
@@ -1344,7 +1363,7 @@ async function copyShare() {
 async function applySide(key, o) {
   const sd = S.sides[key];
   if (!o || !o.t) { sd.team = ''; return; }
-  sd.team = o.t; sd.formation = o.f || '4-3-3';
+  sd.team = o.t; sd.formation = o.f || null; sd.userFormation = o.f || null;
   await loadSide(key);
   if (sd.error) return;
   if (o.s) sd.tactics = { ...sd.tactics, ...o.s };
@@ -1391,7 +1410,7 @@ const teamSel = document.getElementById('teamInput'), oppSel = document.getEleme
 async function applyOpponent() {
   if (!S.sides.A.xi.length) { S.active = 'A'; return loadAll(); }   // A not built yet → full load
   if (S.sides.B.team) {
-    if (S.sides.B.formation === 'Custom') S.sides.B.formation = '4-3-3';  // fresh opponent → stock shape
+    if (S.sides.B.formation === 'Custom') S.sides.B.formation = null;     // fresh opponent → its own default
     await loadSide('B');
     if (S.sides.B.error) { S.sides.B.team = ''; S.sides.B.xi = []; S.sides.B.squad = []; ensureOption(oppSel, ''); }
   } else {
@@ -1407,7 +1426,7 @@ document.getElementById('loadBtn').onclick = () => {
   S.sides.A.team = newA;
   S.sides.B.team = oppSel.value;
   if (aChanged) {                                    // switching team A → full (re)load
-    S.sides.A.formation = document.getElementById('formSel').value || '4-3-3';
+    S.sides.A.formation = document.getElementById('formSel').value || null;
     S.active = 'A'; loadAll();
   } else {                                           // same team A → keep its build, just load the opponent
     applyOpponent();
@@ -1419,7 +1438,8 @@ oppSel.onchange = () => { S.sides.B.team = oppSel.value; applyOpponent(); };
 document.getElementById('formSel').onchange = () => {
   const v = document.getElementById('formSel').value;
   if (v === 'Custom') return;                 // custom layout already applied; picking a preset re-loads it
-  cur().formation = v; loadSide(S.active).then(() => { render(); runSim(); });
+  cur().formation = v; cur().userFormation = v;        // an explicit choice, and it sticks
+  loadSide(S.active).then(() => { render(); runSim(); });
 };
 document.getElementById('shareBtn').onclick = copyShare;
 // A shared setup (?s=...) carries the whole build; ?a=/?b= remain as the simple
