@@ -9,6 +9,8 @@ scripts illustrating the README's Phase-One use cases.
 - **FotMob** advanced stats (big chances, dribbles, tackles, interceptions,
   passes, etc.): 2020/21→2025/26 (earlier seasons predate full Opta coverage).
 - **Duels**: 2025/26 only (FotMob only exposes them for a player's current season).
+- **Per-match player log** (`player_match_log`): all 12 seasons, 630k player-match
+  rows over 21,586 matches (`pipeline/backfill_match_log.py`).
 
 ## TL;DR — how to run
 
@@ -163,6 +165,16 @@ pipeline/scrape.py            Understat -> data/raw/understat/*.parquet
 pipeline/fotmob_auth.py       FotMob x-mas request signing (live secret extraction)
 pipeline/scrape_enrich.py     FotMob enrichment -> data/raw/fotmob/*.parquet
 pipeline/scrape_duels.py      FotMob per-player duels -> data/raw/fotmob/*.parquet
+pipeline/scrape_dob.py        FotMob per-player birth dates (ages for the 12-season panel)
+pipeline/load_dob.py          birth dates -> player_dob (keyed by Understat player_id)
+pipeline/scrape_sofa_gk.py    SofaScore top-5 keeper stats, 2015/16+ (datamb is current-season only)
+pipeline/load_sofa_gk.py      keeper stats -> gk_season_stats (fuzzy name match, ~93%)
+pipeline/backfill_match_log.py  warm the Understat cache, then load every season's match log
+pipeline/build_absences.py    absence spells + availability, derived from the match log
+ml/train_trajectory.py        next-season rating projection + availability (see readme)
+ml/train_match_contribution.py  per-fixture goal-involvement probability
+tools/form_test.py            is form real? hot-hand test against a full-season ability estimate
+tools/transfer_effect.py      what a transfer costs, vs the trajectory model's own expectation
 pipeline/init_db.py           create/reset warehouse from schema.sql
 pipeline/load.py              raw -> tables + derived standings & ratings
 pipeline/load_enrich.py       FotMob enrichment -> player_enrichment (fuzzy match)

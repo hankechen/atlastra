@@ -194,9 +194,31 @@ COARSE_FALLBACK = {"FWD": "ST", "MID": "CM", "DEF": "CB"}
 
 
 def _gk_league_df(con, season: str, min_min: int) -> pd.DataFrame:
-    """League keepers from datamb player_wyscout (the only domestic source with
-    GK stats), name+team crosswalked to Understat player_id. Returns one row per
-    player_id with the GK_METRICS columns already as rates."""
+    """League keepers from `gk_season_stats` (SofaScore, 2015/16 onward), already
+    crosswalked to Understat player_id by pipeline.load_sofa_gk. One row per
+    player_id with the GK_METRICS columns as rates.
+
+    This used to read datamb/`player_wyscout`, which publishes the CURRENT season
+    only -- so keepers were rated in 2025/26 and in no other season, and no keeper
+    had a season-to-season transition anywhere in the warehouse. SofaScore carries
+    the same four metrics for every season, and using it for *all* seasons rather
+    than splicing it onto a wyscout 2025/26 keeps the series internally
+    consistent: a rating that changes because the source changed is worse than no
+    rating, and the season boundary would land exactly where a trajectory is read.
+
+    Falls back to wyscout when SofaScore has nothing for the season -- which today
+    means 2014/15, the one season SofaScore does not populate for the top five.
+    """
+    df = con.execute("""
+        SELECT player_id, minutes, save_percentage_pct,
+               goals_conceded_per_90, clean_sheets, saves_per_90
+        FROM gk_season_stats
+        WHERE season = ? AND minutes >= ? AND save_percentage_pct IS NOT NULL
+    """, [season, min_min]).df() if _has_table(con, "gk_season_stats") else pd.DataFrame()
+    if not df.empty:
+        df["player_id"] = df["player_id"].astype("int64")
+        return df.sort_values("minutes", ascending=False).drop_duplicates("player_id")
+
     from pipeline.profile import _datamb_to_understat  # reuse the datamb->id matcher
     df = con.execute("""
         SELECT player, team_within_selected_timeframe AS team,
@@ -214,6 +236,11 @@ def _gk_league_df(con, season: str, min_min: int) -> pd.DataFrame:
     df["player_id"] = df["player_id"].astype("int64")
     # one row per id (keepers who switched clubs): keep the max-minutes spell
     return df.sort_values("minutes", ascending=False).drop_duplicates("player_id")
+
+
+def _has_table(con, name: str) -> bool:
+    return bool(con.execute(
+        "SELECT 1 FROM information_schema.tables WHERE table_name = ?", [name]).fetchone())
 
 
 def _gk_ucl_df(con, season: str, min_min: int) -> pd.DataFrame:

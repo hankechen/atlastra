@@ -21,7 +21,11 @@ logs/
 
 # Large binary assets / experiments (deployed via scp, not git)
 webapp/frontend/clips/
-ml/
+# ml/ is ~1.9GB of harvested clips, feature tensors and fitted artifacts, all
+# regenerable by re-running the trainers -- but the trainers themselves are
+# source and belong in the repo (the readme documents them by path).
+ml/*
+!ml/*.py
 # Local networking / DNS helper config (unrelated to the app)
 tools/*.mobileconfig
 tools/*.plist

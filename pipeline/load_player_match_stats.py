@@ -34,6 +34,41 @@ DDL = """CREATE TABLE IF NOT EXISTS player_match_log(
     xg DOUBLE, xa DOUBLE, key_passes INTEGER, opp_position INTEGER, opp_top_half BOOLEAN)"""
 
 
+def _player_matches(reader, game_ids: list[int]) -> pd.DataFrame:
+    """Read a league-season's player-match stats, surviving a single bad match.
+
+    soccerdata reads the whole league-season in one call, and one malformed match
+    aborts all ~306 of them. Understat serves exactly that: match 27930 (Bundesliga
+    2024/25) comes back with `rosters.h` as an empty list rather than a dict of
+    players, and soccerdata does `rosters["h"].values()` on it. Since the roster is
+    empty there is no data in that match to lose -- but as it stands the whole
+    league-season is lost with it.
+
+    So: try the bulk read, and only if it fails fall back to reading match by match
+    (every page is already cached, so this is cheap), skipping the ones that raise
+    and saying how many were skipped rather than passing off a short season as
+    whole.
+    """
+    try:
+        return reader.read_player_match_stats().reset_index()
+    except Exception as e:  # noqa: BLE001
+        print(f"    bulk read failed ({type(e).__name__}); retrying match by match", flush=True)
+
+    frames, skipped = [], []
+    for gid in game_ids:
+        try:
+            frames.append(reader.read_player_match_stats(match_id=gid).reset_index())
+        except Exception:  # noqa: BLE001
+            skipped.append(gid)
+    if skipped:
+        print(f"    skipped {len(skipped)} unreadable match(es): "
+              f"{', '.join(str(g) for g in skipped[:5])}"
+              f"{'...' if len(skipped) > 5 else ''}", flush=True)
+    if not frames:
+        raise RuntimeError("no readable matches in this league-season")
+    return pd.concat(frames, ignore_index=True)
+
+
 def load(season: str = FOCUS_SEASON) -> int:
     con = duckdb.connect(str(DB_PATH))
     con.execute(DDL)
@@ -53,7 +88,7 @@ def load(season: str = FOCUS_SEASON) -> int:
             sched = reader.read_schedule().reset_index()
             sgame = {int(r.game_id): (r.date, int(r.home_team_id), int(r.away_team_id))
                      for r in sched.itertuples() if not pd.isna(r.home_team_id)}
-            pm = reader.read_player_match_stats().reset_index()
+            pm = _player_matches(reader, list(sgame))
         except Exception as e:  # noqa: BLE001
             print(f"  {lg}: FAILED ({type(e).__name__}: {e})", flush=True)
             continue
