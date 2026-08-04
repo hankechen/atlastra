@@ -1410,6 +1410,130 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .vf-mult{width:52px;text-align:right;font-weight:800;font-size:13px}
 .vf-mult.up{color:var(--green)}.vf-mult.down{color:var(--red)}
 
+/* ===== Career Trajectory (profile card + Risers & Fallers board) ===== */
+/* the trajectory verdicts span five steps, two more than the value model's three */
+.fin-badge.great{background:rgba(47,191,113,.24);color:#8fe9b4}
+.fin-badge.warn{background:rgba(240,166,60,.16);color:#f3c076}
+.tj-nums{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.tj-num{background:var(--card2);border-radius:10px;padding:9px 16px;text-align:center;min-width:82px}
+.tj-num label{display:block;font-size:11px;color:var(--muted);margin-bottom:2px}
+.tj-num b{font-size:22px;font-weight:800;line-height:1.1}
+.tj-num.proj b{color:var(--accent2)}
+.tj-pm{font-size:11px;color:var(--muted);margin-left:4px}
+.tj-arrow{font-weight:800;font-size:14px}
+.tj-arrow.up{color:var(--green)}.tj-arrow.down{color:var(--red)}
+.tj-avail{flex:1;min-width:150px;text-align:right}
+.tj-risk{font-size:11.5px;color:var(--muted)}.tj-risk.bad{color:#f0a0a5}
+/* Charts are stretched to the card width (preserveAspectRatio="none"), so every
+   label lives in HTML alongside the SVG rather than inside it — text drawn in a
+   non-uniformly scaled SVG comes out squashed. Same approach as .wp-chart. */
+/* right padding keeps the projected point and its error bar off the card edge */
+.tj-plot{position:relative;padding:0 12px 16px 26px;margin:2px 0 12px}
+.tj-chart{width:100%;height:104px;display:block;overflow:visible}
+.tj-line{fill:none;stroke:var(--accent2);stroke-width:2;stroke-linejoin:round}
+.tj-line.proj{stroke-dasharray:4 4;opacity:.75}
+.tj-dot{fill:var(--accent2)}
+.tj-dot.proj{fill:var(--card);stroke:var(--accent2);stroke-width:2}
+.tj-band{stroke:var(--accent2);stroke-width:2;opacity:.35;stroke-linecap:round}
+.tj-yax{position:absolute;left:0;top:0;height:104px;display:flex;flex-direction:column;
+  justify-content:space-between;font-size:9.5px;color:var(--muted)}
+.tj-xax{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px}
+/* Risers & Fallers board */
+.tj-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:820px){.tj-grid{grid-template-columns:1fr}.tj-nums{gap:10px}}
+.tj-delta{width:56px;text-align:right;font-weight:800;font-size:13px}
+.tj-delta.up{color:var(--green)}.tj-delta.down{color:var(--red)}
+.tj-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tj-chip{background:var(--card2);border:1px solid var(--border2);color:var(--muted);
+  border-radius:20px;padding:5px 13px;font-size:11.5px;font-weight:600;cursor:pointer;
+  font-family:inherit;transition:.12s}
+.tj-chip:hover{border-color:var(--accent2);color:var(--text)}
+.tj-chip.on{background:var(--accent2);border-color:var(--accent2);color:#fff}
+.tj-cwrap{position:relative;padding-bottom:16px}
+.tj-curve{width:100%;height:210px;display:block;overflow:visible}
+.tj-cline{fill:none;stroke-linejoin:round;stroke-linecap:round}
+.tj-czero{stroke:var(--border2);stroke-width:1;stroke-dasharray:3 3}
+.tj-cross{stroke:var(--border2);stroke-width:1}
+/* the label layers match the plot box exactly, so a % from the chart's own scale
+   lands where the corresponding gridline would */
+.tj-cy,.tj-cends{position:absolute;left:0;top:0;height:210px;width:100%;pointer-events:none}
+.tj-cx{position:absolute;left:0;right:0;bottom:0;height:14px;pointer-events:none}
+.tj-cy span,.tj-cx span{position:absolute;font-size:9.5px;color:var(--muted);white-space:nowrap}
+.tj-cy span{left:0;transform:translateY(-50%)}
+.tj-cx span{bottom:0;transform:translateX(-50%)}
+/* direct labels at each line's end — identity never rests on colour alone */
+.tj-cend{position:absolute;font-size:11px;font-weight:700;white-space:nowrap;
+  transform:translate(8px,-50%)}
+.tj-ctip{position:absolute;top:4px;background:var(--card2);border:1px solid var(--border2);
+  border-radius:8px;padding:7px 10px;font-size:11.5px;pointer-events:none;
+  transform:translateX(10px);box-shadow:0 4px 14px rgba(0,0,0,.35);z-index:2}
+.tj-ctip h6{font-size:10.5px;color:var(--muted);margin:0 0 4px;font-weight:700}
+.tj-ctip div{display:flex;align-items:center;gap:6px;white-space:nowrap;line-height:1.7}
+.tj-ctip i{display:inline-block;width:10px;height:3px;border-radius:2px;flex:none}
+.tj-ctip b{margin-left:auto;padding-left:10px}
+
+/* ===== Availability (profile card) ===== */
+.av-head{display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-bottom:14px}
+.av-big b{font-size:34px;font-weight:800;line-height:1}
+.av-big span{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+.av-facts{display:flex;gap:10px;flex-wrap:wrap}
+.av-facts div{background:var(--card2);border-radius:9px;padding:8px 14px;text-align:center;min-width:74px}
+.av-facts label{display:block;font-size:10.5px;color:var(--muted);margin-bottom:2px}
+.av-facts b{font-size:17px;font-weight:800}
+/* one column per season — a lost season reads as a notch in the row */
+.av-chart{display:flex;gap:6px;align-items:flex-end;height:92px}
+.av-col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%}
+.av-track{flex:1;width:100%;max-width:38px;background:var(--border2);border-radius:5px;
+  display:flex;align-items:flex-end;overflow:hidden}
+.av-track i{display:block;width:100%;border-radius:5px}
+.av-track i.great{background:linear-gradient(180deg,#7ee0a6,#2fbf71)}
+.av-track i.good{background:linear-gradient(180deg,#8fa8ff,#5570f0)}
+.av-track i.warn{background:linear-gradient(180deg,#f3c076,#d9963f)}
+.av-track i.bad{background:linear-gradient(180deg,#f0a0a5,#e5484d)}
+.av-col label{font-size:10px;color:var(--muted)}
+.av-spells{display:flex;flex-wrap:wrap;gap:8px}
+.av-spell{background:var(--card2);border:1px solid var(--border2);border-radius:9px;padding:7px 12px}
+.av-spell b{display:block;font-size:13px}
+.av-spell span{font-size:11px;color:var(--muted)}
+
+/* ===== Squad Planner ===== */
+.sp-controls{display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin:4px 0 16px}
+.sp-controls label{display:flex;flex-direction:column;gap:5px;font-size:11px;
+  letter-spacing:.5px;color:var(--muted);font-weight:700}
+.sp-controls select{background:var(--card2);border:1px solid var(--border2);color:var(--text);
+  border-radius:9px;padding:8px 12px;font-size:13px;font-family:inherit;min-width:190px}
+.sp-head{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.sp-crest{width:44px;height:44px;object-fit:contain}
+.sp-head h3{font-size:19px;margin:0}
+.sp-head .muted{font-size:12.5px}
+.sp-sect{font-size:11px;letter-spacing:.7px;color:var(--muted);font-weight:800;
+  margin:20px 0 10px;text-transform:uppercase}
+.sp-unit .card-h{align-items:center}
+.sp-gap{font-size:12px;font-weight:800}
+.sp-gap.ok{color:var(--green)}.sp-gap.warn{color:#f3c076}.sp-gap.bad{color:#f0a0a5}
+.sp-meta{font-size:11.5px;color:var(--muted);margin:-4px 0 12px}
+.sp-bars{display:flex;flex-direction:column;gap:9px;margin-bottom:12px}
+.sp-bar-row label{display:flex;justify-content:space-between;font-size:11.5px;
+  color:var(--muted);margin-bottom:3px}
+.sp-bar-row label b{color:var(--text);font-size:13px}
+.sp-bar{height:10px;border-radius:5px;background:var(--border2);overflow:hidden}
+.sp-bar i{display:block;height:100%;border-radius:5px}
+.sp-bar i.bench{background:#8a93a6}
+.sp-bar i.now{background:linear-gradient(90deg,#5570f0,#7d5cf5)}
+.sp-bar i.ok{background:linear-gradient(90deg,#2fbf71,#7ee0a6)}
+.sp-bar i.warn{background:linear-gradient(90deg,#d9963f,#f3c076)}
+.sp-bar i.bad{background:linear-gradient(90deg,#e5484d,#f0a0a5)}
+.sp-reasons{list-style:none;display:flex;flex-direction:column;gap:6px;margin:0;padding:0}
+.sp-reasons li{font-size:12.5px;color:var(--text);padding-left:14px;position:relative;line-height:1.45}
+.sp-reasons li:before{content:'›';position:absolute;left:0;color:var(--muted)}
+.sp-cov{font-size:9.5px;font-weight:700;letter-spacing:.4px;background:var(--border2);
+  color:var(--muted);border-radius:4px;padding:1px 5px;margin-left:5px;vertical-align:middle}
+.sp-proj{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.sp-proj b{color:var(--text)}
+.sp-vd{font-size:10px;padding:3px 8px}
+.sp-val{width:64px;text-align:right;font-size:12px;font-weight:700;white-space:nowrap}
+@media(max-width:820px){.sp-controls select{min-width:150px}}
+
 /* ===== Match Previews — upcoming fixtures list + national-team preview ===== */
 .pv-layout{display:grid;grid-template-columns:300px 1fr;gap:18px;align-items:start;margin-top:18px}
 @media(max-width:900px){.pv-layout{grid-template-columns:1fr}}
@@ -2621,3 +2745,15 @@ a.hl-scorer:hover{color:var(--accent);text-decoration:underline}
 /* provenance for a pre-filled lineup: shown when the XI is a real teamsheet, not auto-picked */
 .tl-lsrc { display: block; margin-top: 3px; font-size: 11px; font-style: normal;
            color: var(--muted); opacity: .85; }
+
+/* ===== Projected table (Squad Planner) ===== */
+.pt-table{display:flex;flex-direction:column}
+.pt-row{display:grid;grid-template-columns:26px 1fr 40px 44px 48px;align-items:center;gap:10px;
+  padding:7px 8px;border-bottom:1px solid var(--border);font-size:13px}
+.pt-row:last-child{border-bottom:none}
+.pt-row.me{background:var(--card2);border-radius:8px;font-weight:700}
+.pt-pos{color:var(--muted);text-align:center;font-weight:700;font-size:12px}
+.pt-team{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pt-mv,.pt-dr{text-align:right;font-size:11.5px;font-weight:700}
+.pt-pts{text-align:right;font-weight:800}
+.pt-dr.ok{color:var(--green)}.pt-dr.bad{color:var(--red)}.pt-dr.muted{color:var(--muted)}

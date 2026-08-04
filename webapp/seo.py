@@ -72,6 +72,12 @@ PAGE_META = {
         "League and international tournaments.", False),
     "bestxi.html": ("Team of the Week & Best XI",
         "The best XI by Atlastra ratings, plus tournament teams of the week.", False),
+    "trajectory.html": ("Risers & Fallers — Next-Season Projections",
+        "Which players are projected to improve or decline next season, plus the "
+        "measured aging curve by position.", False),
+    "squadplan.html": ("Squad Planner — Where a Club Needs Signings",
+        "Position-by-position squad gaps for any top-5 club, today and once the "
+        "current squad has aged, with suggested targets.", False),
 }
 
 # Pages with no standalone search value -> keep them out of the index (private

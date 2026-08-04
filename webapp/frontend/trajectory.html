@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Risers &amp; Fallers</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=96">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="breadcrumb"><a href="/rankings.html">Analytics</a> › <b>Risers &amp; Fallers</b></div>
+    <div class="page-head">
+      <div><h2>Risers &amp; Fallers</h2><p>Everything else on Atlastra scores the season that happened.
+        This is the one model that looks <b>forward</b>: from twelve seasons of the top-5 panel it projects
+        where each player's rating goes <b>next</b> season — and how likely he is to still be here at all.</p></div>
+    </div>
+
+    <div id="tj-out"></div>
+  </main>
+</div>
+<script src="/js/api.js?v=31"></script>
+<script src="/js/trajectory.js?v=2"></script>
+</body>
+</html>

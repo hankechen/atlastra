@@ -1,5 +1,4 @@
 """A Decade of Goals — Europe's Top-5 Leagues, 2014/15–2025/26.
-
 Builds an 8-panel data story (8 figures + matching tables) from the DuckDB
 warehouse. Run:  python -m analytics.story
 Outputs PNGs to reports/figures/ and a STORY.md narrative with tables.

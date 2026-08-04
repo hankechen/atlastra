@@ -13,6 +13,7 @@ import random
 import sys
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 try:
@@ -4890,6 +4891,724 @@ class SoccerDB:
 
         return {"available": True, "season": season, "model": self._value_meta(season),
                 "undervalued": fetch("DESC"), "overvalued": fetch("ASC")}
+
+    # -------------------------------------------------------- career trajectory
+    #  The one forward-looking player model (ml/train_trajectory.py): where a
+    #  player's Atlastra rating goes NEXT season, plus the odds he is still a
+    #  top-5 regular at all. Trained on transitions up to 2021/22 and scored on
+    #  the three seasons after that, against the persistence baseline ("he'll be
+    #  exactly as good as he was"), which is the only baseline worth beating.
+    #  Projections, drivers and the measured aging curve are all precomputed.
+    def _trajectory_meta(self) -> dict | None:
+        if not self._table_exists("trajectory_meta"):
+            return None
+        m = self.con.execute("""SELECT target_season, n_train, n_test, test_seasons,
+                                       mae, base_mae, skill_pct, r2, direction_acc,
+                                       band, avail_auc, n_projected,
+                                       big_move, big_up_n, big_up_pred, big_up_real,
+                                       big_dn_n, big_dn_pred, big_dn_real,
+                                       interval_pct, coverage, coverage_const
+                                FROM trajectory_meta LIMIT 1""").fetchone()
+        if not m:
+            return None
+        return {"target_season": m[0], "target_label": season_label(m[0]),
+                "n_train": int(m[1]), "n_test": int(m[2]), "test_seasons": m[3],
+                "mae": round(float(m[4]), 2), "base_mae": round(float(m[5]), 2),
+                "skill_pct": round(float(m[6]), 1), "r2": round(float(m[7]), 3),
+                "direction_acc": round(float(m[8]), 3), "band": round(float(m[9]), 1),
+                "avail_auc": round(float(m[10]), 3), "n_projected": int(m[11]),
+                # how the boards' own biggest calls fared on the held-out seasons,
+                # split by direction (a +20 and a -20 would cancel if pooled)
+                "big_move": round(float(m[12]), 1),
+                "big_up": {"n": int(m[13]), "pred": round(float(m[14]), 1),
+                           "real": round(float(m[15]), 1)},
+                "big_dn": {"n": int(m[16]), "pred": round(float(m[17]), 1),
+                           "real": round(float(m[18]), 1)},
+                # the error bar's own report card: an 80% interval has to contain
+                # the truth 80% of the time, so say how often it actually did
+                "interval_pct": int(m[19]), "coverage": round(float(m[20]), 3),
+                "coverage_const": round(float(m[21]), 3)}
+
+    def web_trajectory(self, name: str, season: str = FOCUS_SEASON) -> dict:
+        """Next-season projection + drivers + the aging curve for this player's
+        position, with his own age marked (profile card)."""
+        if not self._table_exists("player_trajectory"):
+            return {"available": False}
+        pid = self.find_player_id(name, season)
+        if not pid:
+            return {"available": False}
+        r = self.con.execute(
+            """SELECT target_season, rating_now, projected, delta, band, p_present,
+                      age, verdict, verdict_class, blurb, lo, hi
+               FROM player_trajectory WHERE player_id = ? AND season = ?""",
+            [pid, season]).fetchone()
+        if not r:
+            return {"available": False}      # below the rating minutes bar this season
+        drivers = self.con.execute(
+            """SELECT label, impact FROM player_trajectory_drivers
+               WHERE player_id = ? AND season = ? ORDER BY abs(impact) DESC LIMIT 5""",
+            [pid, season]).fetchall()
+
+        grp = self.con.execute(
+            """SELECT position_group FROM player_ratings_combined
+               WHERE player_id = ? AND season = ? AND scope='league'""",
+            [pid, season]).fetchone()
+        curve = self._aging_curve(grp[0] if grp else "ALL")
+
+        # his own rating history, so the card can draw where he has been
+        hist = self.con.execute(
+            """SELECT season, rating FROM player_ratings_combined
+               WHERE player_id = ? AND scope='league' ORDER BY season""", [pid]).fetchall()
+        return {
+            "available": True, "season": season, "target_season": r[0],
+            "target_label": season_label(r[0]),
+            "rating_now": int(r[1]), "projected": round(float(r[2]), 1),
+            "delta": round(float(r[3]), 1), "band": round(float(r[4]), 1),
+            # the interval is asymmetric — a high-rated player has more room
+            # below him than above — so the card gets both ends, not one ±
+            "lo": round(float(r[10]), 1), "hi": round(float(r[11]), 1),
+            "p_present": round(float(r[5]), 3),
+            "age": None if r[6] is None else round(float(r[6]), 1),
+            "verdict": r[7], "verdict_class": r[8], "blurb": r[9],
+            "drivers": [{"label": d[0], "impact": round(float(d[1]), 2)} for d in drivers],
+            "history": [{"season": h[0], "label": season_label(h[0]), "rating": int(h[1])}
+                        for h in hist],
+            "curve": curve, "position_group": grp[0] if grp else None,
+            "model": self._trajectory_meta(),
+        }
+
+    def _aging_curve(self, position_group: str = "ALL") -> list[dict]:
+        """Measured mean season-on-season rating change by age. Data, not a model —
+        falls back to the all-positions curve where a group is too thin."""
+        if not self._table_exists("trajectory_aging_curve"):
+            return []
+        rows = self.con.execute(
+            """SELECT age, mean_delta, n FROM trajectory_aging_curve
+               WHERE position_group = ? ORDER BY age""", [position_group]).fetchall()
+        if len(rows) < 6:
+            rows = self.con.execute(
+                """SELECT age, mean_delta, n FROM trajectory_aging_curve
+                   WHERE position_group = 'ALL' ORDER BY age""").fetchall()
+        return [{"age": int(a), "delta": round(float(d), 2), "n": int(n)} for a, d, n in rows]
+
+    def web_aging_curves(self) -> dict:
+        """Every measured aging curve, for the chart on the Trajectory page."""
+        if not self._table_exists("trajectory_aging_curve"):
+            return {"available": False}
+        df = self.con.execute(
+            """SELECT position_group, age, mean_delta, n FROM trajectory_aging_curve
+               ORDER BY position_group, age""").df()
+        out: dict[str, list] = {}
+        for r in df.itertuples():
+            out.setdefault(r.position_group, []).append(
+                {"age": int(r.age), "delta": round(float(r.mean_delta), 2), "n": int(r.n)})
+        # the peak is where the curve last crosses from gaining to losing
+        peaks = {}
+        for grp, pts in out.items():
+            cross = [p["age"] for p, q in zip(pts, pts[1:]) if p["delta"] >= 0 > q["delta"]]
+            peaks[grp] = cross[-1] if cross else None
+        return {"available": True, "curves": out, "peaks": peaks,
+                "model": self._trajectory_meta()}
+
+    def web_trajectory_board(self, season: str = FOCUS_SEASON, limit: int = 15,
+                             min_minutes: int = 900) -> dict:
+        """Risers, fallers and breakout candidates by the trajectory model."""
+        if not self._table_exists("player_trajectory"):
+            return {"available": False, "error": "Trajectory model not trained yet."}
+
+        def fetch(where: str, order: str, params: list) -> list:
+            df = self.con.execute(f"""
+                SELECT pl.player_name AS player,
+                       COALESCE(f.detailed_position, f.main_position, pl.position_group) AS position,
+                       f.team, pe.fpid,
+                       t.rating_now, t.projected, t.delta, t.band, t.lo, t.hi,
+                       t.p_present, t.age, t.verdict, t.verdict_class
+                FROM player_trajectory t
+                JOIN players pl USING(player_id)
+                JOIN player_ratings_combined c
+                     ON c.player_id = t.player_id AND c.scope='league' AND c.season = t.season
+                LEFT JOIN v_player_profile_full f ON f.player_id = t.player_id
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id = t.player_id
+                WHERE t.season = ? AND c.minutes >= ? {where}
+                ORDER BY {order} LIMIT ?
+            """, [season, min_minutes] + params + [limit]).df()
+            out = []
+            for r in df.itertuples():
+                out.append({
+                    "player": r.player, "position": r.position, "team": r.team,
+                    "photo": self.player_photo(r.fpid),
+                    "rating_now": int(r.rating_now), "projected": round(float(r.projected), 1),
+                    "delta": round(float(r.delta), 1), "band": round(float(r.band), 1),
+                    "lo": round(float(r.lo), 1), "hi": round(float(r.hi), 1),
+                    "p_present": round(float(r.p_present), 3),
+                    "age": None if pd.isna(r.age) else round(float(r.age), 1),
+                    "verdict": r.verdict, "verdict_class": r.verdict_class,
+                })
+            return out
+
+        return {
+            "available": True, "season": season, "model": self._trajectory_meta(),
+            "risers": fetch("", "t.delta DESC", []),
+            "fallers": fetch("", "t.delta ASC", []),
+            # breakouts: young, not yet at the top, and projected to CLIMB — the
+            # players the model expects to arrive rather than the ones already
+            # there. The rise is a filter, not just a sort key: ordering a young
+            # cohort by projected rating alone lists the best of them, which puts
+            # players the model expects to decline under a "breakout" heading.
+            "breakouts": fetch("AND t.age IS NOT NULL AND t.age <= 23 "
+                               "AND t.rating_now < 80 AND t.delta > 0",
+                               "t.projected DESC", []),
+            # the ones the availability head doubts will still be top-5 regulars
+            "at_risk": fetch("", "t.p_present ASC", []),
+        }
+
+    # ---------------------------------------------------- projected league table
+    #  "Where does this club finish if nobody moves?" Next season's squad is not
+    #  knowable, so that assumption is the feature rather than a limitation of it —
+    #  it is exactly the counterfactual a Squad Planner user wants before deciding
+    #  whether to sign anyone.
+    #
+    #  Squad strength is the minutes-weighted rating of a club's top 14, and the
+    #  map from strength to points is fitted on real final tables rather than
+    #  assumed. Held out it lands within 9.5 points against 9.8 for assuming this
+    #  season's table repeats — better, but not by much, and the page says so.
+    #
+    #  The points model is fitted AND served on measured squad strength. An earlier
+    #  version fitted the coefficient on measured strength and then fed it
+    #  projected strength at serve time, which is a different variable wearing the
+    #  same coefficient; the honest gain from that substitution was about a point
+    #  of MAE and it cost internal consistency. The trajectory instead appears as
+    #  its own column — how far each squad's strength is projected to move — which
+    #  is the part a planner actually acts on, and is not laundered through a
+    #  coefficient it did not earn.
+    SQUAD_DEPTH = 14
+
+    def _table_fit(self):
+        """Fit next-season points on (this season's points, projected strength).
+        Returns (coefficients, held-out MAE, persistence MAE) or None."""
+        if not self._table_exists("player_trajectory"):
+            return None
+        df = self.con.execute(f"""
+            WITH sq AS (
+                SELECT ps.player_id, ps.season,
+                       ARG_MAX(ps.team_id, ps.minutes) AS team_id,
+                       sum(ps.minutes) AS mins
+                FROM player_season_stats ps GROUP BY 1, 2),
+            rated AS (
+                SELECT sq.team_id, sq.season, sq.mins, c.rating,
+                       row_number() OVER (PARTITION BY sq.team_id, sq.season
+                                          ORDER BY sq.mins DESC) AS rn
+                FROM sq JOIN player_ratings_combined c
+                     ON c.player_id = sq.player_id AND c.season = sq.season
+                    AND c.scope = 'league'),
+            strength AS (
+                SELECT team_id, season,
+                       sum(rating * mins) / NULLIF(sum(mins), 0) AS str_now,
+                       count(*) AS n
+                FROM rated WHERE rn <= {self.SQUAD_DEPTH} GROUP BY 1, 2)
+            SELECT s.team_id, s.season, s.str_now, t.points AS pts_now,
+                   n.points AS pts_next
+            FROM strength s
+            JOIN team_season_stats t ON t.team_id = s.team_id AND t.season = s.season
+            JOIN team_season_stats n ON n.team_id = s.team_id
+                 AND CAST(n.season AS INT) = CAST(s.season AS INT) + 101
+            WHERE s.n >= {self.SQUAD_DEPTH}
+        """).df()
+        if len(df) < 100:
+            return None
+        A = np.column_stack([np.ones(len(df)), df["pts_now"].values, df["str_now"].values])
+        y = df["pts_next"].values.astype(float)
+        # held out by time, like everything else that claims a number here
+        tr = (df["season"] <= "2122").values
+        coef, *_ = np.linalg.lstsq(A[tr], y[tr], rcond=None)
+        pred = A[~tr] @ coef
+        mae = float(np.abs(y[~tr] - pred).mean())
+        mae_pers = float(np.abs(y[~tr] - df["pts_now"].values[~tr]).mean())
+        full, *_ = np.linalg.lstsq(A, y, rcond=None)
+        return {"coef": full.tolist(), "mae": round(mae, 2),
+                "mae_persistence": round(mae_pers, 2), "n": len(df)}
+
+    def web_projected_table(self, league_key: str | None = None,
+                            season: str = FOCUS_SEASON) -> dict:
+        """Next season's table if every squad stayed exactly as it is."""
+        fit = self._table_fit()
+        if not fit:
+            return {"available": False, "error": "Not enough history to fit a table projection."}
+        a, b, c = fit["coef"]
+
+        df = self.con.execute(f"""
+            WITH sq AS (
+                SELECT ps.player_id, ARG_MAX(ps.team_id, ps.minutes) AS team_id,
+                       sum(ps.minutes) AS mins
+                FROM player_season_stats ps WHERE ps.season = ? GROUP BY 1),
+            rated AS (
+                SELECT sq.team_id, sq.mins, c.rating,
+                       COALESCE(t.projected, c.rating) AS proj,
+                       row_number() OVER (PARTITION BY sq.team_id ORDER BY sq.mins DESC) AS rn
+                FROM sq
+                JOIN player_ratings_combined c ON c.player_id = sq.player_id
+                     AND c.season = ? AND c.scope = 'league'
+                LEFT JOIN player_trajectory t ON t.player_id = sq.player_id AND t.season = ?)
+            SELECT r.team_id, tm.team_name, tm.league_key,
+                   sum(r.rating * r.mins) / NULLIF(sum(r.mins), 0) AS str_now,
+                   sum(r.proj * r.mins) / NULLIF(sum(r.mins), 0) AS str_proj,
+                   count(*) AS n, ts.points AS pts_now, ts.league_position AS pos_now
+            FROM rated r
+            JOIN teams tm ON tm.team_id = r.team_id
+            JOIN team_season_stats ts ON ts.team_id = r.team_id AND ts.season = ?
+            WHERE r.rn <= {self.SQUAD_DEPTH}
+            GROUP BY 1, 2, 3, ts.points, ts.league_position
+            HAVING count(*) >= {self.SQUAD_DEPTH}
+        """, [season, season, season, season]).df()
+        if league_key:
+            df = df[df["league_key"] == league_key]
+        if df.empty:
+            return {"available": False, "error": "No club with a full rated squad."}
+
+        df["proj_pts"] = a + b * df["pts_now"] + c * df["str_now"]
+        df["str_drift"] = df["str_proj"] - df["str_now"]
+        out = {}
+        for lg, g in df.groupby("league_key"):
+            g = g.sort_values("proj_pts", ascending=False).reset_index(drop=True)
+            out[lg] = [{
+                "pos": i + 1, "team": r.team_name, "team_logo": self.team_logo(r.team_name),
+                "projected_points": int(round(r.proj_pts)),
+                "points_now": int(r.pts_now), "position_now": int(r.pos_now),
+                "move": int(r.pos_now) - (i + 1),
+                "squad_strength": round(float(r.str_now), 1),
+                # reported beside the table, not folded into it: where the
+                # trajectory model expects this squad's level to be heading
+                "strength_drift": round(float(r.str_drift), 1),
+            } for i, r in enumerate(g.itertuples())]
+        return {"available": True, "season": season, "season_label": season_label(season),
+                "tables": out, "model": fit,
+                "target_label": season_label(f"{int(season[:2]) + 1:02d}{int(season[2:]) + 1:02d}")}
+
+    # --------------------------------------------------- danger men for a fixture
+    #  Previews used to name a club's best players by season rating, which gives
+    #  the same answer every week whoever they play. This asks the fixture-specific
+    #  question — who is likely to score or assist in THIS match — from the model
+    #  in ml/train_match_contribution.py.
+    _CONTRIB = None
+
+    def _contrib_model(self):
+        """Load the fitted model once per process; None if it was never trained."""
+        if SoccerDB._CONTRIB is None:
+            try:
+                from joblib import load
+                from ml.train_match_contribution import ART
+                art = load(ART)
+                SoccerDB._CONTRIB = (art["model"], art["feats"])
+            except Exception:  # noqa: BLE001
+                SoccerDB._CONTRIB = (None, None)
+        return SoccerDB._CONTRIB
+
+    def web_match_danger(self, home: str, away: str, top: int = 5,
+                         season: str = FOCUS_SEASON) -> dict:
+        """Most likely goal involvements on each side of one fixture."""
+        model, feats = self._contrib_model()
+        if model is None:
+            return {"available": False, "error": "Match model not trained yet."}
+        hid, aid = self.find_team_id(home), self.find_team_id(away)
+        if not hid or not aid:
+            return {"available": False, "error": "Could not resolve both clubs."}
+
+        from ml.train_match_contribution import predict_fixture
+        names = dict(self.con.execute(
+            "SELECT player_id, player_name FROM players").fetchall())
+        photos = dict(self.con.execute(
+            """SELECT player_id, max(fotmob_player_id) FROM player_enrichment
+               WHERE fotmob_player_id IS NOT NULL GROUP BY 1""").fetchall())
+
+        def side(tid, oid, is_home):
+            df = predict_fixture(self.con, tid, oid, is_home, season, model, feats)
+            out = []
+            for r in df.head(top).itertuples():
+                out.append({
+                    "player": names.get(int(r.player_id), "?"),
+                    "prob": round(float(r.p), 3),
+                    "photo": self.player_photo(photos.get(int(r.player_id))),
+                    "form_ga": None if pd.isna(r.ga_form) else int(r.ga_form),
+                    "apps_form": int(r.apps_form or 0),
+                })
+            return out
+
+        meta = None
+        if self._table_exists("player_match_contribution_meta"):
+            m = self.con.execute(
+                """SELECT auc, auc_rating, hit_top3, hit_top3_rating, n_test
+                   FROM player_match_contribution_meta LIMIT 1""").fetchone()
+            if m:
+                meta = {"auc": round(float(m[0]), 3), "auc_rating": round(float(m[1]), 3),
+                        "hit_top3": round(float(m[2]), 3),
+                        "hit_top3_rating": round(float(m[3]), 3), "n_test": int(m[4])}
+        return {"available": True, "home": home, "away": away, "season": season,
+                "home_players": side(hid, aid, True), "away_players": side(aid, hid, False),
+                "model": meta}
+
+    # ------------------------------------------------------------- availability
+    #  Derived from the match log, not scraped: a club match the player did not
+    #  appear in is an absence, a run of them is a spell (pipeline/build_absences).
+    #  Deliberately never called an injury — a long suspension looks identical from
+    #  here, and only the length is actually observed.
+    def web_availability(self, name: str, season: str = FOCUS_SEASON) -> dict:
+        """Availability this season, the spells behind it, and career history."""
+        if not self._table_exists("player_availability"):
+            return {"available": False}
+        pid = self.find_player_id(name, season)
+        if not pid:
+            return {"available": False}
+
+        cur = self.con.execute("""
+            SELECT sum(window_matches) AS window_matches, sum(played) AS played,
+                   max(longest_spell) AS longest_spell, sum(matches_missed) AS missed
+            FROM player_availability WHERE player_id = ? AND season = ?""",
+            [pid, season]).fetchone()
+        if not cur or not cur[0]:
+            return {"available": False}
+        window, played = int(cur[0]), int(cur[1])
+
+        spells = self.con.execute("""
+            SELECT s.start_date, s.end_date, s.matches_missed, t.team_name
+            FROM player_absence_spell s LEFT JOIN teams t USING(team_id)
+            WHERE s.player_id = ? AND s.season = ? AND s.matches_missed >= 3
+            ORDER BY s.matches_missed DESC LIMIT 6""", [pid, season]).fetchall()
+
+        hist = self.con.execute("""
+            SELECT season, sum(window_matches) AS w, sum(played) AS p,
+                   max(longest_spell) AS longest
+            FROM player_availability WHERE player_id = ?
+            GROUP BY 1 ORDER BY 1""", [pid]).fetchall()
+        career = [{"season": h[0], "label": season_label(h[0]),
+                   "pct": round(100.0 * int(h[2]) / max(1, int(h[1])), 1),
+                   "played": int(h[2]), "window": int(h[1]), "longest": int(h[3] or 0)}
+                  for h in hist]
+        seasons_long = sum(1 for c in career if c["longest"] >= 10)
+
+        pct = round(100.0 * played / max(1, window), 1)
+        verdict, cls = (("Ever-present", "great") if pct >= 90 else
+                        ("Reliable", "good") if pct >= 75 else
+                        ("In and out", "neutral") if pct >= 50 else
+                        ("Rarely available", "bad"))
+        return {
+            "available": True, "season": season, "season_label": season_label(season),
+            "window_matches": window, "played": played, "pct": pct,
+            "missed": int(cur[3] or 0), "longest_spell": int(cur[2] or 0),
+            "verdict": verdict, "verdict_class": cls,
+            "spells": [{"from": str(s[0])[:10], "to": str(s[1])[:10],
+                        "matches": int(s[2]), "team": s[3]} for s in spells],
+            "career": career, "seasons_with_long_absence": seasons_long,
+            "risk": self._absence_risk(),
+        }
+
+    def _absence_risk(self) -> list[dict] | None:
+        """The measured relationship between a long absence this season and another
+        next season. A table, not a per-player score: a model on this target beat
+        reading one column by 0.015 AUC, which is not enough to put a number on a
+        person. Recomputed here so the page always matches the warehouse."""
+        if not self._table_exists("player_availability"):
+            return None
+        # Restricted to the rated cohort. Pooling every player-season instead lets
+        # in fringe players whose whole "window" is a handful of appearances, for
+        # whom a long absence is near-automatic; that pushed the headline rates to
+        # 18/26/34% and put the page at odds with the model, which reports the same
+        # relationship on rated players. Same population, same numbers.
+        rows = self.con.execute("""
+            WITH a AS (SELECT av.player_id, av.season, max(av.longest_spell) AS spell
+                       FROM player_availability av
+                       JOIN player_ratings_combined c
+                            ON c.player_id = av.player_id AND c.season = av.season
+                           AND c.scope = 'league'
+                       GROUP BY 1, 2),
+            pairs AS (
+                SELECT a.spell AS prior, b.spell AS nxt
+                FROM a JOIN a b ON b.player_id = a.player_id
+                   AND CAST(b.season AS INT) = CAST(a.season AS INT) + 101)
+            SELECT CASE WHEN prior >= 10 THEN '10+'
+                        WHEN prior >= 5  THEN '5-9' ELSE 'none' END AS bucket,
+                   count(*) AS n,
+                   round(avg(CASE WHEN nxt >= 10 THEN 1.0 ELSE 0.0 END), 3) AS rate
+            FROM pairs GROUP BY 1""").fetchall()
+        order = {"none": 0, "5-9": 1, "10+": 2}
+        out = sorted(({"prior": r[0], "n": int(r[1]), "rate": float(r[2])} for r in rows),
+                     key=lambda d: order.get(d["prior"], 9))
+        return out or None
+
+    # ------------------------------------------------------------ squad planner
+    #  "What does this squad need, and when?" — the question none of the other
+    #  features can answer, because they all describe the present. It joins three
+    #  things that already exist: who is at the club now, where the trajectory
+    #  model expects each of them to be next season, and what the measured aging
+    #  curve says about the three years after that. A unit that is fine today and
+    #  30 years old is a problem the league table will not show for two years.
+    #
+    #  The benchmark is measured, not invented: for each position, take every
+    #  top-5 club's BEST player there and use the 80th percentile of that. It is
+    #  literally "what a strong club has in this position this season".
+    UNIT_LABELS = {"GK": "Goalkeeper", "CB": "Centre-back", "FB": "Full-back",
+                   "DM": "Defensive midfield", "CM": "Central midfield",
+                   "AM": "Attacking midfield", "W": "Winger", "ST": "Striker"}
+    PLAN_MIN_MINUTES = 450          # below this a player is not really a squad option
+
+    #  Positions cover for one another, and a planner that ignores that produces
+    #  nonsense: Manchester United's midfield is classified DM and AM, with nobody
+    #  labelled CM, and the first version of this duly told a club with Casemiro,
+    #  Ugarte, Mainoo, Fernandes and Mount that its top priority was a central
+    #  midfielder. So an adjacent player counts toward a unit at a discount — he
+    #  can do the job, just not as naturally as a specialist.
+    COVERS = {
+        "GK": {}, "CB": {"FB": 0.85}, "FB": {"CB": 0.85, "W": 0.80},
+        "DM": {"CM": 0.90, "CB": 0.80}, "CM": {"DM": 0.90, "AM": 0.90},
+        "AM": {"CM": 0.90, "W": 0.85}, "W": {"AM": 0.85, "ST": 0.80, "FB": 0.75},
+        "ST": {"W": 0.80, "AM": 0.75},
+    }
+    COVER_DEPTH_WEIGHT = 0.5        # an out-of-position body is half a squad option
+    MAX_COVER = 3                   # and you cannot field six centre-backs at full-back
+
+    def _aging_deltas(self) -> dict:
+        """(position_group, age) -> mean season-on-season rating change. The
+        measured curve, used to age a squad forward past the model's one season."""
+        if not self._table_exists("trajectory_aging_curve"):
+            return {}
+        return {(r[0], int(r[1])): float(r[2]) for r in self.con.execute(
+            "SELECT position_group, age, mean_delta FROM trajectory_aging_curve").fetchall()}
+
+    def _age_forward(self, curve: dict, grp: str, age: float | None, years: int) -> float:
+        """Rating points a player of this age and position typically gains or loses
+        over `years` more seasons. A cohort average, not a personal projection —
+        the model only speaks for one season ahead, and this is labelled as such."""
+        if age is None:
+            return 0.0
+        total = 0.0
+        for k in range(years):
+            a = int(round(age)) + k
+            step = curve.get((grp, a), curve.get(("ALL", a)))
+            if step is None:            # past the end of the curve: hold the last
+                step = curve.get((grp, 38), curve.get(("ALL", 38), 0.0))
+            total += step
+        return total
+
+    def web_squad_plan(self, name: str, season: str = FOCUS_SEASON,
+                       horizon: int = 3, targets_per_unit: int = 4) -> dict:
+        """Squad-gap analysis for one club: where it is short now, where it will be
+        short once the current squad ages, and who could fix it."""
+        if not self._table_exists("player_trajectory"):
+            return {"available": False, "error": "Trajectory model not trained yet."}
+        tid = self.find_team_id(name)
+        if not tid:
+            return {"available": False, "error": f"No club matching {name!r}."}
+        head = self.con.execute(
+            """SELECT t.team_name, t.league_key, l.league_name
+               FROM teams t JOIN leagues l USING(league_key) WHERE t.team_id = ?""",
+            [tid]).fetchone()
+
+        squad = self.con.execute("""
+            SELECT pl.player_name AS player, c.position_group AS grp, c.rating,
+                   c.minutes, t.projected, t.delta, t.lo, t.hi, t.p_present, t.age,
+                   t.verdict, t.verdict_class, pe.fpid
+            FROM player_season_stats ps
+            JOIN players pl USING(player_id)
+            JOIN player_ratings_combined c
+                 ON c.player_id = ps.player_id AND c.season = ps.season AND c.scope = 'league'
+            LEFT JOIN player_trajectory t
+                 ON t.player_id = ps.player_id AND t.season = ps.season
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = ps.player_id
+            WHERE ps.team_id = ? AND ps.season = ? AND ps.minutes >= ?
+            ORDER BY c.rating DESC
+        """, [tid, season, self.PLAN_MIN_MINUTES]).df()
+        if squad.empty:
+            return {"available": False, "error": f"No rated squad for {head[0]} in {season}."}
+
+        bench = {r[0]: float(r[1]) for r in self.con.execute("""
+            WITH s AS (
+                SELECT ps.team_id, c.position_group AS grp, c.rating
+                FROM player_season_stats ps
+                JOIN player_ratings_combined c
+                     ON c.player_id = ps.player_id AND c.season = ps.season AND c.scope='league'
+                WHERE ps.season = ?),
+            best AS (SELECT grp, team_id, max(rating) AS r FROM s GROUP BY 1, 2)
+            SELECT grp, quantile_cont(r, 0.8) FROM best GROUP BY 1
+        """, [season]).fetchall()}
+
+        curve = self._aging_deltas()
+        tgt_season = self.con.execute(
+            "SELECT target_season FROM player_trajectory LIMIT 1").fetchone()
+
+        def _p(r) -> dict:
+            proj = None if pd.isna(r.projected) else round(float(r.projected), 1)
+            return {"player": r.player, "group": r.grp, "rating": int(r.rating),
+                    "minutes": int(r.minutes),
+                    "age": None if pd.isna(r.age) else round(float(r.age), 1),
+                    "projected": proj,
+                    "delta": None if pd.isna(r.delta) else round(float(r.delta), 1),
+                    "p_present": None if pd.isna(r.p_present) else round(float(r.p_present), 3),
+                    "verdict": None if pd.isna(r.verdict) else r.verdict,
+                    "verdict_class": None if pd.isna(r.verdict_class) else r.verdict_class,
+                    "in_horizon": None if proj is None or pd.isna(r.age) else
+                        round(proj + self._age_forward(curve, r.grp, float(r.age) + 1, horizon - 1), 1),
+                    "photo": self.player_photo(r.fpid)}
+
+        players = [_p(r) for r in squad.itertuples()]
+        # how deep a typical top-5 club is at each position — measured, so "thin"
+        # means "thinner than everyone else" rather than a number someone guessed
+        depth_norm = {r[0]: float(r[1]) for r in self.con.execute("""
+            WITH s AS (
+                SELECT ps.team_id, c.position_group AS grp
+                FROM player_season_stats ps
+                JOIN player_ratings_combined c
+                     ON c.player_id = ps.player_id AND c.season = ps.season AND c.scope='league'
+                WHERE ps.season = ? AND ps.minutes >= ?),
+            d AS (SELECT grp, team_id, count(*) AS n FROM s GROUP BY 1, 2)
+            SELECT grp, median(n) FROM d GROUP BY 1
+        """, [season, self.PLAN_MIN_MINUTES]).fetchall()}
+
+        units = []
+        for grp, label in self.UNIT_LABELS.items():
+            own = [p for p in players if p["group"] == grp]
+            covers = self.COVERS.get(grp, {})
+            # an adjacent player enters this unit at a discount, tagged so the UI
+            # can say "covering from central midfield" rather than imply he is one
+            # A covering player keeps his real rating on display — showing an
+            # 83-rated midfielder as "71" because he is being counted at 0.85 in
+            # this unit misrepresents the player. The discount lives in the
+            # eff_* fields, which is what the unit maths reads.
+            cover = []
+            for p in players:
+                w = covers.get(p["group"])
+                if not w:
+                    continue
+                q = dict(p, cover_from=p["group"], cover_weight=w,
+                         eff_rating=round(p["rating"] * w, 1))
+                for k in ("projected", "in_horizon"):
+                    q[f"eff_{k}"] = None if p[k] is None else round(p[k] * w, 1)
+                cover.append(q)
+            cover.sort(key=lambda q: -q["eff_rating"])
+            cover = cover[:self.MAX_COVER]
+            for p in own:                       # specialists are counted in full
+                p["eff_rating"] = float(p["rating"])
+                p["eff_projected"], p["eff_in_horizon"] = p["projected"], p["in_horizon"]
+            ps = own + cover
+            b = round(bench.get(grp, 70.0), 1)
+            want = round(depth_norm.get(grp, 3.0))
+            if not ps:
+                units.append({
+                    "group": grp, "label": label, "depth": 0, "target_depth": want,
+                    "benchmark": b, "best_now": None, "best_next": None,
+                    "best_horizon": None, "gap_now": b, "gap_next": b, "gap_horizon": b,
+                    "mean_age": None, "priority": round(b + 12, 1), "players": [],
+                    "reasons": [f"No rated {label.lower()} played {self.PLAN_MIN_MINUTES}+ minutes, "
+                                f"and nobody in an adjacent position to cover"],
+                })
+                continue
+            best_now = round(max(p["eff_rating"] for p in ps), 1)
+            nxt = [p["eff_projected"] for p in ps if p["eff_projected"] is not None]
+            hz = [p["eff_in_horizon"] for p in ps if p["eff_in_horizon"] is not None]
+            best_next = max(nxt) if nxt else None
+            best_hz = max(hz) if hz else None
+            # a squad's age at a position is the age of the players actually
+            # holding it, so weight by minutes rather than counting heads
+            aged = [(p["age"], p["minutes"]) for p in own if p["age"] is not None]
+            mean_age = (round(sum(a * m for a, m in aged) / sum(m for _, m in aged), 1)
+                        if aged else None)
+
+            gap_now = round(b - best_now, 1)
+            gap_next = round(b - best_next, 1) if best_next is not None else gap_now
+            gap_hz = round(b - best_hz, 1) if best_hz is not None else gap_next
+            eff_depth = len(own) + self.COVER_DEPTH_WEIGHT * len(cover)
+            short = max(0.0, want - eff_depth)
+
+            reasons = []
+            if gap_now > 4:
+                reasons.append(f"Best {label.lower()} rates {best_now} against {b:.0f} "
+                               f"at a strong club — {gap_now:.0f} short today")
+            if gap_hz - gap_now > 3:
+                reasons.append(f"Widens to {gap_hz:.0f} short within {horizon} seasons "
+                               f"as the current group ages")
+            if short >= 1:
+                spec = f"{len(own)} specialist{'s' if len(own) != 1 else ''}"
+                extra = f" plus {len(cover)} covering from elsewhere" if cover else ""
+                reasons.append(f"Thin: {spec}{extra} with real minutes, against "
+                               f"{want} at a typical top-5 club")
+            if mean_age is not None and mean_age >= 30:
+                reasons.append(f"Minutes here average {mean_age:.0f} years old")
+            declining = [p for p in own if (p["delta"] or 0) <= -3.5]
+            if declining:
+                reasons.append(", ".join(p["player"] for p in declining[:3])
+                               + (" are" if len(declining) > 1 else " is")
+                               + " projected to drop sharply")
+            leaving = [p for p in own if (p["p_present"] or 1) < 0.5]
+            if leaving:
+                reasons.append(", ".join(p["player"] for p in leaving[:3])
+                               + " may not be a top-5 regular next season")
+            if not reasons:
+                reasons.append("Covered — at or above a strong club's level, with depth")
+
+            # priority: the future gap matters most, then today's, then depth
+            priority = round(max(0.0, gap_hz) * 1.0 + max(0.0, gap_now) * 0.6 + short * 3.0, 1)
+            units.append({
+                "group": grp, "label": label, "depth": len(own),
+                "cover_depth": len(cover), "target_depth": want,
+                "benchmark": b, "best_now": best_now, "best_next": best_next,
+                "best_horizon": best_hz, "gap_now": gap_now, "gap_next": gap_next,
+                "gap_horizon": gap_hz, "mean_age": mean_age, "priority": priority,
+                "reasons": reasons,
+                "players": sorted(ps, key=lambda p: -p["eff_rating"]),
+            })
+        units.sort(key=lambda u: -u["priority"])
+
+        needs = [u for u in units if u["priority"] > 0][:3]
+        targets = {u["group"]: self._plan_targets(
+            tid, u["group"], u["best_next"] or u["best_now"] or 0, season, targets_per_unit)
+            for u in needs}
+
+        return {
+            "available": True, "team": head[0], "league": head[2],
+            "league_key": head[1], "team_logo": self.team_logo(head[0]),
+            "season": _fmt_season(season), "horizon": horizon,
+            "target_label": season_label(tgt_season[0]) if tgt_season else None,
+            "units": units, "targets": targets,
+            "needs": [u["group"] for u in needs],
+            "model": self._trajectory_meta(),
+        }
+
+    def _plan_targets(self, tid: int, grp: str, beat: float,
+                      season: str, limit: int) -> list[dict]:
+        """Players at other clubs who would raise this position next season.
+        Ranked by projected rating; market value shown where we have one (only
+        the ~500 most valuable players are priced, so most come back unpriced)."""
+        df = self.con.execute("""
+            SELECT pl.player_name AS player, tm.team_name AS team, c.rating,
+                   t.projected, t.delta, t.age, t.verdict, t.verdict_class,
+                   mv.market_value_eur AS value, pe.fpid
+            FROM player_trajectory t
+            JOIN players pl USING(player_id)
+            JOIN player_ratings_combined c
+                 ON c.player_id = t.player_id AND c.season = t.season AND c.scope='league'
+            JOIN (SELECT player_id, ARG_MAX(team_id, minutes) AS team_id
+                  FROM player_season_stats WHERE season = ? GROUP BY 1) cur
+                 ON cur.player_id = t.player_id
+            JOIN teams tm ON tm.team_id = cur.team_id
+            LEFT JOIN player_market_value mv
+                 ON mv.player_id = t.player_id AND mv.season = t.season
+            LEFT JOIN (SELECT player_id, max(fotmob_player_id) fpid FROM player_enrichment
+                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                   ON pe.player_id = t.player_id
+            WHERE t.season = ? AND c.position_group = ? AND cur.team_id <> ?
+              AND c.minutes >= 900 AND t.projected > ?
+            ORDER BY t.projected DESC LIMIT ?
+        """, [season, season, grp, tid, beat, limit]).df()
+        return [{
+            "player": r.player, "team": r.team, "rating": int(r.rating),
+            "projected": round(float(r.projected), 1), "delta": round(float(r.delta), 1),
+            "age": None if pd.isna(r.age) else round(float(r.age), 1),
+            "verdict": r.verdict, "verdict_class": r.verdict_class,
+            "value_eur": None if pd.isna(r.value) else int(r.value),
+            "photo": self.player_photo(r.fpid),
+        } for r in df.itertuples()]
 
     def web_squad_key_players(self, names: list, top: int = 3, season: str = FOCUS_SEASON) -> list:
         """Match SofaScore squad names to our warehouse and return the top-rated few

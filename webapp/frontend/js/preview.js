@@ -75,6 +75,14 @@ attachSearchDropdown(document.getElementById('searchBox'));
         <div class="pv-keycols">${keyCol(H)}${keyCol(A)}</div>
       </section>
 
+      <!-- filled in after the fixture-specific model answers; hidden if it cannot -->
+      <section class="card" id="pvDanger" style="display:none">
+        <div class="card-h"><h3>Most likely to score or assist</h3>
+          <span class="muted" style="font-size:12px" id="pvDangerNote"></span></div>
+        <div class="pv-keycols" id="pvDangerCols"></div>
+        <div class="muted" id="pvDangerFoot" style="font-size:11.5px;margin-top:10px"></div>
+      </section>
+
       <section class="card">
         <div class="card-h"><h3>Head-to-head</h3></div>
         ${h2h ? `<div class="pv-h2h-tally">
@@ -83,6 +91,39 @@ attachSearchDropdown(document.getElementById('searchBox'));
             <div class="pv-h2h-t"><b>${h2h.away_wins ?? 0}</b><span>${esc(A.name)} wins</span></div>
           </div>` : '<div class="muted" style="padding:8px">No previous meetings on record.</div>'}
       </section>`;
+
+    // Fixture-specific danger men. Loaded after the rest so a slow model never
+    // holds up the preview, and simply stays hidden when it has nothing to say
+    // (a club outside our coverage, or the model not trained).
+    api(`/api/match_danger?home=${encodeURIComponent(H.name)}&away=${encodeURIComponent(A.name)}`)
+      .then((k) => {
+        if (!k || !k.available) return;
+        const col = (name, players) => {
+          const rows = (players || []).map((p) => `
+            <a class="pv-kpl" href="/player.html?name=${encodeURIComponent(p.player)}">
+              <span class="pv-kpl-ph">${avatarHTML(p.photo, p.player)}</span>
+              <span class="pv-kpl-tx"><b>${esc(p.player)}</b>
+                <span>${p.apps_form ? `${p.form_ga} in last ${p.apps_form}` : 'little recent football'}</span></span>
+              <span class="pv-kpl-rat">${Math.round(p.prob * 100)}%</span></a>`).join('');
+          return `<div class="pv-keycol"><h5>${esc(name)}</h5>${rows
+            || '<div class="muted" style="font-size:12px;padding:6px 0">No modelled players.</div>'}</div>`;
+        };
+        document.getElementById('pvDangerCols').innerHTML =
+          col(H.name, k.home_players) + col(A.name, k.away_players);
+        const m = k.model;
+        if (m) {
+          document.getElementById('pvDangerNote').textContent = 'chance of a goal or assist';
+          document.getElementById('pvDangerFoot').innerHTML =
+            `From opponent, venue, recent minutes and form — not season rating alone. On
+             ${m.n_test.toLocaleString()} held-out fixtures the three players it flags per match
+             returned a goal or assist <b>${Math.round(m.hit_top3 * 100)}%</b> of the time, against
+             <b>${Math.round(m.hit_top3_rating * 100)}%</b> for naming the top-rated three
+             (AUC ${m.auc.toFixed(2)} vs ${m.auc_rating.toFixed(2)}). The percentages are calibrated
+             rather than indicative — across the held-out seasons each band landed within a point or
+             two of its own number, so a 30% call really is about a 30% chance.`;
+        }
+        document.getElementById('pvDanger').style.display = '';
+      }).catch(() => {});
   }
 
   (async function init() {

@@ -226,6 +226,22 @@ async function load(name, careerStat = 'xa', season = null) {
     document.getElementById('valueCard').style.display = '';
   }).catch(() => {});
 
+  // Availability — how much of his club's football he was actually there for,
+  // derived from the match log rather than scraped from an injury feed.
+  api('/api/availability?name=' + encodeURIComponent(p.name)).then((a) => {
+    if (!a || !a.available) return;
+    renderAvailability(a);
+    document.getElementById('availCard').style.display = '';
+  }).catch(() => {});
+
+  // Career Trajectory — where the model expects his rating to go next season.
+  // Only players who cleared this season's rating minutes bar are projected.
+  api('/api/trajectory?name=' + encodeURIComponent(p.name)).then((t) => {
+    if (!t || !t.available) return;
+    renderTrajectory(t);
+    document.getElementById('trajCard').style.display = '';
+  }).catch(() => {});
+
   // Recent Form — per-match log from FotMob (result, rating, G/A). Needs the FotMob
   // player id, which is embedded in the photo URL (…/playerimages/<id>.png).
   (function () {
@@ -586,6 +602,164 @@ function renderValue(v) {
         per-90 output and league — it does not see contract length, hype or reputation, so
         highly-priced prospects often read "overvalued".</div>`;
   })();
+}
+
+// Availability — share of his club's league matches he actually played, from his
+// first appearance for them onward, plus the runs he missed. Never called injury:
+// a suspension looks the same from the match log, and only length is observed.
+function renderAvailability(a) {
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const when = (d) => new Date(d).toLocaleDateString([], { month: 'short', year: '2-digit' });
+  const tone = (p) => (p >= 90 ? 'great' : p >= 75 ? 'good' : p >= 50 ? 'warn' : 'bad');
+
+  document.getElementById('availVerdict').innerHTML =
+    `<span class="fin-badge ${a.verdict_class}">${esc(a.verdict)}</span>`;
+
+  // one column per season: height is availability, so a lost season is a notch
+  const bars = (a.career || []).map((c) => `
+    <div class="av-col" title="${esc(c.label)} — played ${c.played} of ${c.window}${
+      c.longest >= 5 ? `, longest absence ${c.longest} matches` : ''}">
+      <div class="av-track"><i class="${tone(c.pct)}" style="height:${Math.max(3, c.pct)}%"></i></div>
+      <label>${esc(c.label.slice(2, 4))}</label>
+    </div>`).join('');
+
+  const spells = (a.spells || []).length
+    ? `<h5 class="val-dh" style="margin-top:14px">Longest absences this season</h5>
+       <div class="av-spells">${a.spells.map((s) => `<div class="av-spell">
+         <b>${s.matches} match${s.matches === 1 ? '' : 'es'}</b>
+         <span>${when(s.from)} – ${when(s.to)}</span></div>`).join('')}</div>`
+    : '';
+
+  // the measured relationship, stated as a rate rather than pinned on this player
+  const r = a.risk || [];
+  const risk = r.length === 3
+    ? `Across the rated panel, a player who missed nothing in a season lost 10+ consecutive
+       matches the next one <b>${Math.round(r[0].rate * 100)}%</b> of the time; after missing 5–9 it
+       was ${Math.round(r[1].rate * 100)}%, and after 10+ it was <b>${Math.round(r[2].rate * 100)}%</b>.
+       Past absence does predict future absence — but weakly enough that we publish the rates rather
+       than an injury risk score for an individual, which the data cannot support. `
+    : '';
+
+  document.getElementById('availBody').innerHTML = `
+    <div class="av-head">
+      <div class="av-big"><b>${a.pct.toFixed(0)}%</b><span>of ${a.window_matches} league matches</span></div>
+      <div class="av-facts">
+        <div><label>Played</label><b>${a.played}</b></div>
+        <div><label>Missed</label><b>${a.missed}</b></div>
+        <div><label>Longest absence</label><b>${a.longest_spell}</b></div>
+      </div>
+    </div>
+    <div class="av-chart">${bars}</div>
+    ${spells}
+    <div class="muted" style="font-size:11.5px;margin-top:12px">${risk}Counted from his first
+      appearance for the club onward, so a mid-season signing is not marked absent for a season he
+      spent elsewhere. League matches only, and a suspension is indistinguishable from an injury
+      here — so these are absences, not diagnoses.</div>`;
+}
+
+// Career Trajectory — the one forward-looking model on the profile. Draws the
+// projection with its error bar, the drivers behind it, and the player's own
+// rating history against the measured aging curve for his position.
+function renderTrajectory(t) {
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const sign = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1);
+
+  const drivers = (t.drivers || []).map((d) => {
+    const pos = d.impact >= 0;
+    const mag = Math.min(100, Math.abs(d.impact) / 4 * 100);
+    return `<div class="val-drv">
+      <span class="val-dl">${esc(d.label)}</span>
+      <span class="val-dbar"><i class="${pos ? 'good' : 'bad'}" style="width:${mag}%"></i></span>
+      <b class="${pos ? 'good' : 'bad'}">${sign(d.impact)}</b>
+    </div>`;
+  }).join('');
+
+  // history (solid) + the projected point (hollow, with its error bar)
+  const hist = t.history || [];
+  const chart = (() => {
+    if (hist.length < 2) return '';
+    const pts = hist.map((h) => ({ x: h.label, y: h.rating }));
+    pts.push({ x: t.target_label, y: t.projected, proj: true });
+    // no padding inside the plot: lo/hi already carry it, so the HTML labels
+    // outside line up exactly with the top and bottom of the drawn area
+    const W = 460, H = 120;
+    const ys = pts.map((p) => p.y).concat([t.hi, t.lo]);
+    const lo = Math.max(0, Math.min(...ys) - 4), hi = Math.min(100, Math.max(...ys) + 4);
+    const sx = (i) => i * W / Math.max(1, pts.length - 1);
+    const sy = (v) => H - (v - lo) / Math.max(1, hi - lo) * H;
+    const solid = pts.filter((p) => !p.proj);
+    const line = solid.map((p, i) => `${i ? 'L' : 'M'}${sx(i).toFixed(1)},${sy(p.y).toFixed(1)}`).join('');
+    const last = solid.length - 1, pi = pts.length - 1;
+    const dash = `M${sx(last).toFixed(1)},${sy(solid[last].y).toFixed(1)}L${sx(pi).toFixed(1)},${sy(t.projected).toFixed(1)}`;
+    const dots = solid.map((p, i) =>
+      `<circle cx="${sx(i).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3" class="tj-dot"/>`).join('');
+    const band = `<line x1="${sx(pi).toFixed(1)}" y1="${sy(t.hi).toFixed(1)}"
+                        x2="${sx(pi).toFixed(1)}" y2="${sy(t.lo).toFixed(1)}" class="tj-band"/>`;
+    // labels live outside the SVG: the plot is stretched to the card width
+    // (preserveAspectRatio="none"), which would distort any text inside it
+    return `<div class="tj-plot">
+      <svg class="tj-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+           aria-label="Atlastra rating by season, with next season projected">
+        <path d="${line}" class="tj-line"/>
+        <path d="${dash}" class="tj-line proj"/>
+        ${dots}${band}
+        <circle cx="${sx(pi).toFixed(1)}" cy="${sy(t.projected).toFixed(1)}" r="4" class="tj-dot proj"/>
+      </svg>
+      <div class="tj-yax"><span>${Math.round(hi)}</span><span>${Math.round(lo)}</span></div>
+      <div class="tj-xax"><span>${esc(hist[0].label)}</span><span>${esc(t.target_label)}</span></div>
+    </div>`;
+  })();
+
+  // the measured curve for his position, at his own age
+  const GROUPS = {
+    CB: 'centre-backs', FB: 'full-backs', DM: 'defensive midfielders',
+    CM: 'central midfielders', AM: 'attacking midfielders', W: 'wingers', ST: 'strikers',
+  };
+  const curveNote = (() => {
+    const c = (t.curve || []).find((p) => t.age != null && p.age === Math.round(t.age));
+    if (!c) return '';
+    const who = GROUPS[t.position_group] || 'players';
+    const dir = c.delta >= 0 ? 'still gaining' : 'losing';
+    return `At ${Math.round(t.age)}, ${who} in the panel are on average
+            <b>${dir} ${Math.abs(c.delta).toFixed(1)} rating points</b> a season (${c.n} player-seasons).`;
+  })();
+
+  const m = t.model;
+  const note = m
+    ? `Gradient-boosting model, trained on transitions through ${m.n_train} player-seasons and scored
+       blind on ${m.test_seasons} (${m.n_test} projections): average error <b>${m.mae.toFixed(1)}</b>
+       rating points against <b>${m.base_mae.toFixed(1)}</b> for assuming no change at all, and the
+       direction right ${Math.round(m.direction_acc * 100)}% of the time on players who actually moved.`
+    : '';
+  // An interval is a claim about how often it is right, so state how often it was.
+  const bandNote = m && m.coverage
+    ? `The ${m.interval_pct}% range is not a flat ± applied to everyone — it is fitted, so it widens
+       where the model knows less and it leans the way the risk does (a high-rated player has more
+       room below him than above). On the held-out seasons it contained the eventual rating
+       <b>${Math.round(m.coverage * 100)}%</b> of the time. `
+    : '';
+
+  const risk = t.p_present < 0.5
+    ? `<span class="tj-risk bad">${Math.round((1 - t.p_present) * 100)}% likely to drop out of the top-5</span>`
+    : `<span class="tj-risk">${Math.round(t.p_present * 100)}% likely to still be a top-5 regular</span>`;
+
+  document.getElementById('trajBody').innerHTML = `
+    <div class="val-head"><span class="fin-badge ${t.verdict_class}">${esc(t.verdict)}</span>
+      <span class="val-sum">${esc(t.blurb)} in ${esc(t.target_label)}</span></div>
+    <div class="tj-nums">
+      <div class="tj-num"><label>Now</label><b>${t.rating_now}</b></div>
+      <div class="tj-arrow ${t.delta >= 0 ? 'up' : 'down'}">${t.delta >= 0 ? '▲' : '▼'} ${sign(t.delta)}</div>
+      <div class="tj-num proj"><label>${esc(t.target_label)}</label>
+        <b>${t.projected.toFixed(1)}</b>
+        <span class="tj-pm">${Math.round(t.lo)}–${Math.round(t.hi)}</span></div>
+      <div class="tj-avail">${risk}</div>
+    </div>
+    ${chart}
+    <h5 class="val-dh">What moves the projection</h5>
+    <div class="val-drivers">${drivers || '<span class="muted">—</span>'}</div>
+    <div class="muted" style="font-size:11.5px;margin-top:10px">${curveNote} ${bandNote}${note}
+      It projects the rating, not transfers or injuries — a move to a stronger side, or a bad one,
+      is exactly the kind of thing it cannot see.</div>`;
 }
 
 // ---- boot ----

@@ -6,7 +6,7 @@
 <title>Atlastra — Player Profile</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/css/styles.css?v=90">
+<link rel="stylesheet" href="/css/styles.css?v=96">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -150,6 +150,22 @@
       </section>
     </div>
 
+    <!-- Availability — derived from the match log; shown when we have a window -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card" id="availCard" style="display:none">
+        <div class="card-h"><h3>Availability ⓘ</h3><span class="see" id="availVerdict"></span></div>
+        <div id="availBody"></div>
+      </section>
+    </div>
+
+    <!-- Career Trajectory (ML model) — next-season projection; needs a rated season -->
+    <div class="grid" style="grid-template-columns:1fr; margin-top:18px">
+      <section class="card" id="trajCard" style="display:none">
+        <div class="card-h"><h3>Career Trajectory ⓘ</h3><a class="see" href="/trajectory.html">Risers &amp; Fallers →</a></div>
+        <div id="trajBody"></div>
+      </section>
+    </div>
+
     <!-- highlights video + AI signature-skills (Gemini reads the reel) — shown when found -->
     <div class="grid" style="grid-template-columns:1fr 1fr; margin-top:18px">
       <section class="card" id="hlVidCard" style="display:none">
@@ -168,8 +184,8 @@
     </div>
   </main>
 </div>
-<script src="/js/api.js?v=29"></script>
+<script src="/js/api.js?v=31"></script>
 <script src="/js/comments.js?v=1"></script>
-<script src="/js/player.js?v=33"></script>
+<script src="/js/player.js?v=37"></script>
 </body>
 </html>

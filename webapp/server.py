@@ -1354,6 +1354,22 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_value_model(q.get("name", ["Pedri"])[0])
         if path == "/api/value_board":            # most under/over-valued leaderboard
             return d.web_value_board(limit=int(q.get("limit", ["15"])[0]))
+        if path == "/api/trajectory":             # next-season projection for one player
+            return d.web_trajectory(q.get("name", ["Pedri"])[0])
+        if path == "/api/trajectory_board":       # risers / fallers / breakouts
+            return d.web_trajectory_board(limit=int(q.get("limit", ["15"])[0]))
+        if path == "/api/aging_curves":           # measured rating-by-age curves
+            return d.web_aging_curves()
+        if path == "/api/projected_table":        # next season's table if nobody moves
+            return d.web_projected_table(q.get("league", [None])[0])
+        if path == "/api/match_danger":           # likeliest goal involvements in a fixture
+            return d.web_match_danger(q.get("home", ["Arsenal"])[0],
+                                      q.get("away", ["Liverpool"])[0])
+        if path == "/api/availability":           # absence spells + availability %
+            return d.web_availability(q.get("name", ["Pedri"])[0])
+        if path == "/api/squad_plan":             # squad gaps now and as the squad ages
+            return d.web_squad_plan(q.get("team", ["Manchester United"])[0],
+                                    horizon=int(q.get("horizon", ["3"])[0]))
         if path == "/api/dna_map":
             return d.web_dna_map(int(q.get("min_minutes", ["900"])[0]))
         if path == "/api/archetypes":

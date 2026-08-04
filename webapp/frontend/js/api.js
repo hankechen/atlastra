@@ -591,6 +591,8 @@ const ICONS = {
   blog: '<path d="M5 3.5h9l5 5V20.5H5z"/><path d="M13.5 3.5V9H19"/><path d="M8 12.5h8M8 15.5h8M8 18h5"/>',
   tactics: '<rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M12 3.5v17M3.5 12h17"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.4" fill="currentColor" stroke="none"/><path d="M9 8h5M10 16h4"/>',
   value: '<circle cx="12" cy="12" r="8.5"/><path d="M14.5 9c-.5-1-1.5-1.5-2.7-1.5-1.5 0-2.6.8-2.6 2 0 2.7 5.4 1.3 5.4 4 0 1.3-1.2 2.1-2.8 2.1-1.3 0-2.4-.6-2.9-1.6"/><path d="M12 6v1.6M12 16.4V18"/>',
+  trend: '<path d="M4 16.5l5-5 3.5 3.5L20 7.5"/><path d="M15 7.5h5v5"/>',
+  plan: '<path d="M4 6h7M4 12h13M4 18h9"/><circle cx="19" cy="6" r="2"/><circle cx="20" cy="18" r="2"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -606,6 +608,7 @@ const NAV_MAIN = [
   ]],
   ['Teams', 'teams', '/teams.html', null, [
     ['Team Styles', 'styles', '/styles.html'],
+    ['Squad Planner', 'plan', '/squadplan.html'],
   ]],
   ['Champions League', 'ucl', '/ucl.html'],
   ['World Cup', 'worldcup', '/worldcup.html'],
@@ -622,6 +625,7 @@ const NAV_ANALYTICS = [
   // discovery & tools
   ['Find the Next…', 'target', '/findnext.html'],
   ['Value Finder', 'value', '/value.html'],
+  ['Risers & Fallers', 'trend', '/trajectory.html'],
   ['Football DNA Map', 'dnamap', '/dnamap.html'],
   ['Best XI on a Budget', 'budget', '/bestxi.html'],
   ['Player Cards', 'card', '/card.html'],

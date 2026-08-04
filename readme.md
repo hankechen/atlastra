@@ -51,6 +51,135 @@ Phase One use cases are live in a web UI (**Atlastra**), alongside the following
     the move where no own-clip exists. Cached per player in SQLite (`webapp/signature_skills.py`), with
     the biggest stars prewarmed. This is what closes use case 9 properly: the stats say a player takes
     a lot of people on, the video says *how*.
+33. **Career Trajectory** — the one model here that looks *forward*. Everything above scores the season
+    that happened; this projects where a player's rating goes **next** season, from twelve seasons of
+    the top-5 panel (11,713 season-to-season transitions). Two heads, because "how good will he be" and
+    "will he still be here" are different questions: a projection with an error bar, and the odds he is
+    still a top-5 regular at all. Held out on 3,639 projections it had never seen, it lands within
+    **8.42 rating points against 9.51** for assuming no change at all — 11.4% skill over persistence,
+    beating it in every held-out season — and calls the direction right **69%** of the time on players
+    who actually moved. The availability head separates 0.795 AUC. The error bar is fitted rather than flat — two quantile models,
+    conformalized on a calibration season — so it widens where the model knows less and leans the way
+    the risk does. A flat ±sd covered 83% of weak players and only 73% of strong ones; the fitted
+    interval runs 76–82% across the range and contained the eventual rating 78% of the time overall
+    against a nominal 80%. Shown on the profile with the drivers behind it, and as a
+    **Risers & Fallers** board with breakout candidates and the **measured aging curve** by position.
+    Trained on transitions through 2021/22 and scored blind on 2022/23–2024/25 against the only
+    baseline that matters — persistence, "he'll be exactly as good as he was" (`ml/train_trajectory.py`).
+    One deliberate handicap is worth naming: only players whose **age we actually know** are modelled,
+    which costs a fifth of the training rows. Birth dates come from FotMob, whose coverage begins in
+    2020/21, so a missing one nearly means "had already left the top-5 by 2020" — the availability
+    target itself. Left in, that artefact of our own scrape becomes the most predictive feature in the
+    model and inflates availability AUC from 0.79 to 0.84. The lower, real number is the one reported.
+    Goalkeepers were excluded at first for a similar reason — the engine only rated them in 2025/26, so
+    no keeper had a season-to-season transition anywhere in the warehouse and the model read their empty
+    attacking line as an outfielder in freefall, "correcting" a 19-rated keeper up to 47. That belonged
+    upstream rather than here: `pipeline/scrape_sofa_gk.py` backfilled keeper metrics to 2015/16, and
+    including them then *improved* the model. Their ratings swing ~13 points a season against ~9 for a
+    midfielder, and the fitted interval finds that on its own — GK bands come out about 5 points wider.
+
+34. **Squad Planner** — the first feature that asks what a squad will need rather than describing what
+    it is. For any top-5 club, each position is scored against **what a strong club has there** (the
+    80th percentile of every club's best player in that position — measured, not chosen), both today
+    and once the current group has aged the chosen number of seasons: next season from the trajectory
+    model, the years after from the measured aging curve. Ranks the club's priorities with the reason
+    in words ("minutes here average 34 years old", "widens to 9 short within 3 seasons"), then names
+    players who would raise each one. Positions **cover for one another** at a discount — a defensive
+    midfielder counts toward central midfield, labelled as covering rather than counted as a
+    specialist, because a planner that reads position labels literally tells a club with Casemiro,
+    Ugarte, Mainoo, Fernandes and Mount that it urgently needs a central midfielder.
+
+35. **Availability** — how much of his club's football a player was actually there for, on every
+    profile: share of league matches played, the absence spells behind it, and a season-by-season
+    career strip where a lost year reads as a notch. Derived from the match log rather than scraped
+    from an injury feed (`pipeline/build_absences.py`) — a match the club played and the player did
+    not is an absence, a run of them is a spell. A player's window starts at his **first appearance
+    for that club**, so a January signing is not recorded as having missed the first half of a season
+    he spent elsewhere, and ends when he next turns out for someone else. Validated against seasons
+    whose history is public: Rodri's 2024/25 comes back as 3 of 35 matches with a single 31-match
+    spell, which is his ACL. Nothing here is called an injury — a suspension looks identical from a
+    match log, and only the length is observed.
+    - **What it is worth is written down too.** It does *not* scar the next season's rating: control
+      for a player's level and those who missed 10+ consecutive matches move almost identically to
+      those who missed none (−9.3 against −9.3 in the 65–80 band). It adds ~0.001 AUC to the
+      availability head, because minutes-share already proxies it. What it does predict is more
+      absence — 10.2% → 13.3% → **17.7%** by how long a player was out this season. A model on that
+      target beat reading one column by 0.015 AUC, so the **rates are published and no individual is
+      given an injury-risk score**, which is more than the data can carry.
+
+36. **Most likely to score or assist** — on every match preview, the chance each player records a goal
+    or an assist *in that fixture*. Previews used to name a club's best players by season rating,
+    which gives the same answer every week whoever they play; this reads the opponent's leakiness,
+    the venue, the player's recent minutes and his form (`ml/train_match_contribution.py`, 711,663
+    player-fixtures). Modelled over the whole window grid — every club match in a player's spell,
+    appeared or not — so rotation and injury are inside the number rather than a caveat beside it.
+    Trained through 2022/23 and scored on the seasons after: **AUC 0.79 against 0.65** for ranking by
+    season rating, and of the three players it flags per fixture **34.3% deliver, against 23.3%** for
+    naming the top-rated three. The probabilities are calibrated, not indicative — each band lands
+    within a point or two of its own number across the held-out seasons.
+
+37. **If nobody moves** — next season's league table on the Squad Planner, projected on the one
+    assumption that makes the question answerable: that every squad stays exactly as it is. That is
+    not a limitation dressed up as a feature — it is the counterfactual a planner wants before
+    deciding whether to sign anyone. Points are fitted to real final tables from this season's points
+    and measured squad strength (the minutes-weighted rating of a club's top 14); held out it lands
+    within **9.5 points against 9.82** for assuming this season repeats, which is better but not by
+    much, so the page says to read a position as a range. Each squad's **projected drift** sits beside
+    the table rather than inside the points model — a percentile rating mean-reverts, so almost every
+    strong squad drifts down in absolute terms and only the comparison between clubs carries meaning.
+
+## Questions we asked the data, and what it said
+Not everything worth knowing becomes a feature. These are measurements run against the panel where the
+answer was the point — including where the answer was "no", which is written down rather than quietly
+dropped. Each is a script in `tools/`, so a change gets re-measured instead of argued about.
+
+### Is form real? (`python -m tools.form_test`)
+Every broadcast treats form as a fact. It is a testable claim, and 21,586 matches are enough to test
+it — carefully, because the obvious version answers itself. "Players who scored recently score next
+match" is true of good players in every window; form only means something if it beats **the player's
+own baseline**. And the usual test is confounded even then: a baseline built from a dozen earlier
+matches is a *noisy* estimate of ability, and recent form is simply five more matches of the same
+thing, so a model improves when form is added even if recency means nothing. So the test controls
+against a full-season ability estimate (excluding the window and the match itself), which is what
+that confound requires.
+
+| | naive baseline | well-estimated ability |
+|---|---|---|
+| weight on form | 0.270 | **0.202** |
+| hot-vs-cold gap, xG+xA per 90 | +0.074 | **+0.051** (19σ) |
+| held-out MAE improvement | 1.26% | **0.70%** |
+
+**Form is real, and it is nearly useless for predicting one match.** About 45% of the apparent effect
+is the estimation artefact above. What survives is genuine and large in significance terms — a hot
+player beats a cold one of the same ability by roughly 25% relative output, holding across every
+ability band and on goals as well as xG — but it moves single-match error by under one percent,
+because one match is mostly noise. It earns a feature in the match model below, not a headline. One
+caveat the data cannot settle: a player whose role improves mid-season looks "hot" and then keeps
+performing, which is a role change rather than a hot hand, and this cannot separate the two.
+
+### What does a transfer cost? (`python -m tools.transfer_effect`)
+The trajectory model projects a player forward knowing nothing about where he will play, which is a
+stated blind spot. This measures how big it is. Comparing movers to stayers directly would answer the
+wrong question — players who move are disproportionately the ones already declining — so the
+counterfactual is the model's own projection, made without knowledge of the move, and the residual is
+what the move is worth. Scored on transitions the model never trained on (3,639, a quarter of them
+moves):
+
+| | residual vs projection | n |
+|---|---|---|
+| stayed | **+0.26** | 2,718 |
+| moved | **−1.94** | 921 |
+| → to a stronger club | −0.15 | 337 |
+| → sideways | −2.21 | 276 |
+| → to a weaker club | −2.95 | 159 |
+
+A move costs about **2.2 rating points against expectation** (5.4σ) — but essentially all of it is
+sideways and downward moves. **Going to a better club costs nothing.** The interesting reading is that
+the cost is not adaptation to a new dressing room, which would apply in every direction; it tracks
+where a player is going, and a move down is partly the market pricing a decline the model has not
+seen yet. Knowing only "did he move" would cut held-out error 0.66% — and it is not knowable at
+projection time anyway, since the transfer has not happened. This measures the blind spot; it does
+not close it.
 
 ## Tactics Lab
 The largest single feature (`/tactics.html`, `webapp/tactics.py`) — a tactical sandbox that is
@@ -141,8 +270,11 @@ The suggested APIs (Football API, Sportmonks, RapidAPI) were not used; the data 
   squads, **and the entire live feed**: scores, fixtures, results, lineups, match detail and the
   Champions League field. It answers from a datacentre IP, which is why the live surface runs
   server-side with no scraper on a home machine (`ATLASTRA_FOTMOB=1`).
-- **SofaScore** — Champions League player stats (back to 08/09) and season heatmaps. It blocks
-  datacentre IPs, so it is no longer used for anything live.
+- **SofaScore** — Champions League player stats (back to 08/09), season heatmaps, and **goalkeeper
+  metrics for the top-5 domestic leagues back to 2015/16** (saves, goals conceded, clean sheets —
+  `pipeline/scrape_sofa_gk.py`). That last one exists because the rating engine's other keeper source,
+  datamb/Wyscout, publishes the current season only, which left keepers rated in 2025/26 and no other
+  season. It blocks datacentre IPs, so it is no longer used for anything live.
 - **Player ability ratings** — a stable, ability-based rating and attribute set per player
   (`data/fifa_ratings.json`, derived from the EA FC 26 dataset), used as ONE input to the Tactics Lab
   alongside twelve seasons of per-90 output, real match results and the real league tables. Preferred
@@ -166,7 +298,42 @@ python -m tools.fit                        # re-derive the fitted constants, pri
 python -m tools.fit --only xg --season 2425
 python -m tools.roles                      # learn positional roles from heatmaps
 python -m tools.roles --write              # persist player_learned_role
+python -m ml.train_trajectory              # fit + project next season, write the tables
+python -m ml.train_trajectory --report     # score the held-out seasons only, write nothing
+python -m ml.train_match_contribution      # fit the per-fixture goal-involvement model
+python -m pipeline.build_absences          # absence spells + availability from the match log
+python -m tools.form_test                  # is form real? (--metric ga for goals rather than xG)
+python -m tools.transfer_effect            # what a transfer costs against the model's expectation
+python -m pytest tests/ -q -m "not slow"   # the fast suite (drop the -m to refit the models)
 ```
+The trajectory model needs a birth date per player, which the current-squad pull only covers for
+2025/26. `python -m pipeline.scrape_dob && python -m pipeline.load_dob` back-fills them from FotMob
+(resumable) — without it the model still runs, it just loses age on the older seasons. Keeper ratings
+need `python -m pipeline.scrape_sofa_gk && python -m pipeline.load_sofa_gk` before
+`python -m pipeline.rate_combined`, or GKs are rated in the current season only.
+
+The per-match log is backfilled season by season:
+```
+python -m pipeline.backfill_match_log --warm    # slow, cache only, holds no DB lock
+python -m pipeline.backfill_match_log --load    # fast; loads COMPLETE seasons only
+```
+Understat throttles a sustained pull, so `--warm` retries with a widening pause and is safe to run
+repeatedly — cached pages are skipped, so each run gets further. `--load` verifies a season brought
+all five leagues and **rolls it back if not**: a season that silently lands missing one league would
+look finished to everything downstream while missing a fifth of its matches.
+
+Order matters for a rebuild from scratch, because each step feeds the next:
+```
+python -m pipeline.run_pipeline                                   # warehouse
+python -m pipeline.backfill_match_log                             # 12 seasons of match logs
+python -m pipeline.build_absences                                 # -> availability
+python -m pipeline.scrape_dob    && python -m pipeline.load_dob   # -> ages
+python -m pipeline.scrape_sofa_gk && python -m pipeline.load_sofa_gk
+python -m pipeline.rate_combined                                  # -> ratings incl. keepers
+python -m ml.train_trajectory                                     # needs ages + availability
+python -m ml.train_match_contribution                             # needs the match log
+```
+
 The Scout Report's AI mode is optional: `ANTHROPIC_API_KEY=sk-ant-... python -m webapp.server` (without it, the offline report engine is used).
 
 ## Live
