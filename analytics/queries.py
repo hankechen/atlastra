@@ -9,8 +9,13 @@ Stats that Understat does not provide (duels, dribbles, tackles, interceptions,
 big chances, passes completed, market value, manager, venue) are simply not
 returned; see NOTES.md.
 """
+import os
 import random
 import sys
+import threading
+import time
+
+from functools import lru_cache
 
 import duckdb
 import numpy as np
@@ -132,15 +137,26 @@ _SPECIAL_LETTERS = (("ø", "o"), ("æ", "ae"), ("å", "a"), ("ð", "d"), ("þ", 
                     ("ß", "ss"), ("ł", "l"), ("đ", "d"), ("ı", "i"))
 
 
-def _fold(s):
-    """Accent + special-letter folded lowercase string ('Dembélé'->'dembele',
-    'Ødegaard'->'odegaard')."""
+@lru_cache(maxsize=100_000)
+def _fold_str(s: str) -> str:
     import unicodedata
-    s = unicodedata.normalize("NFKD", str(s or ""))
+    s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c)).lower()
     for a, b in _SPECIAL_LETTERS:
         s = s.replace(a, b)
     return s
+
+
+def _fold(s):
+    """Accent + special-letter folded lowercase string ('Dembélé'->'dembele',
+    'Ødegaard'->'odegaard').
+
+    Memoized because the World Cup lookups fold the same few thousand names on every
+    profile request -- three methods each scan wc_player_stats and fold every row to
+    match one player, which was the largest slice of Python time in a profile load.
+    The mapping is a pure function of the string, so a cache of it cannot go stale.
+    """
+    return _fold_str(s if isinstance(s, str) else str(s or ""))
 
 
 def _fold_sql(expr):
@@ -165,25 +181,103 @@ def _norm_team(s):
     return " ".join(s.split())
 
 
-def connect_retry(db_path, read_only=True, attempts=15, backoff=0.06):
-    """duckdb.connect that rides out transient file-lock contention. The live
-    refresher (pipeline.load_live) briefly takes a read-write lock every refresh;
-    a read-only connect that lands in that ~0.2s window otherwise raises. Retry
-    only on lock/IO errors so real problems still surface immediately."""
+def connect_retry(db_path, read_only=True, attempts=15, backoff=0.06, patience=45.0):
+    """duckdb.connect that rides out file-lock contention. The live refresher
+    (pipeline.load_live) takes a read-write lock every refresh; a connect that lands
+    in that window otherwise raises. Retry only on lock/IO errors so real problems
+    still surface immediately.
+
+    `patience` is for the OTHER process: the web server now keeps one connection open
+    across requests (see _pool_acquire), so a pipeline script started while the site is
+    being used finds the warehouse held rather than momentarily busy. The server drops
+    it after a short idle, so waiting works where failing fast would just mean running
+    the command again. It says what it is waiting for rather than appearing to hang.
+    """
     import time as _t
-    for i in range(attempts):
+    deadline, told = _t.time() + patience, False
+    i = 0
+    while True:
         try:
             return duckdb.connect(str(db_path), read_only=read_only)
         except Exception as e:  # noqa: BLE001
             msg = str(e).lower()
-            if i == attempts - 1 or not any(k in msg for k in ("lock", "conflict", "being used")):
+            held = any(k in msg for k in ("lock", "conflict", "being used"))
+            if not held or (i >= attempts - 1 and _t.time() >= deadline):
                 raise
-            _t.sleep(backoff)
+            if not told and _t.time() > deadline - patience + 1.0:
+                told = True
+                print(f"warehouse is held by another process (likely the web server); "
+                      f"waiting up to {patience:.0f}s for it to be released…",
+                      file=sys.stderr, flush=True)
+            _t.sleep(backoff if i < attempts else 0.5)
+            i += 1
+
+
+# ---- one open database, many cursors ---------------------------------------- #
+# Opening the warehouse costs ~200ms: DuckDB reads the catalogue of a 155MB file.
+# The web server opened and closed one per request, so EVERY endpoint paid it --
+# a player profile fires nine calls and spent ~2.4s of its life just opening the
+# same database nine times. DuckDB keeps the database instance alive as long as
+# one connection to it is, and hands out further connections through cursor() in
+# ~0.2ms, so the fix is simply not to let the last one close between requests.
+#
+# It is released again after IDLE_S of no use, and that matters: a read-only
+# connection holds a SHARED file lock, which stops another process from opening
+# the warehouse read-write. Holding one forever would mean `pipeline.run_pipeline`
+# could no longer run while the server is up. Thirty idle seconds is far longer
+# than the gap between a page's own requests and far shorter than the pause before
+# someone switches to a terminal to rebuild. ATLASTRA_NO_DB_POOL=1 opts out.
+_POOL: dict = {"key": None, "con": None, "live": 0, "last": 0.0}
+_POOL_LOCK = threading.Lock()
+_POOL_IDLE_S = float(os.environ.get("ATLASTRA_DB_IDLE", "30"))
+_POOL_OFF = os.environ.get("ATLASTRA_NO_DB_POOL") == "1"
+
+
+def _pool_reaper():
+    while True:
+        time.sleep(5)
+        with _POOL_LOCK:
+            con, live, last = _POOL["con"], _POOL["live"], _POOL["last"]
+            if con is not None and live == 0 and time.time() - last > _POOL_IDLE_S:
+                _POOL.update(con=None, key=None)
+                try:
+                    con.close()
+                except Exception:  # noqa: BLE001 -- already gone; nothing to release
+                    pass
+
+
+def _pool_acquire(db_path, read_only):
+    """A cursor on the shared connection, opening the database if nobody holds it."""
+    key = (str(db_path), bool(read_only))
+    with _POOL_LOCK:
+        if _POOL["con"] is not None and _POOL["key"] != key:
+            # A different path or mode: DuckDB refuses two configurations of one file
+            # in a process, and mixing them is a caller bug rather than a pooling one.
+            # Fall back to an unpooled connection instead of failing the request.
+            return connect_retry(db_path, read_only=read_only), False
+        if _POOL["con"] is None:
+            _POOL["con"] = connect_retry(db_path, read_only=read_only)
+            _POOL["key"] = key
+            if not _POOL.get("reaper"):
+                _POOL["reaper"] = True
+                threading.Thread(target=_pool_reaper, daemon=True).start()
+        _POOL["live"] += 1
+        return _POOL["con"].cursor(), True
+
+
+def _pool_release():
+    with _POOL_LOCK:
+        _POOL["live"] = max(0, _POOL["live"] - 1)
+        _POOL["last"] = time.time()
 
 
 class SoccerDB:
     def __init__(self, db_path=None, read_only=True):
-        self.con = connect_retry(db_path or DB_PATH, read_only=read_only)
+        path = db_path or DB_PATH
+        if _POOL_OFF:
+            self.con, self._pooled = connect_retry(path, read_only=read_only), False
+        else:
+            self.con, self._pooled = _pool_acquire(path, read_only)
         self._logo_map = None
         self._wiki_photos = None
         self._fifa_ranks = None
@@ -259,7 +353,14 @@ class SoccerDB:
         return {"credit": r[0], "license": r[1], "page": r[2]}
 
     def close(self):
-        self.con.close()
+        # Closes THIS cursor; the shared connection stays open so the next request
+        # doesn't pay the catalogue read again (see _pool_acquire).
+        try:
+            self.con.close()
+        finally:
+            if self._pooled:
+                self._pooled = False
+                _pool_release()
 
     def __enter__(self):
         return self

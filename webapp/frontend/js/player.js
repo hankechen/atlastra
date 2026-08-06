@@ -112,11 +112,18 @@ function drawGauge(canvasId, rating, w = 124, h = 78) {
   }
 }
 
+// The name in the URL can be a partial ("Saka"), which every endpoint resolves the same
+// way. /api/player is the one that reports the canonical spelling, so cards started before
+// it answers label themselves with what they were given until it does.
+let _canonName = null, _formDone = false, _sideCardsDone = false;
+const nameLabel = () => _canonName || current;   // `current` is set at boot, below
+
 async function load(name, careerStat = 'xa', season = null) {
   let url = '/api/player?name=' + encodeURIComponent(name) + '&career_stat=' + careerStat;
   if (season) url += '&season=' + encodeURIComponent(season);
   const p = await api(url);
   if (!p.name) { document.getElementById('crumb').textContent = 'not found'; return; }
+  _canonName = p.name;
   document.getElementById('crumb').textContent = p.name;
   document.getElementById('pname').innerHTML = p.name + ' <span class="verified">✔</span>';
 
@@ -194,59 +201,15 @@ async function load(name, careerStat = 'xa', season = null) {
   syncF(); syncW();
   wireFavBtn(document.getElementById('favBtn'), 'favPlayers', { name: p.name, photo: p.photo });
 
-  // Big Game Index card (only if match-log data is available for this player)
-  api('/api/big_game?name=' + encodeURIComponent(p.name)).then((b) => {
-    if (!b || !b.available) return;
-    const badge = b.badge === 'Big-Game Player' ? '<span class="bgp-badge big">⭐ Big-Game Player</span>'
-      : b.badge === 'Flat-Track Bully' ? '<span class="bgp-badge bully">🛑 Flat-Track Bully</span>'
-        : '<span class="bgp-badge neutral">Consistent across opposition</span>';
-    const MAX = Math.max(0.4, b.big.ga90, b.weak.ga90);
-    const bar = (v, cls) => `<div class="bgp-bar"><i class="${cls}" style="width:${Math.min(100, v / MAX * 100)}%"></i></div>`;
-    document.getElementById('bigGame').innerHTML = `<div class="bgp">${badge}
-      <div class="bgp-split">
-        <div class="bgp-row"><label>vs Top-half · ${b.big.apps} apps <b>${b.big.ga90.toFixed(2)} G+A/90</b></label>${bar(b.big.ga90, 'big')}</div>
-        <div class="bgp-row"><label>vs Bottom-half · ${b.weak.apps} apps <b>${b.weak.ga90.toFixed(2)} G+A/90</b></label>${bar(b.weak.ga90, 'weak')}</div>
-      </div></div>`;
-    document.getElementById('bigGameCard').style.display = '';
-  }).catch(() => {});
-
-  // Finishing vs Expected — Goals − xG over/under-performance (Understat match log).
-  // Shown only for players with enough shots this season; hidden for the rest.
-  api('/api/finishing?name=' + encodeURIComponent(p.name)).then((f) => {
-    if (!f || !f.available) return;
-    renderFinishing(f);
-    document.getElementById('finishingCard').style.display = '';
-  }).catch(() => {});
-
-  // Fair Value model — over/undervalued vs the model estimate, with value-drivers.
-  // Only ~488 players have a Transfermarkt value to model against, so hide otherwise.
-  api('/api/value_model?name=' + encodeURIComponent(p.name)).then((v) => {
-    if (!v || !v.available) return;
-    renderValue(v);
-    document.getElementById('valueCard').style.display = '';
-  }).catch(() => {});
-
-  // Availability — how much of his club's football he was actually there for,
-  // derived from the match log rather than scraped from an injury feed.
-  api('/api/availability?name=' + encodeURIComponent(p.name)).then((a) => {
-    if (!a || !a.available) return;
-    renderAvailability(a);
-    document.getElementById('availCard').style.display = '';
-  }).catch(() => {});
-
-  // Career Trajectory — where the model expects his rating to go next season.
-  // Only players who cleared this season's rating minutes bar are projected.
-  api('/api/trajectory?name=' + encodeURIComponent(p.name)).then((t) => {
-    if (!t || !t.available) return;
-    renderTrajectory(t);
-    document.getElementById('trajCard').style.display = '';
-  }).catch(() => {});
 
   // Recent Form — per-match log from FotMob (result, rating, G/A). Needs the FotMob
-  // player id, which is embedded in the photo URL (…/playerimages/<id>.png).
+  // player id, which is embedded in the photo URL (…/playerimages/<id>.png), so unlike
+  // the cards in sideCards() it does have to wait for the profile. Neither it nor the
+  // bio depends on the chosen season, so a season change leaves both alone.
   (function () {
     const pm = /playerimages\/(\d+)\./.exec(p.photo || '');
-    if (!pm) return;
+    if (!pm || _formDone) return;
+    _formDone = true;
     // Preferred foot + height (FotMob) — facts our DB doesn't carry.
     api('/api/player_bio?pid=' + pm[1]).then((bio) => {
       if (!bio || !bio.available) return;
@@ -297,44 +260,6 @@ async function load(name, careerStat = 'xa', season = null) {
     }).catch(() => {});
   })();
 
-  // Highlights & skills video (searched on YouTube; shown only if found)
-  api('/api/player_video?name=' + encodeURIComponent(p.name)).then((v) => {
-    if (!v || !v.available || !v.thumbnail) return;
-    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-    const link = document.getElementById('hlVid');
-    link.href = v.url;
-    link.innerHTML = `<div class="pv-thumb"><img src="${esc(v.thumbnail)}" alt="" loading="lazy"><span class="pv-play">▶</span></div>
-      <div class="pv-meta"><b>${esc(v.title || (p.name + ' — skills & goals'))}</b><span>Watch on YouTube ↗</span></div>`;
-    document.getElementById('hlVidSrc').textContent = 'YouTube';
-    document.getElementById('hlVidCard').style.display = '';
-  }).catch(() => {});
-
-  // Signature Skills — Gemini watches the player's reel and ranks their moves.
-  // First view for a player runs the analysis (~15-30s); cached forever after.
-  const sigCard = document.getElementById('sigSkillCard'), sigBox = document.getElementById('sigSkills');
-  sigCard.style.display = '';
-  sigBox.innerHTML = '<div class="sig-load">✨ Analysing highlight reel…</div>';
-  api('/api/signature_skills?name=' + encodeURIComponent(p.name)).then((s) => {
-    if (!s || !s.available || !(s.skills || []).length) { sigCard.style.display = 'none'; return; }
-    const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    sigBox.innerHTML = s.skills.map((x, i) => {
-      // Prefer a clip of THIS player doing the move (cut from their own reel);
-      // fall back to the generic example clip for the move if we don't have one.
-      // Whole feature is gated by SKILL_CLIPS_ENABLED (api.js) — off = data kept, ▶ hidden.
-      const clipsOn = (typeof SKILL_CLIPS_ENABLED === 'undefined') ? true : SKILL_CLIPS_ENABLED;
-      const own = clipsOn ? x.clip : null;
-      const generic = clipsOn && !own && typeof skillClipId === 'function' && skillClipId(x.skill);
-      const playable = own || generic;
-      const attr = own
-        ? ` data-clipurl="${esc(own)}" data-cliplabel="${esc(p.name + ' — ' + x.skill)}"`
-        : (generic ? ` data-skillclip="${esc(x.skill)}"` : '');
-      return `<div class="sig-row${playable ? ' has-clip' : ''}"${attr}>
-        <span class="sig-rk">${i + 1}</span>
-        <div class="sig-txt"><b>${esc(x.skill)}</b><span>${esc(x.note)}</span></div>
-        ${playable ? `<span class="sig-play" title="${own ? 'Watch him do it' : 'See an example'}">▶</span>` : ''}</div>`;
-    }).join('');
-    document.getElementById('sigSkillSrc').textContent = 'AI · tap a move';
-  }).catch(() => { sigCard.style.display = 'none'; });
 
   // dual ratings (League + UCL, common-metric)
   const lg = p.ratings?.league, ucl = p.ratings?.ucl;
@@ -784,6 +709,7 @@ let current = params.get('name') || 'Pedri';
   }
 })();
 const careerStatVal = () => document.getElementById('careerStat').value;
+sideCards(current);                             // in flight before /api/player answers
 load(current, 'xa', params.get('season'));      // ?season=2324 deep-links a season
 document.getElementById('careerStat').onchange = (e) => load(current, e.target.value, curSeason);
 document.getElementById('seasonSel').onchange = (e) => load(current, careerStatVal(), e.target.value);
@@ -791,3 +717,102 @@ document.getElementById('seasonSel').onchange = (e) => load(current, careerStatV
 // Enter-to-reload-this-profile box, so search is consistent across the app.
 attachSearchDropdown(document.getElementById('searchBox'));
 
+
+
+// The cards that depend only on WHICH player this is — not on the season, and not on
+// the career stat the selector is showing. Fired at boot in PARALLEL with /api/player
+// rather than after it: each resolves the name itself exactly as /api/player does, so
+// waiting for the profile only put a whole round trip in front of seven requests. Run
+// once per page for the same reason — changing season used to refetch every one of
+// them to re-render the identical card.
+function sideCards(name) {
+  if (_sideCardsDone) return;
+  _sideCardsDone = true;
+  const p = { name };            // these blocks only ever read p.name
+  // Big Game Index card (only if match-log data is available for this player)
+  api('/api/big_game?name=' + encodeURIComponent(p.name)).then((b) => {
+    if (!b || !b.available) return;
+    const badge = b.badge === 'Big-Game Player' ? '<span class="bgp-badge big">⭐ Big-Game Player</span>'
+      : b.badge === 'Flat-Track Bully' ? '<span class="bgp-badge bully">🛑 Flat-Track Bully</span>'
+        : '<span class="bgp-badge neutral">Consistent across opposition</span>';
+    const MAX = Math.max(0.4, b.big.ga90, b.weak.ga90);
+    const bar = (v, cls) => `<div class="bgp-bar"><i class="${cls}" style="width:${Math.min(100, v / MAX * 100)}%"></i></div>`;
+    document.getElementById('bigGame').innerHTML = `<div class="bgp">${badge}
+      <div class="bgp-split">
+        <div class="bgp-row"><label>vs Top-half · ${b.big.apps} apps <b>${b.big.ga90.toFixed(2)} G+A/90</b></label>${bar(b.big.ga90, 'big')}</div>
+        <div class="bgp-row"><label>vs Bottom-half · ${b.weak.apps} apps <b>${b.weak.ga90.toFixed(2)} G+A/90</b></label>${bar(b.weak.ga90, 'weak')}</div>
+      </div></div>`;
+    document.getElementById('bigGameCard').style.display = '';
+  }).catch(() => {});
+
+  // Finishing vs Expected — Goals − xG over/under-performance (Understat match log).
+  // Shown only for players with enough shots this season; hidden for the rest.
+  api('/api/finishing?name=' + encodeURIComponent(p.name)).then((f) => {
+    if (!f || !f.available) return;
+    renderFinishing(f);
+    document.getElementById('finishingCard').style.display = '';
+  }).catch(() => {});
+
+  // Fair Value model — over/undervalued vs the model estimate, with value-drivers.
+  // Only ~488 players have a Transfermarkt value to model against, so hide otherwise.
+  api('/api/value_model?name=' + encodeURIComponent(p.name)).then((v) => {
+    if (!v || !v.available) return;
+    renderValue(v);
+    document.getElementById('valueCard').style.display = '';
+  }).catch(() => {});
+
+  // Availability — how much of his club's football he was actually there for,
+  // derived from the match log rather than scraped from an injury feed.
+  api('/api/availability?name=' + encodeURIComponent(p.name)).then((a) => {
+    if (!a || !a.available) return;
+    renderAvailability(a);
+    document.getElementById('availCard').style.display = '';
+  }).catch(() => {});
+
+  // Career Trajectory — where the model expects his rating to go next season.
+  // Only players who cleared this season's rating minutes bar are projected.
+  api('/api/trajectory?name=' + encodeURIComponent(p.name)).then((t) => {
+    if (!t || !t.available) return;
+    renderTrajectory(t);
+    document.getElementById('trajCard').style.display = '';
+  }).catch(() => {});
+
+  // Highlights & skills video (searched on YouTube; shown only if found)
+  api('/api/player_video?name=' + encodeURIComponent(p.name)).then((v) => {
+    if (!v || !v.available || !v.thumbnail) return;
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const link = document.getElementById('hlVid');
+    link.href = v.url;
+    link.innerHTML = `<div class="pv-thumb"><img src="${esc(v.thumbnail)}" alt="" loading="lazy"><span class="pv-play">▶</span></div>
+      <div class="pv-meta"><b>${esc(v.title || (nameLabel() + ' — skills & goals'))}</b><span>Watch on YouTube ↗</span></div>`;
+    document.getElementById('hlVidSrc').textContent = 'YouTube';
+    document.getElementById('hlVidCard').style.display = '';
+  }).catch(() => {});
+
+  // Signature Skills — Gemini watches the player's reel and ranks their moves.
+  // First view for a player runs the analysis (~15-30s); cached forever after.
+  const sigCard = document.getElementById('sigSkillCard'), sigBox = document.getElementById('sigSkills');
+  sigCard.style.display = '';
+  sigBox.innerHTML = '<div class="sig-load">✨ Analysing highlight reel…</div>';
+  api('/api/signature_skills?name=' + encodeURIComponent(p.name)).then((s) => {
+    if (!s || !s.available || !(s.skills || []).length) { sigCard.style.display = 'none'; return; }
+    const esc = (t) => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    sigBox.innerHTML = s.skills.map((x, i) => {
+      // Prefer a clip of THIS player doing the move (cut from their own reel);
+      // fall back to the generic example clip for the move if we don't have one.
+      // Whole feature is gated by SKILL_CLIPS_ENABLED (api.js) — off = data kept, ▶ hidden.
+      const clipsOn = (typeof SKILL_CLIPS_ENABLED === 'undefined') ? true : SKILL_CLIPS_ENABLED;
+      const own = clipsOn ? x.clip : null;
+      const generic = clipsOn && !own && typeof skillClipId === 'function' && skillClipId(x.skill);
+      const playable = own || generic;
+      const attr = own
+        ? ` data-clipurl="${esc(own)}" data-cliplabel="${esc(nameLabel() + ' — ' + x.skill)}"`
+        : (generic ? ` data-skillclip="${esc(x.skill)}"` : '');
+      return `<div class="sig-row${playable ? ' has-clip' : ''}"${attr}>
+        <span class="sig-rk">${i + 1}</span>
+        <div class="sig-txt"><b>${esc(x.skill)}</b><span>${esc(x.note)}</span></div>
+        ${playable ? `<span class="sig-play" title="${own ? 'Watch him do it' : 'See an example'}">▶</span>` : ''}</div>`;
+    }).join('');
+    document.getElementById('sigSkillSrc').textContent = 'AI · tap a move';
+  }).catch(() => { sigCard.style.display = 'none'; });
+}
