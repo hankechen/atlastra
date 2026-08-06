@@ -48,7 +48,7 @@ def fetch_image(url: str):
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from analytics.queries import SoccerDB  # noqa: E402
+from analytics.queries import SoccerDB, warm_pool  # noqa: E402
 from config import FOCUS_SEASON, SOFASCORE_BASE  # noqa: E402
 from webapp import auth  # noqa: E402
 
@@ -1894,6 +1894,12 @@ def _national_warmer():
 
 if __name__ == "__main__":
     print(f"Atlastra UI -> http://localhost:{PORT}  (Ctrl-C to stop)")
+    # Open the warehouse before the first request rather than during it: the pool
+    # holds it open from here on, so nobody's page load pays the catalogue read.
+    _t0 = time.time()
+    warm_pool(read_only=DB_READ_ONLY)
+    print(f"warehouse: open ({(time.time() - _t0) * 1000:.0f} ms)"
+          + (", held" if os.environ.get("ATLASTRA_DB_IDLE") == "0" else ""), flush=True)
     admin.start_writer()
     print("admin usage log: on (buffered writer -> /admin dashboard)")
     if LIVE_REFRESH or FOTMOB:

@@ -221,16 +221,35 @@ def connect_retry(db_path, read_only=True, attempts=15, backoff=0.06, patience=4
 # one connection to it is, and hands out further connections through cursor() in
 # ~0.2ms, so the fix is simply not to let the last one close between requests.
 #
-# It is released again after IDLE_S of no use, and that matters: a read-only
-# connection holds a SHARED file lock, which stops another process from opening
-# the warehouse read-write. Holding one forever would mean `pipeline.run_pipeline`
-# could no longer run while the server is up. Thirty idle seconds is far longer
-# than the gap between a page's own requests and far shorter than the pause before
-# someone switches to a terminal to rebuild. ATLASTRA_NO_DB_POOL=1 opts out.
+# It is released again after ATLASTRA_DB_IDLE seconds of no use, and that matters:
+# an open connection holds the file lock, which stops another process from opening
+# the warehouse. Holding one forever would mean `pipeline.run_pipeline` could no
+# longer run while the server is up. Thirty idle seconds is far longer than the gap
+# between a page's own requests and far shorter than the pause before someone
+# switches to a terminal to rebuild.
+#
+# ATLASTRA_DB_IDLE=0 means never release, which is what the deployed host sets:
+# nothing else there opens the warehouse, and a site quiet most of the time would
+# otherwise hand the catalogue read to whoever arrives next -- seconds on the
+# t3.micro, not the ~200ms it costs on a laptop. ATLASTRA_NO_DB_POOL=1 opts out of
+# pooling altogether.
 _POOL: dict = {"key": None, "con": None, "live": 0, "last": 0.0}
 _POOL_LOCK = threading.Lock()
 _POOL_IDLE_S = float(os.environ.get("ATLASTRA_DB_IDLE", "30"))
 _POOL_OFF = os.environ.get("ATLASTRA_NO_DB_POOL") == "1"
+_POOL_KEEP = _POOL_IDLE_S <= 0                    # 0 -> hold it for the process's life
+
+
+def warm_pool(db_path=None, read_only=True):
+    """Open the warehouse now so the first visitor doesn't. Called at server start:
+    the catalogue read is several seconds on a cold t3.micro, and a burst of requests
+    all queue behind whoever triggers it."""
+    if _POOL_OFF:
+        return
+    try:
+        SoccerDB(db_path=db_path, read_only=read_only).close()
+    except Exception as e:  # noqa: BLE001 -- warming is best-effort; requests still work
+        print(f"db warm-up skipped: {type(e).__name__}: {str(e)[:100]}", flush=True)
 
 
 def _pool_reaper():
@@ -238,6 +257,8 @@ def _pool_reaper():
         time.sleep(5)
         with _POOL_LOCK:
             con, live, last = _POOL["con"], _POOL["live"], _POOL["last"]
+            if _POOL_KEEP:
+                continue
             if con is not None and live == 0 and time.time() - last > _POOL_IDLE_S:
                 _POOL.update(con=None, key=None)
                 try:
