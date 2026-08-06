@@ -76,6 +76,7 @@ from webapp import weekly_recap  # noqa: E402
 from webapp import signature_skills  # noqa: E402
 from webapp import blog  # noqa: E402
 from webapp import tactics  # noqa: E402
+from webapp import shortlink  # noqa: E402
 
 _TAC_SQUAD: dict = {}                                     # team -> (expiry, squad) cache
 # Club → FotMob team id (authoritative live roster + correct player-photo ids).
@@ -1513,6 +1514,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(auth.submit_score(game, period, user["id"], user["username"], score))
             return
+        if u.path == "/api/shorten":                   # long ?s=... build -> /t/<code>
+            res = shortlink.shorten(str(b.get("target", ""))[:32],
+                                    str(b.get("payload", ""))[:shortlink.MAX_PAYLOAD + 1])
+            self._json(res, 400 if res.get("error") else 200)
+            return
         if u.path == "/api/ingest/live":               # live feed pushed from a non-blocked scraper
             if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
                 self._json({"error": "unauthorized"}, 401)
@@ -1737,6 +1743,16 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._send(404 if isinstance(e, KeyError) else 500,
                            json.dumps({"error": str(e)}).encode(), "application/json")
+            return
+        if u.path.startswith("/t/"):                   # short share link -> the real page
+            hit = shortlink.resolve(u.path[3:])
+            if hit:
+                self.send_response(302)
+                self.send_header("Location", f"{hit[0]}?{hit[1]}")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+            else:
+                self._send(404, b"That share link has expired or never existed.", "text/plain")
             return
         # SEO: crawl guidance + a sitemap of every player/team page (which are
         # otherwise undiscoverable -- they live behind a JS search box).

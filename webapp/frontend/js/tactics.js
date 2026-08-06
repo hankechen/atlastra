@@ -1342,8 +1342,27 @@ function shareURL() {
   u.search = '?s=' + encodeShare(payload);
   return u.toString();
 }
+// Trade the long ?s=... for a /t/<code> alias. The long link stays the canonical
+// format and keeps working, so anything that goes wrong here — old server, offline,
+// slow — just shares the long one instead of failing.
+async function shortURL(long) {
+  let payload;
+  try { payload = new URL(long).searchParams.get('s'); } catch { return null; }
+  if (!payload) return null;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 2500);
+  try {
+    const r = await fetch('/api/shorten', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctl.signal,
+      body: JSON.stringify({ target: 'tactics', payload }),
+    }).then((x) => x.json());
+    return r && r.path ? new URL(r.path, location.href).toString() : null;
+  } catch { return null; } finally { clearTimeout(t); }
+}
 async function copyShare() {
-  const url = shareURL();
+  const long = shareURL();
+  const short = await shortURL(long);
+  const url = short || long;
   let copied = false;
   try { await navigator.clipboard.writeText(url); copied = true; } catch { copied = false; }
   closePop();
@@ -1354,7 +1373,7 @@ async function copyShare() {
         added players and past seasons included.</div>
       <input class="tl-shareurl" id="shareUrl" readonly value="${esc(url)}">
       <div class="tl-mfoot"><button class="tl-seasonbtn" id="shareCopy">${copied ? '✅ Copied' : '📋 Copy link'}</button>
-        <span class="tl-mtally">${url.length} characters</span></div></div>`;
+        <span class="tl-mtally">${short ? `short link · ${url.length} characters` : `${url.length} characters`}</span></div></div>`;
   document.body.appendChild(pop);
   pop.querySelector('.tl-pop-x').onclick = closePop;
   pop.onclick = (e) => { if (e.target === pop) closePop(); };

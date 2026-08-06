@@ -143,6 +143,7 @@ def robots_txt() -> bytes:
         "Allow: /\n"
         "Disallow: /api/\n"
         "Disallow: /admin.html\n"
+        "Disallow: /t/\n"                     # share aliases; the page itself is crawlable
         f"\nSitemap: {SITE_URL}/sitemap.xml\n"
     )
     return body.encode()
