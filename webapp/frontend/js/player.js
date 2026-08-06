@@ -124,6 +124,7 @@ async function load(name, careerStat = 'xa', season = null) {
   const p = await api(url);
   if (!p.name) { document.getElementById('crumb').textContent = 'not found'; return; }
   _canonName = p.name;
+  sideCards(p.name);                    // once the page can render — see sideCards()
   document.getElementById('crumb').textContent = p.name;
   document.getElementById('pname').innerHTML = p.name + ' <span class="verified">✔</span>';
 
@@ -709,7 +710,6 @@ let current = params.get('name') || 'Pedri';
   }
 })();
 const careerStatVal = () => document.getElementById('careerStat').value;
-sideCards(current);                             // in flight before /api/player answers
 load(current, 'xa', params.get('season'));      // ?season=2324 deep-links a season
 document.getElementById('careerStat').onchange = (e) => load(current, e.target.value, curSeason);
 document.getElementById('seasonSel').onchange = (e) => load(current, careerStatVal(), e.target.value);
@@ -720,11 +720,16 @@ attachSearchDropdown(document.getElementById('searchBox'));
 
 
 // The cards that depend only on WHICH player this is — not on the season, and not on
-// the career stat the selector is showing. Fired at boot in PARALLEL with /api/player
-// rather than after it: each resolves the name itself exactly as /api/player does, so
-// waiting for the profile only put a whole round trip in front of seven requests. Run
-// once per page for the same reason — changing season used to refetch every one of
-// them to re-render the identical card.
+// the career stat the selector is showing, so they run ONCE per page. Changing season
+// used to refetch every one of them to re-render an identical card.
+//
+// They start when /api/player comes back, not alongside it, and that is deliberate.
+// They don't need it — each resolves the name itself — and starting them early did cut
+// the total on a laptop. But the server has two cores: eight concurrent queries all
+// finish later, and the one they delay is the only one the page cannot render without.
+// Measured on the deployed host, the profile landed at 2226ms with them alongside it
+// and ~500ms with them behind it, for the same total. First paint is what a reader
+// waits for; a card arriving a second later is a card they haven't scrolled to.
 function sideCards(name) {
   if (_sideCardsDone) return;
   _sideCardsDone = true;
