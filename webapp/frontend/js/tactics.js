@@ -1295,33 +1295,32 @@ async function loadAdvisor() {
 // ---- sharing a setup ----
 // A link carries the whole build, not just the team names: formation, every tactic slider,
 // each slot's player, role and position on the pitch — including players you added, past
-// seasons and an XI built from scratch. It stores only what DIFFERS from what the server
-// would hand you for that team, so an untouched side costs a handful of characters and only
-// the parts you actually changed travel. No server state, so a link keeps working.
+// seasons and an XI built from scratch. No server state beyond the /t/<code> alias, so a
+// link keeps working.
 function sideShare(sd) {
   if (!sd || !sd.team || !sd.xi.length) return null;
-  // Encode the shape only when the user picked it. Encoding the resolved one would turn
-  // "Arsenal's own lineup" into "Arsenal, auto-picked, in a 3-4-3" on the other end — a
-  // different eleven from the one being shared, since the XI diff is stored against the
-  // real teamsheet as its base.
-  const o = { t: sd.custom ? '__custom__' : sd.team, f: sd.userFormation || undefined };
+  // Encode the shape only when the user picked it. Encoding the resolved one as a REQUEST
+  // would turn "Arsenal's own lineup" into "Arsenal, auto-picked, in a 3-4-3" on the other
+  // end, since the server builds its auto XI to fit whatever shape it is handed. `fl` is
+  // the resolved shape as a label for the picker, and is never sent back to the server.
+  const o = { t: sd.custom ? '__custom__' : sd.team, f: sd.userFormation || undefined,
+              fl: sd.formation || undefined };
   const base = sd.base || { tactics: {}, xi: [] };
   const tdiff = {};
   Object.keys(sd.tactics || {}).forEach((k) => {
     if (sd.tactics[k] !== (base.tactics[k] === undefined ? 50 : base.tactics[k])) tdiff[k] = sd.tactics[k];
   });
   if (Object.keys(tdiff).length) o.s = tdiff;
-  const byId = {}; (base.xi || []).forEach((b) => { byId[b.id] = b; });
-  const slots = [];
-  sd.xi.forEach((s) => {
-    const b = byId[s.id], nm = s.player ? s.player.player : null;
-    const moved = !b || Math.round(s.x) !== Math.round(b.x) || Math.round(s.y) !== Math.round(b.y)
-      || s.family !== b.family || s.line !== b.line;
-    if (!b || nm !== b.name || s.role !== b.role || moved) {
-      slots.push([s.id, nm, s.role, s.family, Math.round(s.x), Math.round(s.y), s.line]);
-    }
-  });
-  if (slots.length) o.x = slots;
+  // The WHOLE eleven, not just the slots that differ from what the server handed us. A diff
+  // needs its base to still be there when the link is opened, and that base MOVES: the server
+  // picks a club's shape from the personnel, so a squad update or a new European teamsheet
+  // changes both the slot ids and who fills them. Decoded against a base that had since
+  // changed shape, a diff addressed slots that no longer existed — which were appended,
+  // giving sixteen chips stacked over eleven positions, the same player in two of them, and a
+  // sixteen-man XI fed to the simulation. Sending all eleven cannot drift, and costs a few
+  // hundred characters of a link that is shortened to /t/<code> anyway.
+  o.x = sd.xi.map((s) => [s.id, s.player ? s.player.player : null, s.role, s.family,
+                          Math.round(s.x), Math.round(s.y), s.line]);
   return o;
 }
 function encodeShare(obj) {
@@ -1335,7 +1334,7 @@ function decodeShare(str) {
   } catch { return null; }
 }
 function shareURL() {
-  const payload = { v: 1, a: sideShare(S.sides.A) };
+  const payload = { v: 2, a: sideShare(S.sides.A) };
   const b = sideShare(S.sides.B);
   if (b) payload.b = b;
   const u = new URL(location.href);
@@ -1387,35 +1386,79 @@ async function copyShare() {
 // Rebuild a side from a shared link: load the team normally, then lay the differences back
 // over it. Players who aren't in that squad (added, or a past season of someone) resolve
 // through the same endpoint the add box uses.
-async function applySide(key, o) {
+// Lay one shared entry over a slot. The entry is authoritative for everything it carries:
+// where the player stands, what he is asked to do, and who he is.
+function applyEntry(slot, [, name, role, family, x, y, line], known) {
+  slot.role = role || slot.role;
+  if (family) slot.family = family;
+  if (line) slot.line = line;
+  if (typeof x === 'number') slot.x = x;
+  if (typeof y === 'number') slot.y = y;
+  slot.player = name ? (known[name] || null) : null;
+}
+// v1 links (the diff format) are still out there and still have to open sanely against a
+// base that has since changed shape. Match what we can by slot id; put the rest in the
+// closest slot of the same family that nothing has claimed. NEVER append: the eleven is
+// eleven, and a slot too many is what put chips on top of each other.
+function applyLegacy(sd, entries, known) {
+  const claimed = new Set(), orphans = [];
+  let dropped = 0;
+  entries.forEach((e) => {
+    const slot = sd.xi.find((s) => s.id === e[0] && !claimed.has(s));
+    if (slot) { claimed.add(slot); applyEntry(slot, e, known); } else orphans.push(e);
+  });
+  orphans.forEach((e) => {
+    const free = sd.xi.filter((s) => !claimed.has(s));
+    if (!free.length) { dropped += 1; return; }     // eleven full -> drop it, don't grow
+    const [, , , family, x = 50, y = 50] = e;
+    const cost = (s) => (s.family === family ? 0 : 1000)
+      + Math.hypot((s.x || 50) - x, (s.y || 50) - y);
+    const slot = free.reduce((a, b) => (cost(b) < cost(a) ? b : a));
+    claimed.add(slot); applyEntry(slot, e, known);
+  });
+  // A player the link puts in one slot can still be sitting in another that the link never
+  // mentioned, because the base moved under it. Empty the slot it didn't ask for rather than
+  // field the same man twice.
+  const shared = new Set(Array.from(claimed).map((s) => s.player && s.player.player).filter(Boolean));
+  sd.xi.forEach((s) => {
+    if (!claimed.has(s) && s.player && shared.has(s.player.player)) s.player = null;
+  });
+  return { moved: orphans.length - dropped, dropped };
+}
+// Rebuild a side from a shared link: load the team normally for its squad, roles and
+// defaults, then put the sender's eleven on the pitch.
+async function applySide(key, o, version) {
   const sd = S.sides[key];
   if (!o || !o.t) { sd.team = ''; return; }
   sd.team = o.t; sd.formation = o.f || null; sd.userFormation = o.f || null;
   await loadSide(key);
   if (sd.error) return;
   if (o.s) sd.tactics = { ...sd.tactics, ...o.s };
-  if (!o.x) return;
+  if (!o.x || !o.x.length) return;
   const known = {}; (sd.squad || []).forEach((p) => { known[p.player] = p; });
   const needed = o.x.map((e) => e[1]).filter((n) => n && !known[n]);
   const fetched = await Promise.all(needed.map((n) => api('/api/tactics/player?name=' + encodeURIComponent(n))
     .then((r) => (r && r.available ? r.player : null)).catch(() => null)));
   needed.forEach((n, i) => { if (fetched[i]) { known[n] = fetched[i]; sd.squad.push(fetched[i]); } });
-  o.x.forEach(([id, name, role, family, x, y, line]) => {
-    let slot = sd.xi.find((s) => s.id === id);
-    if (!slot) { slot = { id, family, line, x, y, role, player: null }; sd.xi.push(slot); }
-    slot.role = role || slot.role;
-    if (family) slot.family = family;
-    if (line) slot.line = line;
-    if (typeof x === 'number') slot.x = x;
-    if (typeof y === 'number') slot.y = y;
-    slot.player = name ? (known[name] || null) : null;
-  });
+  if (version >= 2) {
+    // The link carries the whole eleven, so build the XI from it outright — no patching, so
+    // nothing to append and no way to end up with a player in two places.
+    sd.xi = o.x.slice(0, 11).map((e) => {
+      const slot = { id: e[0], family: e[3], line: e[6], x: e[4], y: e[5], role: e[2], player: null };
+      applyEntry(slot, e, known);
+      return slot;
+    });
+  } else {
+    sd.restored = applyLegacy(sd, o.x, known);
+  }
+  if (o.fl) sd.formation = o.fl;                    // the shape as the sender saw it
   if (o.f === 'Custom') sd.formation = 'Custom';
 }
 async function loadShared(payload) {
   document.getElementById('tlBody').innerHTML = '<div class="tl-loading">Opening a shared setup…</div>';
-  await applySide('A', payload.a);
-  if (payload.b) await applySide('B', payload.b); else S.sides.B.team = '';
+  const v = payload.v || 1;
+  await applySide('A', payload.a, v);
+  if (payload.b) await applySide('B', payload.b, v); else S.sides.B.team = '';
   if (S.sides.A.error) {
     document.getElementById('tlBody').innerHTML = '<div class="empty-state">That shared setup could not be loaded.</div>';
     return;
@@ -1425,7 +1468,12 @@ async function loadShared(payload) {
   ensureOption(document.getElementById('teamInput'), S.sides.A.custom ? '__custom__' : S.sides.A.team);
   ensureOption(document.getElementById('oppInput'), S.sides.B.custom ? '__custom__' : S.sides.B.team);
   render(); runSim();
-  toast('Shared setup loaded — every change the sender made is in place.');
+  // An older link is restored against a lineup that may have moved on, so say when it
+  // didn't land exactly rather than presenting a rearranged side as the sender's.
+  const off = ['A', 'B'].map((k) => S.sides[k].restored).filter((r) => r && (r.moved || r.dropped));
+  toast(off.length
+    ? 'Shared setup loaded — this link predates a lineup change, so some players were fitted to the closest spot.'
+    : 'Shared setup loaded — every change the sender made is in place.');
 }
 
 // ---- init ----

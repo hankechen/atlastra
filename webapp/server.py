@@ -423,13 +423,25 @@ def _team_form(d, team):
 
 
 def _tac_rebuild(d, team, slots):
-    """Rebuild engine XI (full player stats) from wire slots {id,family,line,role,player}."""
+    """Rebuild engine XI (full player stats) from wire slots {id,family,line,role,player}.
+
+    Hard-capped at eleven, and no player twice. Every formation we hold is eleven slots,
+    so anything longer is a client that has gone wrong -- which it did: a share link
+    decoded against a lineup that had since changed shape used to append the slots it
+    couldn't find, and the engine rated the resulting sixteen-man side as if it were legal.
+    A projection is only meaningful for a team that could take the field.
+    """
     squad = _tac_squad(d, team)
     by_name = {p["player"]: p for p in squad}
     xi = []
-    for s in (slots or []):
+    seen: set = set()
+    for s in (slots or [])[:11]:
         pl = s.get("player")
         name = pl.get("player") if isinstance(pl, dict) else pl
+        if name and name in seen:
+            name = None                              # same man in two slots -> field him once
+        elif name:
+            seen.add(name)
         # squad first; if the player isn't on this team (a user-added what-if transfer),
         # resolve them independently so their real stats still drive the sim.
         full = by_name.get(name) or (_tac_player(d, name) if name else None)
