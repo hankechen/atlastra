@@ -239,6 +239,10 @@ _POOL_IDLE_S = float(os.environ.get("ATLASTRA_DB_IDLE", "30"))
 _POOL_OFF = os.environ.get("ATLASTRA_NO_DB_POOL") == "1"
 _POOL_KEEP = _POOL_IDLE_S <= 0                    # 0 -> hold it for the process's life
 
+# Percentile fields for the profile's stat tiles, keyed by (season, position group).
+# See _tile_percentiles for why this is safe to hold.
+_TILE_FIELD: dict = {}
+
 
 def warm_pool(db_path=None, read_only=True):
     """Open the warehouse now so the first visitor doesn't. Called at server start:
@@ -3705,34 +3709,107 @@ class SoccerDB:
                 out[key]["pct"] = int(round((c <= v).mean() * 100))
         return out
 
+    # Minutes a player needs in a scope before he is ranked in it, and before his own
+    # number is ranked against it. A UCL campaign is a fraction of a league season --
+    # eight league-phase matches now, six group games before -- so the league bar would
+    # empty the UCL field of everyone but the finalists.
+    _TILE_MIN_MINUTES = {"league": 600, "combined": 600, "ucl": 270}
+    _TILE_PER90 = ["goals", "assists", "xg", "xa", "chances_created", "big_chances_created",
+                   "dribbles_completed", "duels_won", "tackles", "interceptions"]
+    _TILE_RATE = ["duels_won_pct", "pass_accuracy_pct"]
+
     def _tile_percentiles(self, pid: int, season: str) -> dict:
-        g = self.con.execute("SELECT position_group FROM players WHERE player_id=?", [pid]).fetchone()
-        if not g or not g[0]:
+        """Per-stat percentile vs same-position peers, ONE MAP PER SCOPE:
+        {"league": {...}, "ucl": {...}, "combined": {...}}.
+
+        The tiles switch between League, UCL and Combined numbers, so the bar under them
+        has to switch too. It used to be a single map built from the player's DOMESTIC
+        season against domestic peers, which meant flipping to UCL changed the number and
+        left the percentile alone -- Vinicius Junior's 2022/23 read 64th under both, when
+        his league goals/90 is 64th among league forwards and his UCL goals/90 is 85th
+        among UCL ones. A percentile that doesn't move when its population does is worse
+        than no percentile.
+
+        Peers are ranked on the same aggregation the tiles display (counts summed,
+        rates minutes-weighted), so the comparison is like with like, and grouped by the
+        player's position IN THAT SEASON rather than the one he plays now -- the profile
+        already labels past seasons that way, so a converted winger is not ranked against
+        the strikers he later became one of.
+        """
+        counts = ", ".join(f"SUM(x.{c}) AS {c}" for c in self._TILE_PER90)
+        rates = ", ".join(
+            f"SUM(x.{c} * x.minutes) FILTER (WHERE x.{c} IS NOT NULL) "
+            f"/ NULLIF(SUM(x.minutes) FILTER (WHERE x.{c} IS NOT NULL), 0) AS {c}"
+            for c in self._TILE_RATE)
+        # His position for THIS season (stat-derived history, falling back to the standing
+        # group where that season was never split). Resolved first and passed in, so the
+        # field query filters on it instead of materialising every position's rows.
+        pos = self.con.execute("""
+            SELECT COALESCE(h.coarse_group, p.position_group)
+            FROM players p
+            LEFT JOIN player_position_history h ON h.player_id = p.player_id AND h.season = ?
+            WHERE p.player_id = ?
+        """, [season, pid]).fetchone()
+        if not pos or not pos[0]:
             return {}
-        cols = ("v.player_id, v.minutes, v.goals, v.assists, v.xg, v.xa, v.chances_created, "
-                "v.big_chances_created, v.dribbles_completed, v.duels_won, v.duels_won_pct, "
-                "v.tackles, v.interceptions, v.pass_accuracy_pct")
-        df = self.con.execute(
-            f"SELECT {cols} FROM v_player_season_stats v JOIN players pl USING(player_id) "
-            "WHERE v.season=? AND pl.position_group=? AND v.minutes>=600", [season, g[0]]).df()
-        if pid not in set(df["player_id"]):
-            me = self.con.execute(
-                f"SELECT {cols} FROM v_player_season_stats v WHERE v.player_id=? AND v.season=?",
-                [pid, season]).df()
-            if me.empty:
-                return {}
-            df = pd.concat([df, me], ignore_index=True)
-        if len(df) < 5:
+        # The field is the same for every player of a position in a season, and the tables
+        # behind it (Understat + FotMob enrichment + UCL) only change on a pipeline
+        # rebuild, which comes with a restart -- so it is computed once per (season,
+        # position) rather than on every profile view. A rebuild while the server is up
+        # would leave this stale until it restarts.
+        ck = (season, pos[0])
+        if ck in _TILE_FIELD:
+            df = _TILE_FIELD[ck]
+        else:
+            df = self._tile_field(season, pos[0], counts, rates)
+            if len(_TILE_FIELD) < 256:                # bounded: 12 seasons x a few groups
+                _TILE_FIELD[ck] = df
+        if df.empty or pid not in set(df["player_id"]):
             return {}
-        mins = df["minutes"].clip(lower=1)
-        me_mask = df["player_id"] == pid
-        me_i = df.index[me_mask][0]
-        per90 = ["goals", "assists", "xg", "xa", "chances_created", "big_chances_created",
-                 "dribbles_completed", "duels_won", "tackles", "interceptions"]
-        rate = ["duels_won_pct", "pass_accuracy_pct"]
         out = {}
-        for k in per90 + rate:
-            raw = pd.to_numeric(df[k], errors="coerce")
+        for scope in ("league", "ucl", "combined"):
+            pct = self._tile_scope_pct(df[df["scp"] == scope], pid,
+                                       self._TILE_MIN_MINUTES[scope])
+            if pct:
+                out[scope] = pct
+        return out
+
+    def _tile_field(self, season, pos, counts, rates):
+        """Every player of one position in one season, aggregated per scope: league and
+        UCL by competition, then the same rows again ungrouped for combined."""
+        return self.con.execute(f"""
+            WITH x AS (
+                SELECT s.player_id, s.minutes, {', '.join('s.' + c for c in self._TILE_PER90)},
+                       {', '.join('s.' + c for c in self._TILE_RATE)},
+                       CASE WHEN s.competition = 'UCL' THEN 'ucl' ELSE 'league' END AS scp
+                FROM v_stats_combined s
+                JOIN players p USING(player_id)
+                LEFT JOIN player_position_history h
+                       ON h.player_id = s.player_id AND h.season = s.season
+                WHERE s.season = ? AND COALESCE(h.coarse_group, p.position_group) = ?
+            )
+            SELECT x.scp, x.player_id, SUM(x.minutes) AS minutes, {counts}, {rates}
+            FROM x GROUP BY 1, 2
+            UNION ALL
+            SELECT 'combined', x.player_id, SUM(x.minutes) AS minutes, {counts}, {rates}
+            FROM x GROUP BY 2
+        """, [season, pos]).df()
+
+    def _tile_scope_pct(self, grp, pid: int, min_minutes: int) -> dict:
+        """Rank one player against a scope's field. His own row is kept even when he is
+        under the bar -- the bar is there to keep a 90-minute cameo out of the FIELD, not
+        to refuse him a percentile."""
+        if grp is None or grp.empty or pid not in set(grp["player_id"]):
+            return {}
+        field = grp[(grp["minutes"] >= min_minutes) | (grp["player_id"] == pid)]
+        if len(field) < 5:
+            return {}
+        field = field.reset_index(drop=True)
+        me_i = field.index[field["player_id"] == pid][0]
+        mins = field["minutes"].clip(lower=1)
+        out = {}
+        for k in self._TILE_PER90 + self._TILE_RATE:
+            raw = pd.to_numeric(field[k], errors="coerce")
             my = raw.loc[me_i]
             have = raw.notna()
             # A stat that isn't tracked for this season (e.g. duels before 2025/26 are
@@ -3742,11 +3819,16 @@ class SoccerDB:
             # it so the tile simply drops its percentile bar (pctBar handles null).
             if pd.isna(my) or have.sum() < 5:
                 continue
-            if k in rate:
+            if k in self._TILE_RATE:
                 vals, myv = raw[have], my
             else:                                          # per-90
                 vals = raw[have] / mins[have] * 90
                 myv = my / mins.loc[me_i] * 90
+            # A field with one value in it cannot rank anyone: every goalkeeper has
+            # scored the same zero goals, and "<= mine" made all of them the 100th
+            # percentile for it. No spread, no bar.
+            if vals.nunique() <= 1:
+                continue
             out[k] = int(round((vals <= myv).mean() * 100))
         return out
 
@@ -3883,8 +3965,12 @@ class SoccerDB:
                     sc[key] = per90               # per-90 value (Per-90 grid)
                     if sc.get("minutes"):         # season total (Total grid) = rate x minutes/90
                         sc[key + "_total"] = round(per90 * sc["minutes"] / 90)
-                if "pct" in info:                 # same rate-based percentile for both tiles
-                    tile_pct[key] = tile_pct[key + "_total"] = info["pct"]
+                    # The datamb set is domestic and isn't split by competition, so the
+                    # same rate -- and the same domestic percentile -- goes in every
+                    # scope that shows it. The tooltip says which field it ranks against.
+                    if "pct" in info:
+                        tile_pct.setdefault(sck, {})
+                        tile_pct[sck][key] = tile_pct[sck][key + "_total"] = info["pct"]
         return {
             "name": prof["player_name"], "team": team,
             "photo": self.player_photo(fpid[0] if fpid else None),
@@ -3903,7 +3989,9 @@ class SoccerDB:
             "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
             "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
             "tiles": tiles, "radar": radar,
-            "tile_pct": tile_pct,            # per-stat percentile vs position peers
+            # per-stat percentile vs position peers, ONE MAP PER SCOPE, so the bar under
+            # a tile ranks against the competition whose number the tile is showing
+            "tile_pct": tile_pct,
             "wc_tile_pct": self._wc_tile_percentiles(pid, season),  # vs the WC field (WC scope)
             "stats_scopes": scopes,          # league/ucl/combined cumulative
             "archetype": self._player_archetype(pid),  # use case 10: role + traits + similar

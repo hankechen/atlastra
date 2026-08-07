@@ -37,8 +37,9 @@ const PER90_DEFS = [
 ];
 const SCOPES = [['league', 'League'], ['ucl', 'UCL'], ['combined', 'Combined'], ['worldcup', 'World Cup']];
 let statScopes = {}, scopeTotals = 'combined', scopePer90 = 'combined';
-let tilePct = {};                                   // per-stat percentile vs position peers
-let wcTilePct = {};                                 // per-stat percentile vs the WC field (WC scope)
+let tilePct = {};        // {league:{...}, ucl:{...}, combined:{...}} — one map per scope
+let wcTilePct = {};      // per-stat percentile vs the WC field (WC scope)
+let seasonLabelTxt = ''; // the selected season, for the percentile tooltips
 
 function fmtTile(def, s) {
   const [, key, , kind] = def, v = s ? s[key] : null;
@@ -53,19 +54,27 @@ const pctColor = (p) => p >= 80 ? '#2fbf71' : p >= 60 ? '#7d9f3a' : p >= 40 ? '#
 const ordinal = (n) => { const v = n % 100, s = ['th', 'st', 'nd', 'rd']; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
 // percentile bar + number shown under a stat (skip Apps — no peer percentile)
 function pctBar(key, pctMap, peer) {
-  const p = (pctMap || tilePct)[key];
+  const p = (pctMap || {})[key];
   if (p == null || key === 'games') return '';
-  return `<div class="tpctw" title="${ordinal(p)} percentile vs ${peer || 'same position across all top-5 leagues'} (100 = best in position)">
+  return `<div class="tpctw" title="${ordinal(p)} percentile vs ${peer} (100 = best in position)">
     <div class="tpct"><i style="width:${p}%;background:${pctColor(p)}"></i></div>
     <span class="tpctn" style="color:${pctColor(p)}">${ordinal(p)}</span></div>`;
 }
-// The WC scope ranks against the WORLD CUP field (wcTilePct); every other scope uses
-// the top-5-league percentiles (tilePct).
+// Each scope ranks against ITS OWN field: the League tiles against league players, the
+// UCL tiles against the players in that season's Champions League, the World Cup tiles
+// against that edition's field. Ranking every scope against the league — which is what
+// a single percentile map did — left the bar sitting still while the number under it
+// changed competition.
+const PEER_TXT = {
+  league: 'the same position across all top-5 leagues',
+  ucl: 'the same position in that season’s Champions League',
+  combined: 'the same position, league + UCL combined',
+  worldcup: 'the World Cup field, same position',
+};
 const oneTile = (def, s, scope) =>
   `<div class="ic">${def[0]}</div><b>${fmtTile(def, s)}</b><span>${def[2]}</span>${
-    scope === 'worldcup'
-      ? pctBar(def[1], wcTilePct, 'the World Cup field, same position')
-      : pctBar(def[1], tilePct)}`;
+    pctBar(def[1], scope === 'worldcup' ? wcTilePct : (tilePct[scope] || {}),
+           PEER_TXT[scope] || PEER_TXT.league)}`;
 
 function renderTiles(elId, defs, scope) {
   const s = statScopes[scope];
