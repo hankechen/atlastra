@@ -593,6 +593,7 @@ const ICONS = {
   value: '<circle cx="12" cy="12" r="8.5"/><path d="M14.5 9c-.5-1-1.5-1.5-2.7-1.5-1.5 0-2.6.8-2.6 2 0 2.7 5.4 1.3 5.4 4 0 1.3-1.2 2.1-2.8 2.1-1.3 0-2.4-.6-2.9-1.6"/><path d="M12 6v1.6M12 16.4V18"/>',
   trend: '<path d="M4 16.5l5-5 3.5 3.5L20 7.5"/><path d="M15 7.5h5v5"/>',
   plan: '<path d="M4 6h7M4 12h13M4 18h9"/><circle cx="19" cy="6" r="2"/><circle cx="20" cy="18" r="2"/>',
+  buildplayer: '<circle cx="10.5" cy="10" r="4"/><path d="M3.5 20.5c0-3.7 3.1-5.6 7-5.6 1 0 1.9.1 2.7.4"/><path d="M18 13.5v6M15 16.5h6"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -638,6 +639,7 @@ const NAV_GAMES = [
   ['Higher or Lower', 'higherlower', '/higherlower.html'],
   ['Guess the Player', 'mystery', '/mystery.html'],
   ['Draft Battle', 'draft', '/draft.html'],
+  ['Build a Player', 'buildplayer', '/buildplayer.html'],
 ];
 
 // in-page sub-tabs mirroring the sidebar groups. tab = [label, href, activeKey];

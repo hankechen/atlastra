@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Build a Player</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/styles.css?v=96">
+<style>
+.bp-posgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+@media(max-width:680px){.bp-posgrid{grid-template-columns:repeat(2,1fr)}}
+.bp-pos{background:var(--card2);border:1px solid var(--border2);border-radius:12px;padding:16px 10px;text-align:center;
+  cursor:pointer;transition:border-color .12s,transform .12s}
+.bp-pos:hover{border-color:var(--accent)}
+.bp-pos.active{border-color:var(--accent);background:linear-gradient(150deg,rgba(85,112,240,.16),rgba(125,92,245,.10))}
+.bp-pos b{display:block;font-size:20px;font-weight:800;letter-spacing:.02em}
+.bp-pos span{font-size:11.5px;color:var(--muted);font-weight:600}
+.bp-mintier{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.bp-budget{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.bp-budget b{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
+.bp-budget b.over{color:var(--red)}
+.bp-bbar{flex:1;min-width:140px;height:8px;border-radius:5px;background:var(--card2);border:1px solid var(--border2);overflow:hidden}
+.bp-bbar i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .12s}
+.bp-bbar.over i{background:var(--red)}
+.bp-slider{margin-bottom:15px}
+.bp-slabel{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:600;margin-bottom:2px;gap:8px}
+.bp-slabel b{color:var(--accent);font-variant-numeric:tabular-nums}
+.bp-slider input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;display:block;margin:4px 0 3px}
+.bp-shint{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted)}
+.bp-result{display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+.bp-rnum{font-size:52px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;
+  background:linear-gradient(120deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.bp-rmeta{display:flex;flex-direction:column;gap:5px}
+.bp-rank{font-size:12.5px;color:var(--muted)}
+.bp-shrink{font-size:11.5px;color:var(--muted)}
+.bp-shrink b{color:var(--text)}
+.bp-drv{display:grid;grid-template-columns:150px 1fr 60px;align-items:center;gap:10px;font-size:12.5px;margin-bottom:7px}
+.bp-drv span.l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bp-drv .bar{height:6px;border-radius:3px;background:var(--card2);overflow:hidden}
+.bp-drv .bar i{display:block;height:100%;border-radius:3px}
+.bp-drv .bar i.good{background:var(--green)}.bp-drv .bar i.bad{background:var(--red)}
+.bp-drv b{text-align:right;font-variant-numeric:tabular-nums}
+.bp-drv b.good{color:var(--green)}.bp-drv b.bad{color:var(--red)}
+.bp-comps{display:flex;flex-direction:column;gap:6px}
+.bp-comp{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:9px;background:var(--card2);
+  border:1px solid var(--border2);font-size:12.5px}
+.bp-comp.me{border-color:var(--accent);background:linear-gradient(150deg,rgba(85,112,240,.14),rgba(125,92,245,.09))}
+.bp-comp a{color:var(--text);text-decoration:none;font-weight:700}
+.bp-comp a:hover{color:var(--accent)}
+.bp-comp b{font-variant-numeric:tabular-nums}
+.bp-grid2{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
+@media(max-width:900px){.bp-grid2{grid-template-columns:1fr}}
+.bp-live{position:sticky;top:14px}
+.bp-loading{opacity:.55}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main class="main">
+    <div class="topbar">
+      <div class="search"><span>⌕</span><input id="searchBox" placeholder="Search players, teams, matches…"><span class="kbd">/</span></div>
+      <div class="tb-icons"><span class="badge" data-n="3">🔔</span><div class="avatar"></div></div>
+    </div>
+
+    <div class="page-head">
+      <div><h2>Build a Player</h2><p>Pick a position, allocate attribute points, and get a rating from the
+        <b>same engine that rates every real player on Atlastra</b> — your build is scored inside this
+        season's actual field, not a lookalike formula.</p></div>
+    </div>
+
+    <section class="card" id="posCard">
+      <div class="card-h"><h3>1 · Position</h3></div>
+      <div class="bp-posgrid" id="posGrid"></div>
+    </section>
+
+    <section class="card" id="minCard" style="display:none">
+      <div class="card-h"><h3>2 · Minutes</h3><span class="see">this season, per the real shrinkage rule</span></div>
+      <div class="bp-mintier" id="minGrid"></div>
+      <p class="muted" id="shrinkNote" style="font-size:12px"></p>
+    </section>
+
+    <div class="bp-grid2" id="buildArea" style="display:none">
+      <section class="card" id="slidersCard">
+        <div class="card-h"><h3>3 · Attributes</h3><span class="see" id="sliderSub"></span></div>
+        <div class="bp-budget"><span class="muted" style="font-size:12.5px">Points</span>
+          <b id="budgetNum">0 / 0</b>
+          <div class="bp-bbar" id="budgetBar"><i style="width:0%"></i></div>
+        </div>
+        <div id="sliderList"></div>
+      </section>
+
+      <section class="bp-live">
+        <section class="card" id="resultCard">
+          <div class="card-h"><h3>Your Creation</h3><span class="see" id="resPos"></span></div>
+          <div id="resultBody"><div class="placeholder-note">Move a slider to see a rating.</div></div>
+        </section>
+        <section class="card" id="compCard" style="margin-top:14px;display:none">
+          <div class="card-h"><h3>Nearest Real Players</h3><span class="see">this position, this season</span></div>
+          <div class="bp-comps" id="compList"></div>
+        </section>
+      </section>
+    </div>
+
+    <section class="card" id="lbCard" style="margin-top:16px;display:none">
+      <div class="card-h"><h3>Highest-Rated Creations</h3><span class="see">global leaderboard</span></div>
+      <div class="placeholder-note">Loading…</div>
+    </section>
+  </main>
+</div>
+<script src="/js/api.js?v=32"></script>
+<script src="/js/games.js?v=2"></script>
+<script src="/js/buildplayer.js?v=1"></script>
+</body>
+</html>

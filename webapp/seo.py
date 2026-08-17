@@ -83,7 +83,8 @@ PAGE_META = {
 # Pages with no standalone search value -> keep them out of the index (private
 # dashboards, ephemeral live pages, and the casual guessing games).
 NOINDEX_PAGES = {"admin.html", "profile.html", "draft.html", "guess.html", "mystery.html",
-                 "higherlower.html", "predict.html", "daily.html", "card.html", "styles.html"}
+                 "higherlower.html", "predict.html", "daily.html", "card.html", "styles.html",
+                 "buildplayer.html"}
 
 # ---- warehouse-backed entity index (players + teams), cached ----------------
 # Loaded once and refreshed on a long TTL: the underlying stats only change when

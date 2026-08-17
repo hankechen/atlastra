@@ -77,6 +77,7 @@ from webapp import signature_skills  # noqa: E402
 from webapp import blog  # noqa: E402
 from webapp import tactics  # noqa: E402
 from webapp import shortlink  # noqa: E402
+from webapp import build_player  # noqa: E402
 
 _TAC_SQUAD: dict = {}                                     # team -> (expiry, squad) cache
 # Club → FotMob team id (authoritative live roster + correct player-photo ids).
@@ -1222,6 +1223,8 @@ def api(path: str, q: dict) -> dict | list:
                                 q.get("season", [None])[0])
         return scout_ai.scout_report(data, refresh=q.get("refresh", ["0"])[0] == "1")
     with SoccerDB(read_only=DB_READ_ONLY) as d:
+        if path == "/api/build_player/config":  # Build a Player: positions, sliders, budgets
+            return build_player.config(d.con)
         if path == "/api/tactics/squad":       # Tactics Lab: squad + auto XI for a formation
             team = q.get("team", [""])[0]
             # No formation asked for means "give me this club's default", and its default is
@@ -1584,6 +1587,26 @@ class Handler(BaseHTTPRequestHandler):
                 return
             res, err = auth.toggle_like(_int(b.get("id")), user["id"])
             self._json(res if res else {"error": err}, 200 if res else 400)
+            return
+        if u.path == "/api/build_player/rate":         # score a fictional build
+            group = str(b.get("position", ""))
+            attrs_in = b.get("attrs") or {}
+            if not isinstance(attrs_in, dict):
+                self._json({"available": False, "error": "Bad attrs."}, 400)
+                return
+            attrs = {}
+            for k, v in attrs_in.items():
+                try:
+                    attrs[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    continue
+            try:
+                minutes = int(b.get("minutes", 1800))
+            except (TypeError, ValueError):
+                minutes = 1800
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                res = build_player.build_rating(d.con, group, minutes, attrs)
+            self._json(res, 200 if res.get("available") else 400)
             return
         if u.path == "/api/tactics/sim":               # Tactics Lab simulation
             with SoccerDB(read_only=DB_READ_ONLY) as d:
