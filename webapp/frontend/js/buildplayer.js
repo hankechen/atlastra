@@ -108,8 +108,17 @@ async function runRate() {
   lastResult = r;
   renderResult(r);
   renderComparables(r);
-  if (r.rating > bestSeen) { bestSeen = r.rating; postScore('buildplayer', position, bestSeen); }
+  if (r.rating > bestSeen) {
+    bestSeen = r.rating;
+    postScore('buildplayer', position, bestSeen);
+    // Refresh the board so a signed-in user sees their own score land on it --
+    // debounced so dragging through several new bests in a row (rating climbing
+    // one point per tick) doesn't refetch the board on every one of them.
+    clearTimeout(_lbT);
+    _lbT = setTimeout(loadBoard, 900);
+  }
 }
+let _lbT;
 
 function renderResult(r) {
   const over = r.spent > r.budget;
