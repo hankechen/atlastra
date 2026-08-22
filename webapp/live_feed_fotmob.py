@@ -952,7 +952,9 @@ def _yt_embed(url: str):
 
 
 def _match_highlight(mid: int) -> dict | None:
-    """The highlight clip for a finished match (cached permanently), or None."""
+    """The highlight clip for a finished match (cached permanently), or None.
+    FotMob only populates `matchFacts.highlights` for some competitions (mainly
+    La Liga) — `_yt_match_highlight` below covers the rest via YouTube search."""
     if mid in _HL_CACHE:
         return _HL_CACHE[mid]
     res = None
@@ -965,6 +967,21 @@ def _match_highlight(mid: int) -> dict | None:
         res = None
     _HL_CACHE[mid] = res
     return res
+
+
+def _yt_match_highlight(home: str, away: str, competition: str, ts: int) -> dict | None:
+    """Fallback full-match highlight via keyless YouTube search, for competitions
+    FotMob hasn't attached a native clip to (everything besides La Liga, as of
+    this writing). Search results for a finished match never change, so this
+    rides on `_yt_search`'s permanent per-query cache."""
+    yr = datetime.utcfromtimestamp(ts).year if ts else ""
+    vids = _yt_search(f"{home} vs {away} highlights {competition} {yr}".strip(), 1)
+    if not vids:
+        return None
+    vid = vids[0]
+    return {"url": f"https://youtu.be/{vid}",
+            "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            "source": "www.youtube.com"}
 
 
 def _goals_from(m: dict) -> int:
@@ -1010,6 +1027,17 @@ def highlights(period: str = "day", limit: int = 10) -> dict:
     top = cands[:max(limit * 3, 24)]
     with ThreadPoolExecutor(max_workers=8) as pool:
         hls = list(pool.map(lambda c: _match_highlight(c["m"].get("id")), top))
+    missing = [i for i, hl in enumerate(hls) if not hl]
+    if missing:
+        def _fallback(i):
+            c = top[i]
+            home = (c["m"].get("home") or {}).get("name")
+            away = (c["m"].get("away") or {}).get("name")
+            return _yt_match_highlight(home, away, c["competition"], c["ts"])
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            fb = list(pool.map(_fallback, missing))
+        for i, hl in zip(missing, fb):
+            hls[i] = hl
     clips = []
     for c, hl in zip(top, hls):
         if not hl:
