@@ -889,6 +889,40 @@ class SoccerDB:
 
     # ----- use case 6: team performance / standings ----------------------- #
     def league_standings(self, league_key: str, season: str = FOCUS_SEASON) -> pd.DataFrame:
+        # Current season: use FotMob's live table (pipeline/load_standings_fotmob)
+        # wholesale instead of team_season_stats, which is Understat-sourced and
+        # only as fresh as the last manual pipeline run. Deliberately NOT a per-row
+        # merge of the two: across a promotion/relegation boundary a team can be in
+        # one source's table and not the other's, and coalescing row-by-row would
+        # silently splice an ex-Premier-League side's old FINAL 2025/26 points into
+        # a table of everyone else's new, in-progress 2026/27 record. A team we
+        # can't resolve to a FotMob row (e.g. a newly promoted club load_team_logos
+        # hasn't linked yet) is simply absent rather than shown with stale numbers.
+        # xG/xPts aren't in FotMob's basic table, so they're blank here.
+        if season == FOCUS_SEASON:
+            try:
+                df = self.con.execute(
+                    """
+                    SELECT f.position AS pos, t.team_name AS team,
+                           f.played AS mp, f.wins AS w, f.draws AS d, f.losses AS l,
+                           f.goals_for AS gf, f.goals_against AS ga,
+                           f.goal_difference AS gd, f.points AS pts,
+                           CAST(NULL AS DOUBLE) AS xg_for,
+                           CAST(NULL AS DOUBLE) AS xg_against,
+                           CAST(NULL AS DOUBLE) AS xpts
+                    FROM team_standings_fotmob f
+                    JOIN team_logos tl ON tl.fotmob_team_id = f.fotmob_team_id
+                                      AND tl.league_key = f.league_key
+                    JOIN teams t ON t.team_id = tl.team_id
+                    WHERE f.league_key = ?
+                    ORDER BY f.position
+                    """,
+                    [league_key],
+                ).df()
+                if not df.empty:
+                    return df
+            except Exception:                              # noqa: BLE001 -- fotmob tables not built yet
+                pass
         return self.con.execute(
             """
             SELECT s.league_position AS pos, t.team_name AS team,
@@ -2994,6 +3028,19 @@ class SoccerDB:
                    goals_against, goal_difference, points, xg_for, xg_against, expected_points
             FROM team_season_stats WHERE team_id = ? AND season = ?
         """, [tid, season]).fetchone()
+        live = None                      # FotMob live table row (see league_standings)
+        if season == FOCUS_SEASON:
+            try:
+                live = self.con.execute("""
+                    SELECT f.position, f.played, f.wins, f.draws, f.losses,
+                           f.goals_for, f.goals_against, f.goal_difference, f.points
+                    FROM team_logos tl
+                    JOIN team_standings_fotmob f
+                      ON f.fotmob_team_id = tl.fotmob_team_id AND f.league_key = tl.league_key
+                    WHERE tl.team_id = ?
+                """, [tid]).fetchone()
+            except Exception:                            # noqa: BLE001 -- table not built yet
+                live = None
         n_teams = self.con.execute(
             "SELECT COUNT(*) FROM team_season_stats WHERE league_key = ? AND season = ?",
             [head[2], season]).fetchone()[0]
@@ -3010,27 +3057,65 @@ class SoccerDB:
             ORDER BY ps.goals DESC, ps.assists DESC LIMIT 5
         """, [tid, season]).df()
         # use case 7: manager + venue (FotMob), and full squad
-        meta = self.con.execute(
-            "SELECT manager, venue, city, capacity, opened, surface "
-            "FROM team_meta WHERE team_id = ?", [tid]).fetchone()
-        squad = self.con.execute("""
-            SELECT pl.player_name, ps.position_group, ps.matches, ps.minutes,
-                   ps.goals, ps.assists, pe.fpid, bio.fotmob_age
-            FROM player_season_stats ps
-            JOIN players pl USING(player_id)
-            LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
-                       WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
-                   ON pe.player_id = ps.player_id
-            LEFT JOIN player_bio bio ON bio.player_id = ps.player_id
-            WHERE ps.team_id = ? AND ps.season = ?
-            ORDER BY ps.minutes DESC
-        """, [tid, season]).df()
+        try:
+            meta = self.con.execute(
+                "SELECT manager, venue, city, capacity, opened, surface "
+                "FROM team_meta WHERE team_id = ?", [tid]).fetchone()
+        except Exception:                                # noqa: BLE001 -- table not built yet
+            meta = None
         ORDER = {"GK": 0, "DEF": 1, "MID": 2, "FWD": 3}
-        squad_rows = [{"player": r.player_name, "position_group": r.position_group,
-                       "apps": _i(r.matches), "minutes": _i(r.minutes),
-                       "goals": _i(r.goals), "assists": _i(r.assists),
-                       "age": _i(r.fotmob_age), "photo": self.player_photo(r.fpid)}
-                      for r in squad.itertuples()]
+        squad_rows = None
+        if season == FOCUS_SEASON:
+            try:
+                fm_squad = self.con.execute("""
+                    SELECT f.player_name, f.position_group, f.age, f.goals, f.assists,
+                           f.fotmob_player_id,
+                           pe.player_id AS matched_player_id
+                    FROM team_squad_fotmob f
+                    LEFT JOIN (SELECT fotmob_player_id, max(player_id) AS player_id
+                               FROM player_enrichment WHERE fotmob_player_id IS NOT NULL
+                               GROUP BY fotmob_player_id) pe
+                           ON pe.fotmob_player_id = f.fotmob_player_id
+                    WHERE f.team_id = ?
+                """, [tid]).df()
+            except Exception:                            # noqa: BLE001 -- table not built yet
+                fm_squad = None
+            if fm_squad is not None and not fm_squad.empty:
+                # apps/minutes aren't in FotMob's basic squad payload -- backfill
+                # them from this season's Understat totals for players we can match
+                # (new signings simply show 0, which is honest).
+                mins = self.con.execute(
+                    "SELECT player_id, matches, minutes FROM player_season_stats "
+                    "WHERE team_id = ? AND season = ?", [tid, season]
+                ).df().set_index("player_id")
+                squad_rows = []
+                for r in fm_squad.itertuples():
+                    pid = int(r.matched_player_id) if pd.notna(r.matched_player_id) else None
+                    m = mins.loc[pid] if pid is not None and pid in mins.index else None
+                    squad_rows.append({
+                        "player": r.player_name, "position_group": r.position_group,
+                        "apps": _i(m.matches) if m is not None else None,
+                        "minutes": _i(m.minutes) if m is not None else None,
+                        "goals": _i(r.goals), "assists": _i(r.assists),
+                        "age": _i(r.age), "photo": self.player_photo(r.fotmob_player_id)})
+        if squad_rows is None:
+            squad = self.con.execute("""
+                SELECT pl.player_name, ps.position_group, ps.matches, ps.minutes,
+                       ps.goals, ps.assists, pe.fpid, bio.fotmob_age
+                FROM player_season_stats ps
+                JOIN players pl USING(player_id)
+                LEFT JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                           WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                       ON pe.player_id = ps.player_id
+                LEFT JOIN player_bio bio ON bio.player_id = ps.player_id
+                WHERE ps.team_id = ? AND ps.season = ?
+                ORDER BY ps.minutes DESC
+            """, [tid, season]).df()
+            squad_rows = [{"player": r.player_name, "position_group": r.position_group,
+                           "apps": _i(r.matches), "minutes": _i(r.minutes),
+                           "goals": _i(r.goals), "assists": _i(r.assists),
+                           "age": _i(r.fotmob_age), "photo": self.player_photo(r.fpid)}
+                          for r in squad.itertuples()]
         squad_rows.sort(key=lambda p: (ORDER.get(p["position_group"], 4), -(p["minutes"] or 0)))
         return {
             "team": head[0], "team_code": head[1], "league_key": head[2],
@@ -3041,11 +3126,21 @@ class SoccerDB:
             "capacity": _i(meta[3]) if meta else None,
             "opened": _i(meta[4]) if meta else None,
             "surface": meta[5] if meta else None,
-            "stats": None if not s else {
-                "position": _i(s[0]), "played": _i(s[1]), "wins": _i(s[2]),
-                "draws": _i(s[3]), "losses": _i(s[4]), "goals_for": _i(s[5]),
-                "goals_against": _i(s[6]), "goal_difference": _i(s[7]), "points": _i(s[8]),
-                "xg_for": _r(s[9], 1), "xg_against": _r(s[10], 1), "xpts": _r(s[11], 1)},
+            "stats": None if not s and not live else {
+                "position": _i(live[0]) if live else _i(s[0]),
+                "played": _i(live[1]) if live else _i(s[1]),
+                "wins": _i(live[2]) if live else _i(s[2]),
+                "draws": _i(live[3]) if live else _i(s[3]),
+                "losses": _i(live[4]) if live else _i(s[4]),
+                "goals_for": _i(live[5]) if live else _i(s[5]),
+                "goals_against": _i(live[6]) if live else _i(s[6]),
+                "goal_difference": _i(live[7]) if live else _i(s[7]),
+                "points": _i(live[8]) if live else _i(s[8]),
+                # xG/xPts aren't in FotMob's basic table, and pairing a live record
+                # with a stale season's xG would be misleading -- blank them together.
+                "xg_for": None if live else _r(s[9], 1),
+                "xg_against": None if live else _r(s[10], 1),
+                "xpts": None if live else _r(s[11], 1)},
             "form": self._team_form(head[0], season),
             "results": results,
             "top_scorers": [{"player": r.player_name, "goals": _i(r.goals),

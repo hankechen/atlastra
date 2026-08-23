@@ -1813,6 +1813,16 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, f.read_bytes(), CT.get(f.suffix, "application/octet-stream"))
 
 
+# FotMob's x-mas signing + tls_requests' Go TLS-client binding are not safe under
+# concurrent multi-threaded use (tls_requests already has a known per-request
+# socket-leak quirk in its Go binding -- see memory "live matches"). With four
+# background refreshers now hitting FotMob (live/WC/standings/team-info), calling
+# out concurrently caused an outright hang in testing. Serialize all FotMob HTTP
+# work behind this lock -- each refresher still runs on its own schedule, it just
+# waits its turn for the network call itself.
+_FOTMOB_LOCK = threading.Lock()
+
+
 def _live_refresher():
     """Keep live_matches genuinely live while the server runs: re-scrape SofaScore
     on a loop so the /api/live feed (and the page's 30s poll) shows current scores.
@@ -1828,7 +1838,8 @@ def _live_refresher():
         n_live = 0
         while True:
             try:
-                _, n_live = fm.refresh()
+                with _FOTMOB_LOCK:
+                    _, n_live = fm.refresh()
             except Exception as e:                 # noqa: BLE001
                 print(f"fotmob refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
             time.sleep(LIVE_POLL if n_live else IDLE_POLL)
@@ -1867,11 +1878,46 @@ def _wc_refresher():
     WC_SEASON = os.environ.get("ATLASTRA_WC_SEASON", "2026")
     while True:
         try:
-            n = wc.refresh(WC_SEASON)
+            with _FOTMOB_LOCK:
+                n = wc.refresh(WC_SEASON)
             print(f"WC refresh (FotMob): {n}", flush=True)
         except Exception as e:                         # noqa: BLE001
             print(f"WC refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
         time.sleep(WC_EVERY)
+
+
+def _standings_refresher():
+    """Rebuild team_standings_fotmob (5 top-5-league table calls) on a loop, so
+    league position/record/points stay live between manual Understat pipeline
+    runs. See pipeline/load_standings_fotmob.py and SoccerDB.league_standings."""
+    import time
+    from pipeline import load_standings_fotmob as st
+    STANDINGS_EVERY = int(os.environ.get("ATLASTRA_STANDINGS_EVERY", "1800"))  # 30 min
+    while True:
+        try:
+            with _FOTMOB_LOCK:
+                n = st.refresh()
+            print(f"standings refresh (FotMob): {n} team-rows", flush=True)
+        except Exception as e:                         # noqa: BLE001
+            print(f"standings refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(STANDINGS_EVERY)
+
+
+def _team_info_refresher():
+    """Rebuild team_meta (manager/venue) and team_squad_fotmob (current roster,
+    transfers included) on a loop -- ~96 throttled FotMob calls (~40s), so this
+    runs far less often than the standings/live refreshers. See
+    pipeline/load_team_info.py and SoccerDB.web_team."""
+    import time
+    from pipeline import load_team_info as ti
+    TEAM_INFO_EVERY = int(os.environ.get("ATLASTRA_TEAM_INFO_EVERY", str(6 * 3600)))  # 6h
+    while True:
+        try:
+            with _FOTMOB_LOCK:
+                ti.load_team_info()
+        except Exception as e:                         # noqa: BLE001
+            print(f"team info refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(TEAM_INFO_EVERY)
 
 
 def _preview_warmer():
@@ -1931,6 +1977,10 @@ if __name__ == "__main__":
     if FOTMOB:                                     # WC hub straight from FotMob, no Mac
         threading.Thread(target=_wc_refresher, daemon=True).start()
         print("WC refresher: on (FotMob)")
+        threading.Thread(target=_standings_refresher, daemon=True).start()
+        print("standings refresher: on (FotMob)")
+        threading.Thread(target=_team_info_refresher, daemon=True).start()
+        print("team info refresher: on (FotMob, manager/venue/squad)")
     if live_feed.CACHE_MODE:
         threading.Thread(target=_preview_warmer, daemon=True).start()
         print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")
