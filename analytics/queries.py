@@ -2713,6 +2713,36 @@ class SoccerDB:
                 [season]).fetchone()
             return {"player": r[0], "value": round(float(r[1]), rnd) if rnd else int(r[1]),
                     "photo": self.player_photo(r[3]), "team_logo": self.team_logo(r[2])} if r else None
+
+        # Current season: use FotMob's live top-5-leagues leaderboard
+        # (pipeline/load_standings_fotmob) instead of v_player_season_stats,
+        # which is Understat-sourced and only as fresh as the last manual
+        # pipeline run. All-or-nothing like league_standings: only switch over
+        # once the live table has actually been populated, rather than mixing
+        # a live leader in for one stat and a stale one for another.
+        if season == FOCUS_SEASON:
+            try:
+                has_live = self.con.execute(
+                    "SELECT EXISTS(SELECT 1 FROM player_stat_leaders_fotmob)").fetchone()[0]
+            except Exception:                              # noqa: BLE001 -- table not built yet
+                has_live = False
+            if has_live:
+                def live_top(stat_key, rnd=0):
+                    r = self.con.execute(
+                        "SELECT player_name, value, fotmob_team_id, fotmob_player_id "
+                        "FROM player_stat_leaders_fotmob WHERE stat_key = ? "
+                        "ORDER BY value DESC LIMIT 1", [stat_key]).fetchone()
+                    return {"player": r[0], "value": round(r[1], rnd) if rnd else int(r[1]),
+                            "photo": self.player_photo(r[3]),
+                            "team_logo": FOTMOB_TEAM_IMG.format(int(r[2])) if r[2] else None
+                            } if r else None
+                return {
+                    "top_scorer": live_top("top_scorer"), "top_assists": live_top("top_assists"),
+                    "most_xg": live_top("most_xg", rnd=1), "most_chances": live_top("most_chances"),
+                    # FotMob has no season-total dribble count at league level, only a
+                    # per-90 rate -- an honest redefinition of "Most Dribbles", not a bug.
+                    "most_dribbles": live_top("most_dribbles", rnd=1),
+                }
         return {
             "top_scorer": top("goals"), "top_assists": top("assists"),
             "most_xg": top("xg", rnd=1), "most_chances": top("chances_created"),
