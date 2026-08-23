@@ -1905,12 +1905,17 @@ def _standings_refresher():
 
 def _team_info_refresher():
     """Rebuild team_meta (manager/venue) and team_squad_fotmob (current roster,
-    transfers included) on a loop -- ~96 throttled FotMob calls (~40s), so this
-    runs far less often than the standings/live refreshers. See
-    pipeline/load_team_info.py and SoccerDB.web_team."""
+    transfers included) on a loop -- ~96 throttled FotMob calls (a couple minutes
+    on the EC2 box), so this runs far less often than the standings/live
+    refreshers. See pipeline/load_team_info.py and SoccerDB.web_team."""
     import time
     from pipeline import load_team_info as ti
     TEAM_INFO_EVERY = int(os.environ.get("ATLASTRA_TEAM_INFO_EVERY", str(6 * 3600)))  # 6h
+    # Every refresher grabs _FOTMOB_LOCK on startup; this one is by far the
+    # slowest (minutes, not seconds), so without a head start it can win the
+    # race and hold the lock long enough to stall live scores right after every
+    # restart. Let the fast refreshers (live, standings) go first.
+    time.sleep(int(os.environ.get("ATLASTRA_TEAM_INFO_DELAY", "120")))
     while True:
         try:
             with _FOTMOB_LOCK:
