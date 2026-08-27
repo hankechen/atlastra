@@ -176,13 +176,56 @@ found), say so plainly and briefly -- don't guess or apologize at length.
 - Cite the specific numbers from the data naturally, as a knowledgeable analyst would."""
 
 
+def _extract_obj(text: str) -> dict | None:
+    """Pull the first top-level {...} JSON object out of a model reply.
+
+    Depth-aware (unlike webapp.gemini.extract_json's naive first-'['-to-last-']'
+    heuristic), because the routing reply's "args" often nests an array, e.g.
+    {"tool": "compare_players", "args": {"names": ["A", "B"]}} -- extract_json's
+    bracket search matches the FIRST '[' to the LAST ']' in the whole reply,
+    which grabs just ["A", "B"] as if it were the outer object."""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("```", 2)[1] if "```" in t[3:] else t[3:]
+        t = t[4:] if t[:4].lower() == "json" else t
+    start = t.find("{")
+    if start == -1:
+        return None
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(t)):
+        c = t[i]
+        if in_str:
+            if esc:
+                esc = False          # this char is escaped -- consume it, reset
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(t[start:i + 1])
+                except (json.JSONDecodeError, ValueError):
+                    return None
+                return obj if isinstance(obj, dict) else None
+    return None
+
+
 def _route(question: str) -> dict:
     from webapp import gemini
     tool_list = "\n".join(f"- {name}: {t['desc']} Params: {t['params']}"
                           for name, t in TOOLS.items())
     prompt = SYSTEM_ROUTE.format(tool_list=tool_list) + f"\n\nQuestion: {question}"
     raw = gemini.generate(prompt, temperature=0.1)
-    return gemini.extract_json(raw) or {}
+    return _extract_obj(raw) or {}
 
 
 def _synthesize(question: str, data) -> str:
@@ -192,9 +235,14 @@ def _synthesize(question: str, data) -> str:
     return (gemini.generate(prompt, temperature=0.3) or "").strip()
 
 
-def ask(question: str) -> dict:
+def ask(question: str, db_read_only: bool = True) -> dict:
     """Answer a natural-language question about the site's data.
-    Returns {"answer": str, "tool_used": str | None}."""
+    Returns {"answer": str, "tool_used": str | None}.
+
+    `db_read_only` MUST match the mode the server's own DB pool already uses
+    (its DB_READ_ONLY) -- DuckDB refuses a second in-process connection to the
+    same file with a different read_only config than one already open (same
+    gotcha as pipeline/load_team_info.py)."""
     question = (question or "").strip()[:MAX_QUESTION_LEN]
     if not question:
         return {"answer": "Ask me something about a player, team, or stat leaders "
@@ -216,9 +264,10 @@ def ask(question: str) -> dict:
 
     from analytics.queries import SoccerDB
     try:
-        with SoccerDB(read_only=True) as db:
+        with SoccerDB(read_only=db_read_only) as db:
             data = TOOLS[tool_name]["fn"](db, decision.get("args") or {})
     except Exception as e:                                # noqa: BLE001
+        print(f"ask_agent tool '{tool_name}': {type(e).__name__}: {str(e)[:200]}", flush=True)
         data = {"error": f"{type(e).__name__} while fetching data"}
 
     answer = _synthesize(question, data)

@@ -1540,7 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
             if not question.strip():
                 self._json({"error": "Ask a question."}, 400)
                 return
-            self._json(ask_agent.ask(question))
+            self._json(ask_agent.ask(question, db_read_only=DB_READ_ONLY))
             return
         if u.path == "/api/ingest/live":               # live feed pushed from a non-blocked scraper
             if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
