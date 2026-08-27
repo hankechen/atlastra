@@ -594,6 +594,7 @@ const ICONS = {
   trend: '<path d="M4 16.5l5-5 3.5 3.5L20 7.5"/><path d="M15 7.5h5v5"/>',
   plan: '<path d="M4 6h7M4 12h13M4 18h9"/><circle cx="19" cy="6" r="2"/><circle cx="20" cy="18" r="2"/>',
   buildplayer: '<circle cx="10.5" cy="10" r="4"/><path d="M3.5 20.5c0-3.7 3.1-5.6 7-5.6 1 0 1.9.1 2.7.4"/><path d="M18 13.5v6M15 16.5h6"/>',
+  ask: '<path d="M4 5.5h16v10.5H9.5L5.5 20v-4H4z"/><circle cx="8.3" cy="10.7" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10.7" r="1" fill="currentColor" stroke="none"/><circle cx="15.7" cy="10.7" r="1" fill="currentColor" stroke="none"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -617,6 +618,7 @@ const NAV_MAIN = [
   ['Tactics Lab', 'tactics', '/tactics.html'],
   ['Blog', 'blog', '/blog.html'],
   ['Search', 'search', '/search.html'],
+  ['Ask Atlastra', 'ask', '/ask.html'],
 ];
 const NAV_ANALYTICS = [
   // leaderboards

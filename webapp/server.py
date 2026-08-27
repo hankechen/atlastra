@@ -78,6 +78,7 @@ from webapp import blog  # noqa: E402
 from webapp import tactics  # noqa: E402
 from webapp import shortlink  # noqa: E402
 from webapp import build_player  # noqa: E402
+from webapp import ask_agent  # noqa: E402
 
 _TAC_SQUAD: dict = {}                                     # team -> (expiry, squad) cache
 # Club → FotMob team id (authoritative live roster + correct player-photo ids).
@@ -1533,6 +1534,13 @@ class Handler(BaseHTTPRequestHandler):
             res = shortlink.shorten(str(b.get("target", ""))[:32],
                                     str(b.get("payload", ""))[:shortlink.MAX_PAYLOAD + 1])
             self._json(res, 400 if res.get("error") else 200)
+            return
+        if u.path == "/api/ask":                       # "Ask Atlastra" NL Q&A over the site's data
+            question = str(b.get("question") or "")[:300]
+            if not question.strip():
+                self._json({"error": "Ask a question."}, 400)
+                return
+            self._json(ask_agent.ask(question))
             return
         if u.path == "/api/ingest/live":               # live feed pushed from a non-blocked scraper
             if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
