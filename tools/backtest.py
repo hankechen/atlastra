@@ -124,6 +124,58 @@ def backtest_odds(db, season):
         print(f"     {b*10:>2}-{b*10+10:>3}%   n={len(v):>4}   actual {100*sum(v)/len(v):>5.1f}%")
 
 
+def backtest_ensemble(db, season):
+    """Does blending the card-based Tactics Lab engine with ml.train_match_outcome's
+    independent results-only model actually beat either alone? Neither model is touched
+    here -- this only READS Tactics Lab's existing prediction path (T._metrics/_win_probs,
+    unchanged) and ml.train_match_outcome's held-out-only model (fit_held_out(), which
+    trains through 2223 same as that module's own reported metrics -- never the seasons
+    scored here, so this is a fair comparison, not the optimistic in-sample number the
+    final refit-on-everything artifact would give)."""
+    from ml.train_match_outcome import fit_held_out
+
+    rows = _matches(db, season)
+    units = _squads(db, rows)
+    D = T.DEFAULT_TACTICS
+    model, df, X, _y, _tr, te, classes, *_ = fit_held_out()
+    Pte = model.predict_proba(X[te].values)
+    dft = df[te].reset_index(drop=True)
+    key_to_p = {(r.season, int(r.home_team_id), int(r.away_team_id)): Pte[i]
+                for i, r in enumerate(dft.itertuples())}
+
+    card, results, ensemble, actual = [], [], [], []
+    for r in rows:
+        u, ou = units.get(r["home"]), units.get(r["away"])
+        if not u or not ou:
+            continue
+        hid, aid = db.find_team_id(r["home"]), db.find_team_id(r["away"])
+        p_res = key_to_p.get((season, hid, aid))
+        if p_res is None:
+            continue                                       # not in the held-out window
+        act = "H" if r["gf"] > r["ga"] else ("D" if r["gf"] == r["ga"] else "A")
+        actual.append(act)
+        xh = T._metrics(u, D, ou, D)["xg"] * T._UCL_HOME_XG
+        xa = T._metrics(ou, D, u, D)["xg"] * T._UCL_AWAY_XG
+        w = T._win_probs(xh, xa, T._XG_SHAPE)
+        pc = {"H": w["home"] / 100, "D": w["draw"] / 100, "A": w["away"] / 100}
+        pr = dict(zip(classes, p_res))
+        card.append((pc["H"], pc["D"], pc["A"], act))
+        results.append((pr["H"], pr["D"], pr["A"], act))
+        ph, pd_, pa = (pc["H"] + pr["H"]) / 2, (pc["D"] + pr["D"]) / 2, (pc["A"] + pr["A"]) / 2
+        ensemble.append((ph, pd_, pa, act))
+    if not card:
+        print(f"\n=== ensemble, {season} ===\n  no matches with both a buildable XI and "
+              "results-model coverage (is this season inside the ML model's held-out window?)")
+        return
+    print(f"\n=== ensemble: Tactics Lab (card) + results-only ML, {season} ===")
+    print(f"  {len(card)} matches scorable by both\n")
+    print(f"  {'model':<32}{'log loss':>10}{'Brier':>9}{'top-pick':>10}")
+    for label, preds in (("Tactics Lab (card)", card), ("results-only ML", results),
+                         ("ensemble (50/50 avg)", ensemble)):
+        ll, br, acc = _score(preds)
+        print(f"  {label:<32}{ll:>10.4f}{br:>9.4f}{acc:>9.1f}%")
+
+
 def backtest_points(db, season):
     print(f"\n=== season points projection, {season} ===")
     preds, errs = [], []
@@ -330,6 +382,8 @@ def main():
     ap.add_argument("--weaknesses", action="store_true", help="also test the weakness rules")
     ap.add_argument("--skip-live", action="store_true")
     ap.add_argument("--wc", action="store_true", help="also check the World Cup sim")
+    ap.add_argument("--ensemble", action="store_true",
+                    help="also check blending in ml.train_match_outcome's results-only model")
     args = ap.parse_args()
     with SoccerDB(read_only=True) as db:
         if not args.skip_odds:
@@ -338,6 +392,8 @@ def main():
             backtest_points(db, args.season)
         if not args.skip_live:
             backtest_live(db)
+        if args.ensemble:
+            backtest_ensemble(db, args.season)
         if args.wc:
             backtest_wc(db)
         if args.weaknesses:
