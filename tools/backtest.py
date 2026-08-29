@@ -124,26 +124,32 @@ def backtest_odds(db, season):
         print(f"     {b*10:>2}-{b*10+10:>3}%   n={len(v):>4}   actual {100*sum(v)/len(v):>5.1f}%")
 
 
-def backtest_ensemble(db, season):
-    """Does blending the card-based Tactics Lab engine with ml.train_match_outcome's
-    independent results-only model actually beat either alone? Neither model is touched
-    here -- this only READS Tactics Lab's existing prediction path (T._metrics/_win_probs,
-    unchanged) and ml.train_match_outcome's held-out-only model (fit_held_out(), which
-    trains through 2223 same as that module's own reported metrics -- never the seasons
-    scored here, so this is a fair comparison, not the optimistic in-sample number the
-    final refit-on-everything artifact would give)."""
+def _ensemble_probs(db):
+    """The pieces every ensemble check shares: the results-only model's held-out
+    predictions, keyed by (season, home_team_id, away_team_id). Neither
+    webapp/tactics.py nor webapp/live_feed_fotmob.py is touched anywhere in this
+    file -- fit_held_out() trains through 2223, same cutoff that module's own
+    reported metrics use, so scoring it here on 2324+ is a fair comparison, not
+    the optimistic in-sample number the final refit-on-everything artifact would
+    give."""
     from ml.train_match_outcome import fit_held_out
-
-    rows = _matches(db, season)
-    units = _squads(db, rows)
-    D = T.DEFAULT_TACTICS
     model, df, X, _y, _tr, te, classes, *_ = fit_held_out()
     Pte = model.predict_proba(X[te].values)
     dft = df[te].reset_index(drop=True)
     key_to_p = {(r.season, int(r.home_team_id), int(r.away_team_id)): Pte[i]
                 for i, r in enumerate(dft.itertuples())}
+    return key_to_p, classes
 
-    card, results, ensemble, actual = [], [], [], []
+
+def _card_ml_pairs(db, season, key_to_p, classes):
+    """(card_probs, ml_probs, actual) for every match in `season` that both models can
+    score -- a buildable auto-XI for the card engine AND inside the ML model's held-out
+    window. Reused by both backtest_ensemble (one season) and backtest_ensemble_weight
+    (validation + test seasons), so the matching logic can't drift between them."""
+    rows = _matches(db, season)
+    units = _squads(db, rows)
+    D = T.DEFAULT_TACTICS
+    card, ml_p, actual = [], [], []
     for r in rows:
         u, ou = units.get(r["home"]), units.get(r["away"])
         if not u or not ou:
@@ -153,16 +159,29 @@ def backtest_ensemble(db, season):
         if p_res is None:
             continue                                       # not in the held-out window
         act = "H" if r["gf"] > r["ga"] else ("D" if r["gf"] == r["ga"] else "A")
-        actual.append(act)
         xh = T._metrics(u, D, ou, D)["xg"] * T._UCL_HOME_XG
         xa = T._metrics(ou, D, u, D)["xg"] * T._UCL_AWAY_XG
         w = T._win_probs(xh, xa, T._XG_SHAPE)
-        pc = {"H": w["home"] / 100, "D": w["draw"] / 100, "A": w["away"] / 100}
-        pr = dict(zip(classes, p_res))
-        card.append((pc["H"], pc["D"], pc["A"], act))
-        results.append((pr["H"], pr["D"], pr["A"], act))
-        ph, pd_, pa = (pc["H"] + pr["H"]) / 2, (pc["D"] + pr["D"]) / 2, (pc["A"] + pr["A"]) / 2
-        ensemble.append((ph, pd_, pa, act))
+        card.append({"H": w["home"] / 100, "D": w["draw"] / 100, "A": w["away"] / 100})
+        ml_p.append(dict(zip(classes, p_res)))
+        actual.append(act)
+    return card, ml_p, actual
+
+
+def _blend_score(card, ml_p, actual, w):
+    """log loss/Brier/top-pick for a fixed card-side weight w (1-w on the ML model)."""
+    preds = [(w * c["H"] + (1 - w) * m["H"], w * c["D"] + (1 - w) * m["D"],
+              w * c["A"] + (1 - w) * m["A"], a)
+             for c, m, a in zip(card, ml_p, actual)]
+    return _score(preds)
+
+
+def backtest_ensemble(db, season):
+    """Does blending the card-based Tactics Lab engine with ml.train_match_outcome's
+    independent results-only model actually beat either alone, at a naive 50/50 weight?
+    (backtest_ensemble_weight below checks whether 50/50 is even the RIGHT weight.)"""
+    key_to_p, classes = _ensemble_probs(db)
+    card, ml_p, actual = _card_ml_pairs(db, season, key_to_p, classes)
     if not card:
         print(f"\n=== ensemble, {season} ===\n  no matches with both a buildable XI and "
               "results-model coverage (is this season inside the ML model's held-out window?)")
@@ -170,9 +189,57 @@ def backtest_ensemble(db, season):
     print(f"\n=== ensemble: Tactics Lab (card) + results-only ML, {season} ===")
     print(f"  {len(card)} matches scorable by both\n")
     print(f"  {'model':<32}{'log loss':>10}{'Brier':>9}{'top-pick':>10}")
-    for label, preds in (("Tactics Lab (card)", card), ("results-only ML", results),
-                         ("ensemble (50/50 avg)", ensemble)):
-        ll, br, acc = _score(preds)
+    for label, w in (("Tactics Lab (card)", 1.0), ("results-only ML", 0.0),
+                     ("ensemble (50/50 avg)", 0.5)):
+        ll, br, acc = _blend_score(card, ml_p, actual, w)
+        print(f"  {label:<32}{ll:>10.4f}{br:>9.4f}{acc:>9.1f}%")
+
+
+VALIDATION_SEASONS = ("2324", "2425")
+FINAL_TEST_SEASON = "2526"
+
+
+def backtest_ensemble_weight(db):
+    """Don't just assume 50/50 -- fit the blend weight, and report the honest result on
+    a season the search never saw. 2324+2425 is the VALIDATION slice (search the
+    card-model weight w over [0, 1]); 2526 is the TEST slice, touched only once, after
+    the weight is already fixed -- so the headline number isn't inflated by picking the
+    weight and grading it on the same matches it was picked from."""
+    key_to_p, classes = _ensemble_probs(db)
+    val_card, val_ml, val_act = [], [], []
+    for s in VALIDATION_SEASONS:
+        c, m, a = _card_ml_pairs(db, s, key_to_p, classes)
+        val_card += c
+        val_ml += m
+        val_act += a
+    if not val_card:
+        print("\n=== ensemble weight search ===\n  no validation matches scorable")
+        return
+    test_card, test_ml, test_act = _card_ml_pairs(db, FINAL_TEST_SEASON, key_to_p, classes)
+    if not test_card:
+        print(f"\n=== ensemble weight search ===\n  no {FINAL_TEST_SEASON} test matches scorable")
+        return
+
+    print(f"\n=== ensemble weight search — validation: {'+'.join(VALIDATION_SEASONS)} "
+          f"({len(val_card)} matches) ===")
+    print(f"  {'card weight':>12}{'log loss':>10}{'Brier':>9}{'top-pick':>10}")
+    grid = [round(x * 0.05, 2) for x in range(21)]
+    scored = {w: _blend_score(val_card, val_ml, val_act, w) for w in grid}
+    best_w = min(scored, key=lambda w: scored[w][0])
+    shown = sorted({0.0, 0.25, 0.5, 0.75, 1.0, best_w})
+    for w in shown:
+        ll, br, acc = scored[w]
+        print(f"  {w:>12.2f}{ll:>10.4f}{br:>9.4f}{acc:>9.1f}%"
+              + ("  <- best" if w == best_w else ""))
+    print(f"\n  best card-side weight on validation: {best_w:.2f} "
+          f"(results-only weight {1 - best_w:.2f})")
+
+    print(f"\n=== final test — {FINAL_TEST_SEASON} ({len(test_card)} matches, NEVER used "
+          "to pick the weight) ===")
+    print(f"  {'model':<32}{'log loss':>10}{'Brier':>9}{'top-pick':>10}")
+    for label, w in (("card-only", 1.0), ("results-only ML", 0.0), ("naive 50/50", 0.5),
+                     (f"tuned blend (card={best_w:.2f})", best_w)):
+        ll, br, acc = _blend_score(test_card, test_ml, test_act, w)
         print(f"  {label:<32}{ll:>10.4f}{br:>9.4f}{acc:>9.1f}%")
 
 
@@ -384,6 +451,8 @@ def main():
     ap.add_argument("--wc", action="store_true", help="also check the World Cup sim")
     ap.add_argument("--ensemble", action="store_true",
                     help="also check blending in ml.train_match_outcome's results-only model")
+    ap.add_argument("--ensemble-weight", action="store_true",
+                    help="fit the blend weight on 2324+2425, report the honest result on 2526")
     args = ap.parse_args()
     with SoccerDB(read_only=True) as db:
         if not args.skip_odds:
@@ -394,6 +463,8 @@ def main():
             backtest_live(db)
         if args.ensemble:
             backtest_ensemble(db, args.season)
+        if args.ensemble_weight:
+            backtest_ensemble_weight(db)
         if args.wc:
             backtest_wc(db)
         if args.weaknesses:
