@@ -1035,8 +1035,44 @@ CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
       ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
-# Live match-detail endpoints proxy SofaScore (server-side TLS bypass) and never
-# touch the warehouse, so they bypass the SoccerDB context manager below.
+_ML_PRED_CACHE: dict = {}                                 # (home_tid, away_tid) -> (expiry, pred)
+
+
+def _ml_match_prediction(eid: int):
+    """The independent results-only ML model's H/D/A for this fixture (ml/train_match_outcome
+    .py), or None if it doesn't apply. Backtested to improve on the card-based Tactics Lab
+    engine's own prediction when blended 50/50 -- see tools/backtest.py --ensemble and memory
+    match-outcome-ml.md -- so /api/match/prediction blends it in below. webapp/tactics.py and
+    live_feed_fotmob.py are untouched; this only reads FotMob's header + a team_logos lookup.
+    Club vs club only (the model has no international-team history); cached 6h per team
+    pairing since it only changes when someone manually retrains the model."""
+    h = live_feed.header(eid)
+    if not h.get("available") or h.get("home_national") or h.get("away_national"):
+        return None
+    try:
+        with SoccerDB(read_only=DB_READ_ONLY) as db:
+            hid = db.con.execute("SELECT team_id FROM team_logos WHERE fotmob_team_id = ?",
+                                 [h.get("home_id")]).fetchone()
+            aid = db.con.execute("SELECT team_id FROM team_logos WHERE fotmob_team_id = ?",
+                                 [h.get("away_id")]).fetchone()
+            if not hid or not hid[0] or not aid or not aid[0]:
+                return None
+            key = (int(hid[0]), int(aid[0]))
+            hit = _ML_PRED_CACHE.get(key)
+            if hit and hit[0] > time.time():
+                return hit[1]
+            from ml.train_match_outcome import predict_fixture
+            p = predict_fixture(db.con, *key)
+            _ML_PRED_CACHE[key] = (time.time() + 6 * 3600, p)
+            return p
+    except Exception as e:                                 # noqa: BLE001
+        print(f"ml match prediction: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        return None
+
+
+# Live match-detail endpoints proxy SofaScore (server-side TLS bypass) and never touch the
+# warehouse, so they bypass the SoccerDB context manager below -- except /api/match/prediction,
+# which opens one scoped connection to blend in _ml_match_prediction() above.
 def match_api(path: str, q: dict) -> dict:
     eid = int(q.get("id", [0])[0])
     if path == "/api/match":
@@ -1114,6 +1150,22 @@ def match_api(path: str, q: dict) -> dict:
         d = live_feed.prediction(eid)
         if d.get("available"):
             d["score"] = live_feed.score_prediction(eid, d.get("consensus"))
+            # Blend in the independent results-only ML model where it applies. Skip
+            # knockout ties: _model() has already resolved their draw prob to exactly
+            # 0 (a knockout can't finish level), and the ML model -- which always
+            # gives a nonzero P(draw) -- would wrongly reintroduce one.
+            if d.get("source") == "fitted" and d["consensus"].get("draw", 0) > 0:
+                p_ml = _ml_match_prediction(eid)
+                if p_ml:
+                    c = d["consensus"]
+                    fh = (c["home"] / 100 + p_ml["H"]) / 2
+                    fd = (c["draw"] / 100 + p_ml["D"]) / 2
+                    fa = (c["away"] / 100 + p_ml["A"]) / 2
+                    home_pct, draw_pct = round(fh * 100), round(fd * 100)
+                    d["consensus"] = {"home": home_pct, "draw": draw_pct,
+                                      "away": 100 - home_pct - draw_pct}
+                    d["predicted"] = max(d["consensus"], key=d["consensus"].get)
+                    d["source"] = "fitted+ml"
         return d
     raise KeyError(path)
 

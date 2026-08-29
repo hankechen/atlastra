@@ -245,14 +245,17 @@ async function loadPrediction() {
     </section>` : '';
   // Atlastra model (no bookmaker feed) vs bookmaker-consensus rendering
   const isModel = !(d.books && d.books.length);
-  const fitted = d.source === 'fitted';
-  const srcLabel = isModel ? (fitted ? 'Atlastra model · fitted' : 'Atlastra model') : `${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}`;
+  const blended = d.source === 'fitted+ml';
+  const fitted = blended || d.source === 'fitted';
+  const srcLabel = isModel ? (blended ? 'Atlastra model · fitted + ML' : fitted ? 'Atlastra model · fitted' : 'Atlastra model') : `${d.n_books} bookmaker${d.n_books > 1 ? 's' : ''}`;
   const oddsSection = (d.books && d.books.length) ? `
       <div class="card-h" style="margin-top:18px"><h3>Bookmaker odds <span class="muted" style="font-weight:400">(decimal)</span></h3></div>
       <div class="ltbl-wrap"><table class="ltbl">
         <thead><tr><th class="tl">Source</th><th>${esc(teams.home)}</th><th>Draw</th><th>${esc(teams.away)}</th></tr></thead>
         <tbody>${oddsRows}</tbody></table></div>
       <div class="placeholder-note" style="margin-top:10px">Win probabilities are implied from bookmaker 1X2 odds with the margin removed, averaged across sources. Not betting advice.</div>`
+    : blended
+    ? `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model, blended: the fitted squad-strength engine (attack/midfield/defence/goalkeeping from each side's players, <b>fitted on 3,358 real team-matches</b>) averaged 50/50 with a second, independent model trained purely on each side's result history — form, goals, an Elo rating. Blending the two measurably beats either alone (log loss 0.99 vs 1.00 fitted-only, on real 2025/26 results). Not betting advice.</div>`
     : fitted
     ? `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: each side's squad is scored into attack, midfield, defence and goalkeeping strength, and a goals model <b>fitted on 3,358 real team-matches</b> turns the two into expected goals. Scored against three full seasons of results, it beats a home-advantage-only baseline (log loss 1.00 vs 1.07). Same engine as the Tactics Lab. Not betting advice.</div>`
     : `<div class="placeholder-note" style="margin-top:14px">Atlastra's own model: win probabilities from each side's strength — FIFA ranking for nations, recent form (results + goal difference) for clubs — with a small home edge, run through a Poisson goals model. Used where we don't hold enough squad data to run the fitted engine. Not betting advice.</div>`;
