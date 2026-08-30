@@ -845,6 +845,25 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .pm-heat canvas{width:100%;height:auto;border-radius:8px;display:block}
 .pm-full{display:block;text-align:center;margin-top:14px}
 
+/* fan match ratings ("Rate Players" -- up to both starting XIs in one submission) */
+.rt-card{max-width:480px}
+.rt-list{max-height:56vh;overflow-y:auto;margin:4px -4px 0;padding:0 4px}
+.rt-side-h{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  margin:14px 0 6px;padding-top:10px;border-top:1px solid var(--border)}
+.rt-side-h:first-child{margin-top:0;padding-top:0;border-top:none}
+.rt-row{padding:8px 0;border-bottom:1px solid var(--border)}
+.rt-row:last-child{border-bottom:none}
+.rt-name{font-size:13.5px;font-weight:600;margin-bottom:6px}
+.rt-avg{color:var(--muted);font-weight:400;font-size:12px}
+.rt-btns{display:grid;grid-template-columns:repeat(10,1fr);gap:4px}
+.rt-btns button{background:var(--card2);border:1px solid var(--border);border-radius:6px;color:var(--text);
+  font-size:12px;font-weight:600;padding:5px 0;cursor:pointer}
+.rt-btns button:hover{border-color:var(--accent)}
+.rt-btns button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+.rt-foot{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:14px;
+  padding-top:14px;border-top:1px solid var(--border)}
+.rt-err{color:#e2725b;font-size:12px;font-weight:600}
+
 /* pitch + shot map */
 .pitch-wrap{padding:8px 0}
 .pitch-svg{width:100%;height:auto;background:#0e1f17;border-radius:10px}

@@ -363,6 +363,7 @@ function subsCol(s, label) {
 
 // ---- player match-stats modal (opened from a lineup chip / sub) ----
 let _luStats = null, _luNames = {}, _luAtlas = {}, _luTourn = {}, _luSub = {};  // SofaScore id -> stats / name / {rating,est} / tournament G-A / {in,out} sub minutes
+let _luXI = { home: [], away: [] };  // this match's two starting XIs, for the "rate players" overlay
 async function ensureLineupStats() {
   if (_luStats) return _luStats;
   const d = await A('/api/match/player-stats');
@@ -445,6 +446,77 @@ async function openPlayerModal(id) {
     else if (cv) cv.closest('.pm-heat').innerHTML = '<div class="placeholder-note">No heatmap for this player.</div>';
   } catch { /* heatmap optional */ }
 }
+
+// ---- fan ratings: rate a team's XI (or both, 22 players) in one submission ----
+async function openRatingsModal(homeName, awayName) {
+  if (Auth.user == null) { try { await Auth.me(); } catch { /* guest */ } }
+  const wrap = document.createElement('div');
+  wrap.className = 'pm-overlay';
+  const side = (label, xi) => !xi.length ? '' : `<div class="rt-side-h">${esc(label)}</div>` + xi.map((p) => `
+      <div class="rt-row" data-fid="${p.id}">
+        <div class="rt-name">${p.number != null ? esc(p.number) + ' · ' : ''}${esc(p.name)}
+          <span class="rt-avg" id="rt-avg-${p.id}"></span></div>
+        <div class="rt-btns">${Array.from({ length: 10 }, (_, i) => i + 1)
+          .map((v) => `<button type="button" data-v="${v}">${v}</button>`).join('')}</div>
+      </div>`).join('');
+  wrap.innerHTML = `<div class="pm-card rt-card">
+      <button class="pm-x" aria-label="Close">×</button>
+      <div class="pm-head"><div class="pm-headtxt"><div class="pm-nm">⭐ Rate Players</div>
+        <div class="pm-sub">Tap a score (1-10) for as many players as you like, then submit.</div></div></div>
+      <div class="rt-list" id="rtList">${side(homeName, _luXI.home)}${side(awayName, _luXI.away)}</div>
+      <div class="rt-foot">
+        <span class="rt-err" id="rtErr"></span>
+        <button class="btn btn-primary" id="rtSubmit">Submit Ratings</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  wrap.querySelector('.pm-x').onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  document.addEventListener('keydown', onKey);
+
+  const picks = {};                                       // fotmob_player_id -> chosen rating
+  wrap.querySelector('#rtList').addEventListener('click', (e) => {
+    const btn = e.target.closest('.rt-btns button');
+    if (!btn) return;
+    const row = btn.closest('.rt-row');
+    picks[row.dataset.fid] = +btn.dataset.v;
+    row.querySelectorAll('.rt-btns button').forEach((b) => b.classList.toggle('sel', b === btn));
+  });
+
+  // community averages + the viewer's own prior rating, if any -- a nice-to-have,
+  // so a failure here shouldn't block rating
+  try {
+    const r = await api('/api/match/ratings?id=' + EID);
+    for (const fid in r) {
+      const av = wrap.querySelector('#rt-avg-' + fid);
+      if (av) av.textContent = `· ${r[fid].avg} (${r[fid].count})`;
+      if (r[fid].mine != null) {
+        picks[fid] = r[fid].mine;
+        wrap.querySelector(`.rt-row[data-fid="${fid}"] .rt-btns button[data-v="${r[fid].mine}"]`)
+          ?.classList.add('sel');
+      }
+    }
+  } catch { /* averages optional */ }
+
+  wrap.querySelector('#rtSubmit').onclick = async () => {
+    if (!Auth.user) { close(); openAuthModal(); return; }
+    const ratings = Object.entries(picks).map(([fotmob_player_id, rating]) =>
+      ({ fotmob_player_id: +fotmob_player_id, rating }));
+    const err = wrap.querySelector('#rtErr'), btn = wrap.querySelector('#rtSubmit');
+    if (!ratings.length) { err.textContent = 'Pick at least one rating first.'; return; }
+    btn.disabled = true; btn.textContent = 'Saving…'; err.textContent = '';
+    try {
+      await apiPost('/api/match/rate', { event_id: +EID, ratings });
+      btn.textContent = '✓ Saved';
+      setTimeout(close, 900);
+    } catch (e) {
+      err.textContent = e.message || 'Could not save.';
+      btn.disabled = false; btn.textContent = 'Submit Ratings';
+    }
+  };
+}
 async function loadLineups(isRefresh) {
   const live = tabGuard();
   const d = await A('/api/match/lineups');
@@ -458,6 +530,7 @@ async function loadLineups(isRefresh) {
     for (const p of [...(side?.starting_xi || []), ...(side?.substitutes || [])])
       if (p.id != null) { _luNames[p.id] = p.name; _luAtlas[p.id] = { rating: p.atlas_rating, est: p.atlas_est }; _luTourn[p.id] = p.tourn || null; _luSub[p.id] = { in: p.subbed_in, out: p.subbed_out }; }
   const hx = d.home?.starting_xi || [], ax = d.away?.starting_xi || [];
+  _luXI = { home: hx.filter((p) => p.id != null), away: ax.filter((p) => p.id != null) };
   const hRows = parseFormation(d.home?.formation, hx.length);
   const aRows = parseFormation(d.away?.formation, ax.length);
   // Draw the pitch as soon as the lineup arrives -- do NOT block it on the per-player
@@ -467,8 +540,12 @@ async function loadLineups(isRefresh) {
   const paint = () => {
     if (!live()) return;                                          // user switched tabs mid-load
     // Once the match is over the stats are final, so there's nothing to refresh --
-    // drop the "Refresh stats" button (and its now-purposeless bar) for finished games.
-    const bar = head?.status === 'finished' ? '' : `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
+    // drop the "Refresh stats" button, and offer fan ratings instead (only meaningful
+    // once the players have actually played).
+    const bar = head?.status === 'finished'
+      ? (_luXI.home.length || _luXI.away.length
+          ? `<div class="lp-refresh-bar"><span></span><button class="btn btn-primary btn-sm" id="lpRate">⭐ Rate Players</button></div>` : '')
+      : `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
       new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       }</span><button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
     if (hRows && aRows) {
@@ -493,6 +570,8 @@ async function loadLineups(isRefresh) {
     }
     const rb = document.getElementById('lpReload');
     if (rb) rb.onclick = async () => { rb.disabled = true; rb.textContent = '↻ Refreshing…'; await loadLineups(true); };
+    const rt = document.getElementById('lpRate');
+    if (rt) rt.onclick = () => openRatingsModal(head?.home || 'Home', head?.away || 'Away');
   };
   paint();                                                        // pitch on screen immediately
   // per-player match stats -> goal/assist icons on the chips (+ the modal); fresh each

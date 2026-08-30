@@ -1648,6 +1648,18 @@ class Handler(BaseHTTPRequestHandler):
             res, err = auth.toggle_like(_int(b.get("id")), user["id"])
             self._json(res if res else {"error": err}, 200 if res else 400)
             return
+        if u.path == "/api/match/rate":                # bulk-submit player performance ratings
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Sign in to rate players."}, 401)
+                return
+            n, err = auth.rate_players(_int(b.get("event_id")), b.get("ratings") or [],
+                                       user["id"], user["username"])
+            if err:
+                self._json({"error": err}, 400)
+                return
+            self._json({"ok": True, "saved": n})
+            return
         if u.path == "/api/build_player/rate":         # score a fictional build
             group = str(b.get("position", ""))
             attrs_in = b.get("attrs") or {}
@@ -1813,6 +1825,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json(auth.list_comments(qq.get("target", [""])[0],
                                           viewer["id"] if viewer else None,
                                           qq.get("sort", ["new"])[0]))
+            return
+        # NOTE: handled here (an exact top-level match), not inside match_api() below --
+        # /api/match/* paths that reach the generic startswith("/api/match/") fallback get
+        # routed to match_api(), a bare (path, q) function with no cookie access. This route
+        # needs the viewer's cookie (to return their own prior rating alongside the
+        # community average), so it's registered as an explicit early exact-match here
+        # instead, same as /api/comments just above -- it never reaches that fallback.
+        if u.path == "/api/match/ratings":              # public: community player ratings
+            qq = parse_qs(u.query)
+            viewer = auth.user_for_token(self._cookie("atla_session"))
+            self._json(auth.match_ratings(_int(qq.get("id", ["0"])[0]),
+                                          viewer["id"] if viewer else None))
             return
         if u.path == "/api/img":                       # binary image proxy (not JSON)
             res = fetch_image(parse_qs(u.query).get("u", [""])[0])

@@ -48,6 +48,17 @@ def _con() -> sqlite3.Connection:
     c.execute("CREATE INDEX IF NOT EXISTS idx_comments_target ON comments(target, created)")
     c.execute("CREATE TABLE IF NOT EXISTS comment_likes("
               "comment_id INTEGER, user_id INTEGER, PRIMARY KEY(comment_id, user_id))")
+    # Fan ratings of a player's performance in one match (1-10), keyed by FotMob's
+    # own player id -- what the match-lineups feed already carries, see
+    # webapp/live_feed_fotmob.py. One row per user per player per match: resubmitting
+    # REPLACEs your own rating rather than adding another (unlike comments, which are
+    # append-only) -- this is a single numeric value meant to be averaged, not a thread.
+    c.execute("CREATE TABLE IF NOT EXISTS player_ratings("
+              "event_id INTEGER, fotmob_player_id INTEGER, user_id INTEGER, "
+              "username TEXT, rating INTEGER, updated REAL, "
+              "PRIMARY KEY(event_id, fotmob_player_id, user_id))")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_player_ratings_match "
+              "ON player_ratings(event_id, fotmob_player_id)")
     # Google sign-in: link a Google account to a user (no password). Added by
     # migration so existing databases pick up the columns. `pw`/`salt` stay NULL
     # for Google-only accounts (they just can't password-login).
@@ -382,3 +393,65 @@ def toggle_like(cid: int, uid: int):
             return {"liked": not has, "likes": n}, None
         finally:
             c.close()
+
+
+RATING_MAX_PLAYERS = 22          # both full starting XIs in one submission
+
+
+def rate_players(event_id: int, ratings: list, uid: int, username: str):
+    """Submit/update this user's 1-10 performance ratings for any number of players
+    (up to both starting XIs) in one match, in a single call -- rating "all 11 of a
+    team or all 22 at once" is one bulk write, not 11-22 round trips.
+    `ratings`: [{"fotmob_player_id": int, "rating": 1-10}, ...].
+    -> (n_saved, None) or (None, error)."""
+    if not event_id:
+        return None, "Missing match."
+    if not isinstance(ratings, list) or not ratings:
+        return None, "No ratings given."
+    if len(ratings) > RATING_MAX_PLAYERS:
+        return None, "Too many players in one submission."
+    clean = []
+    for r in ratings:
+        if not isinstance(r, dict):
+            continue
+        try:
+            fid = int(r.get("fotmob_player_id"))
+            val = int(r.get("rating"))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= val <= 10:
+            clean.append((fid, val))
+    if not clean:
+        return None, "No valid ratings given."
+    now = time.time()
+    with _LOCK:
+        c = _con()
+        try:
+            c.executemany(
+                "INSERT OR REPLACE INTO player_ratings"
+                "(event_id, fotmob_player_id, user_id, username, rating, updated) "
+                "VALUES(?,?,?,?,?,?)",
+                [(int(event_id), fid, uid, username, val, now) for fid, val in clean])
+            c.commit()
+        finally:
+            c.close()
+    return len(clean), None
+
+
+def match_ratings(event_id: int, viewer_uid: int | None = None) -> dict:
+    """Community average + rater count per player in this match, plus the viewer's
+    own submitted rating if they have one. -> {fotmob_player_id (str): {avg, count, mine}}."""
+    c = _con()
+    try:
+        rows = c.execute(
+            "SELECT fotmob_player_id, avg(rating), count(*) FROM player_ratings "
+            "WHERE event_id=? GROUP BY fotmob_player_id", [event_id]).fetchall()
+        mine = {}
+        if viewer_uid:
+            mine = dict(c.execute(
+                "SELECT fotmob_player_id, rating FROM player_ratings "
+                "WHERE event_id=? AND user_id=?", [event_id, viewer_uid]).fetchall())
+        return {str(fid): {"avg": round(avg, 1), "count": cnt, "mine": mine.get(fid)}
+                for fid, avg, cnt in rows}
+    finally:
+        c.close()
