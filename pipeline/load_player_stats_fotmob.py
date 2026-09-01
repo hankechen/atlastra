@@ -54,6 +54,10 @@ STAT_KEYS = [
     ("total_att_assist", "chances_created"), ("big_chance_created", "big_chances_created"),
     ("won_contest", "dribbles_completed"), ("rating", "rating"),
 ]
+# Every other stat above is a season TOTAL, but FotMob's CDN publishes won_contest as
+# "Successful dribbles per 90" (a rate, e.g. 4.3), not a count -- everything else in
+# this table is a total, so back it out to one: total = rate * minutes / 90.
+_PER90_STAT_KEYS = {"won_contest"}
 COLS = ["league_key", "fotmob_player_id", "fotmob_team_id", "player_name",
         "matches", "minutes", "goals", "assists", "xg", "xa", "chances_created",
         "big_chances_created", "dribbles_completed", "rating", "updated_at"]
@@ -123,7 +127,11 @@ def _fetch_league(league_key: str, league_id: int, ua: datetime) -> list:
                              "minutes": item.get("MinutesPlayed") or 0,
                              "goals": 0, "assists": 0, "xg": 0.0, "xa": 0.0, "chances_created": 0,
                              "big_chances_created": 0, "dribbles_completed": 0, "rating": None}
-            rows[pid][field] = item.get("StatValue")
+            val = item.get("StatValue")
+            if stat_key in _PER90_STAT_KEYS and val is not None:
+                mins = item.get("MinutesPlayed") or rows[pid]["minutes"] or 0
+                val = round(val * mins / 90)
+            rows[pid][field] = val
     return [(league_key, pid, r["fotmob_team_id"], r["player_name"], r["matches"], r["minutes"],
              r["goals"], r["assists"], r["xg"], r["xa"], r["chances_created"],
              r["big_chances_created"], r["dribbles_completed"], r["rating"], ua)
