@@ -3679,7 +3679,18 @@ class SoccerDB:
         """Cumulative totals split into league / ucl / combined, from the canonical
         v_stats_combined (row-stacked by competition). Combined = league + ucl
         (counts summed, % rates minutes-weighted). Scopes with no minutes are
-        omitted so the UI can disable them."""
+        omitted so the UI can disable them.
+
+        Current season only: the 'league' scope is overridden with live FotMob
+        totals (pipeline/load_player_stats_fotmob) when available -- v_stats_combined
+        is Understat-sourced and only as fresh as the last manual pipeline run, and as
+        of this season's rollover Understat has no 2026/27 data published at all yet
+        (confirmed directly against their site, not just stale on our end). FotMob's
+        public per-stat CDN doesn't cover shots/duels/tackles/interceptions/passes or
+        pass accuracy, so those stay blank on the live path -- an honest gap, not a
+        stale-season number sitting next to fresh ones. UCL isn't covered by this
+        overlay (still SofaScore-sourced, unaffected), so 'combined' below is simply
+        recomputed from the live league scope + whatever UCL scope already exists."""
         rate_sql = ", ".join(
             f"SUM({c} * minutes) FILTER (WHERE {c} IS NOT NULL) "
             f"/ NULLIF(SUM(minutes) FILTER (WHERE {c} IS NOT NULL), 0) AS {c}"
@@ -3697,6 +3708,36 @@ class SoccerDB:
                 d[c] = _i(getattr(r, c))
             if d["minutes"]:
                 scopes[r.scp] = d
+        if season == FOCUS_SEASON:
+            try:
+                live = self.con.execute("""
+                    SELECT f.matches, f.minutes, f.goals, f.assists, f.xg, f.xa,
+                           f.chances_created, f.big_chances_created, f.dribbles_completed
+                    FROM player_stats_fotmob f
+                    JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                          WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                         ON pe.fpid = f.fotmob_player_id
+                    WHERE pe.player_id = ? AND f.minutes > 0
+                """, [pid]).fetchone()
+            except Exception:                              # noqa: BLE001 -- table not built yet
+                live = None
+            if live:
+                scopes["league"] = {
+                    "games": _i(live[0]), "minutes": _i(live[1]), "goals": _r(live[2], 2),
+                    "assists": _r(live[3], 2), "xg": _r(live[4], 2), "xa": _r(live[5], 2),
+                    "shots": None, "chances_created": _r(live[6], 2),
+                    "big_chances_created": _r(live[7], 2), "dribbles_completed": _r(live[8], 2),
+                    "duels_won": None, "tackles": None, "interceptions": None,
+                    "passes_completed": None, "pass_accuracy_pct": None, "duels_won_pct": None,
+                }
+                # Whatever 'ucl' scope is still in `scopes` here is from the SAME stale
+                # `season` query as the league numbers this overlay just replaced -- e.g.
+                # a deep UCL run from the completed 2025/26 campaign, not anything played
+                # this season. Combining it with the live league total would silently
+                # splice two different seasons together (the exact bug already caught
+                # once in league_standings()'s live overlay). Current-season UCL data
+                # simply isn't covered by this overlay yet, so drop it rather than mix.
+                scopes.pop("ucl", None)
         lg, ucl = scopes.get("league"), scopes.get("ucl")
         if lg and ucl:
             comb = {c: round((lg[c] or 0) + (ucl[c] or 0), 2) for c in self._SCOPE_COUNTS}
@@ -3995,8 +4036,41 @@ class SoccerDB:
         if wc:
             ratings["worldcup"] = {"rating": wc["rating"], "classification": wc["classification"],
                                    "apps": wc["apps"], "minutes": wc["minutes"]}
+        # Current season only: overlay live FotMob season totals (pipeline/
+        # load_player_stats_fotmob) over the stat tiles -- v_stats_combined_player is
+        # Understat-sourced and only as fresh as the last manual pipeline run (and, as
+        # of this season's rollover, Understat has no 2026/27 data published at all
+        # yet). Whole-tiles swap, not a per-field merge: mixing a live total with a
+        # stale-season total in the SAME per-90 rate would misrepresent both, the same
+        # reasoning as league_standings()'s live overlay above. pass_accuracy isn't on
+        # FotMob's per-stat CDN, so it's simply blank rather than a stale number.
+        live = None
+        if season == FOCUS_SEASON:
+            try:
+                live = self.con.execute("""
+                    SELECT f.matches, f.minutes, f.goals, f.assists, f.xg, f.xa,
+                           f.chances_created, f.big_chances_created, f.dribbles_completed, f.rating
+                    FROM player_stats_fotmob f
+                    JOIN (SELECT player_id, max(fotmob_player_id) AS fpid FROM player_enrichment
+                          WHERE fotmob_player_id IS NOT NULL GROUP BY player_id) pe
+                         ON pe.fpid = f.fotmob_player_id
+                    WHERE pe.player_id = ? AND f.minutes > 0
+                """, [pid]).fetchone()
+            except Exception:                              # noqa: BLE001 -- table not built yet
+                live = None
         tiles = {}
-        if t:
+        if live:
+            mins = live[1] or 0
+            p90 = lambda v: _r((v or 0) / mins * 90, 2) if mins else None  # noqa: E731
+            tiles = {"apps": _i(live[0]),
+                     "goals": p90(live[2]), "assists": p90(live[3]),
+                     "xg": p90(live[4]), "xa": p90(live[5]),
+                     "chances_created": p90(live[6]), "big_chances_created": p90(live[7]),
+                     "dribbles_per90": p90(live[8]),
+                     "pass_accuracy": None}
+            if live[9] is not None:
+                avg_rating = _r(live[9], 2)
+        elif t:
             mins = t[8] or 0
             p90 = lambda v: _r((v or 0) / mins * 90, 2) if mins else None  # noqa: E731
             tiles = {"apps": _i(t[0]),            # Apps stays a count
@@ -4113,7 +4187,15 @@ class SoccerDB:
             "percentile": round(ctx[1]) if ctx and ctx[1] is not None else None,
             "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
             "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
-            "tiles": tiles, "radar": radar,
+            # while stats_scopes/tiles are showing a live overlay, `season`/`pinned_season`
+            # above still read "2025/26" (FOCUS_SEASON's own code hasn't moved -- that's
+            # the bigger, separate re-rating project, not this fix) -- this label lets the
+            # UI show the numbers' REAL season without touching the season selector itself.
+            "tiles": tiles, "tiles_live": bool(live),
+            "tiles_season_label": (season_label(f"{int(FOCUS_SEASON[:2]) + 1:02d}"
+                                                f"{int(FOCUS_SEASON[2:]) + 1:02d}")
+                                   if live else None),
+            "radar": radar,
             # per-stat percentile vs position peers, ONE MAP PER SCOPE, so the bar under
             # a tile ranks against the competition whose number the tile is showing
             "tile_pct": tile_pct,

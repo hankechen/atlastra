@@ -2009,6 +2009,27 @@ def _team_info_refresher():
         time.sleep(TEAM_INFO_EVERY)
 
 
+def _player_stats_refresher():
+    """Rebuild player_stats_fotmob (current-season per-player totals, ~45 throttled
+    CDN calls per league) on a loop, so the profile's Total/Per-90 stat tiles stay
+    live between manual Understat pipeline runs -- same gap standings/team info
+    already had. See pipeline/load_player_stats_fotmob.py and
+    SoccerDB._player_stat_scopes. Defaults to once a day; this is a much bigger
+    player pool than standings but changes far less often within a day."""
+    import time
+    from pipeline import load_player_stats_fotmob as ps
+    PLAYER_STATS_EVERY = int(os.environ.get("ATLASTRA_PLAYER_STATS_EVERY", str(24 * 3600)))
+    time.sleep(int(os.environ.get("ATLASTRA_PLAYER_STATS_DELAY", "300")))
+    while True:
+        try:
+            with _FOTMOB_LOCK:
+                n = ps.refresh()
+            print(f"player stats refresh (FotMob): {n} player-rows", flush=True)
+        except Exception as e:                         # noqa: BLE001
+            print(f"player stats refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(PLAYER_STATS_EVERY)
+
+
 def _preview_warmer():
     """Keep _PREVIEW_CACHE hot for the soonest upcoming fixtures so the Preview tab is
     instant on the first click. The pusher warms each match's SofaScore preview paths
@@ -2070,6 +2091,8 @@ if __name__ == "__main__":
         print("standings refresher: on (FotMob)")
         threading.Thread(target=_team_info_refresher, daemon=True).start()
         print("team info refresher: on (FotMob, manager/venue/squad)")
+        threading.Thread(target=_player_stats_refresher, daemon=True).start()
+        print("player stats refresher: on (FotMob, per-player season totals)")
     if live_feed.CACHE_MODE:
         threading.Thread(target=_preview_warmer, daemon=True).start()
         print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")

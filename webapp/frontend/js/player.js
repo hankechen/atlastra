@@ -289,6 +289,8 @@ async function load(name, careerStat = 'xa', season = null) {
   } else { wcBox.style.display = 'none'; }
 
   // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
+  document.getElementById('tilesLive').innerHTML = p.tiles_live
+    ? `<span class="live" title="League totals refreshed live from FotMob -- the ${p.pinned_season} season selector above hasn't caught up yet, this card has">● ${p.tiles_season_label}</span>` : '';
   statScopes = p.stats_scopes || {};
   tilePct = p.tile_pct || {};
   wcTilePct = p.wc_tile_pct || {};
