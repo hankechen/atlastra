@@ -116,9 +116,11 @@ const Notif = {
   clear() { const s = this._read(); s.items = []; this._write(s); },
   state() { return this._read().state || {}; },
   saveState(st) { const s = this._read(); s.state = st; this._write(s); },
-  desktop() { return !!this._read().desktop; },
-  setDesktop(v) { const s = this._read(); s.desktop = !!v; this._write(s); },
 };
+// Whether we're allowed to raise real OS notifications. Derived straight from the
+// browser's own permission each time (not a separate localStorage flag) so it can
+// never drift out of sync with what the user actually granted at the browser level.
+function desktopAlertsOn() { return 'Notification' in window && Notification.permission === 'granted'; }
 
 function timeAgo(ts) {
   const s = (Date.now() - ts) / 1000;
@@ -186,7 +188,7 @@ async function notifTick() {
   }
   st.seeded = 1; Notif.saveState(st);
   for (const f of fresh) {
-    if (Notif.add(f) && Notif.desktop() && 'Notification' in window && Notification.permission === 'granted') {
+    if (Notif.add(f) && desktopAlertsOn()) {
       try { new Notification('Atlastra · ' + f.title, { body: f.body }); } catch { /* */ }
     }
   }
@@ -214,7 +216,7 @@ function renderNotifPanel() {
   p.innerHTML = `<div class="npanel-h"><b>Notifications</b>${items.length ? '<button id="nclear">Clear</button>' : ''}</div>
     ${permBtn}<div class="npanel-list">${list}</div>`;
   const pb = document.getElementById('nperm');
-  if (pb) pb.onclick = (e) => { e.preventDefault(); Notification.requestPermission().then(r => { if (r === 'granted') Notif.setDesktop(true); renderNotifPanel(); }); };
+  if (pb) pb.onclick = (e) => { e.preventDefault(); Notification.requestPermission().then(() => renderNotifPanel()); };
   const cl = document.getElementById('nclear');
   if (cl) cl.onclick = (e) => { e.preventDefault(); Notif.clear(); renderNotifPanel(); updateNotifBadge(); };
 }
