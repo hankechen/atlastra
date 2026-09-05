@@ -419,7 +419,16 @@ function initMobileNav() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 }
 
-function _boot() { initNotifications(); initAuth(); initMobileNav(); }
+// Registers the PWA service worker (offline fallback + installability for
+// "Add to Home Screen" / the Android TWA and iOS wrappers) -- see sw.js. Never
+// caches API/page data itself, so this can't cause the stale-content bugs a
+// heavier SW strategy would.
+function initServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
+}
+
+function _boot() { initNotifications(); initAuth(); initMobileNav(); initServiceWorker(); }
 if (document.readyState !== 'loading') _boot();
 else document.addEventListener('DOMContentLoaded', _boot);
 const el = (html) => { const t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; };

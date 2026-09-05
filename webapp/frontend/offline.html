@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlastra — Offline</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0e1220">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Atlastra">
+<style>
+  :root{--bg:#0e1220;--card:#171d2b;--text:#eff2f9;--muted:#9aa4ba;--accent:#5570f0;--accent2:#7d5cf5;--border:rgba(255,255,255,.13)}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,system-ui,Segoe UI,Inter,sans-serif;padding:24px}
+  .card{max-width:360px;text-align:center}
+  svg{width:56px;height:56px;margin-bottom:18px}
+  h1{font-size:20px;margin:0 0 8px}
+  p{color:var(--muted);margin:0 0 22px}
+  button{background:linear-gradient(90deg,var(--accent),var(--accent2));color:#fff;border:0;
+    border-radius:10px;padding:11px 22px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+</style>
+</head>
+<body>
+  <div class="card">
+    <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#171d2b"/>
+      <path d="M16 6 L27 26 H5 Z" fill="none" stroke="#5570f0" stroke-width="3.4" stroke-linejoin="round"/></svg>
+    <h1>You're offline</h1>
+    <p>Atlastra needs a connection for live scores and stats. Reconnect and try again.</p>
+    <button onclick="location.reload()">Retry</button>
+  </div>
+</body>
+</html>

@@ -1032,7 +1032,8 @@ def jdumps(obj):
     return json.dumps(_finite(obj), default=str)
 CT = {".html": "text/html", ".css": "text/css", ".js": "application/javascript",
       ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png",
-      ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+      ".mp4": "video/mp4", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+      ".webmanifest": "application/manifest+json"}
 
 
 _ML_PRED_CACHE: dict = {}                                 # (home_tid, away_tid) -> (expiry, pred)
