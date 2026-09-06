@@ -78,6 +78,48 @@ async function loadSide(key) {
                                              name: s.player ? s.player.player : null })) };
   S.roles = r.roles; S.roleDefaults = r.role_defaults; S.formations = r.formations;
 }
+// Coming from a match page's "Simulate in Tactics Lab" link (?match=<eid>): both sides
+// arrive pre-built from THAT match's own published lineup in one call, rather than the
+// normal per-team loadSide() flow (which only ever knows a club's usual/last-XI). Mirrors
+// loadSide's field-population so every other feature (subs, roles, sliders, sharing) just
+// works on the result without knowing where the XI came from.
+async function loadFromMatch(eid) {
+  document.getElementById('tlBody').innerHTML = '<div class="tl-loading">Loading the real lineups…</div>';
+  let r; try { r = await api(`/api/tactics/from_match?id=${encodeURIComponent(eid)}`); } catch { r = null; }
+  if (!r || !r.available) {
+    document.getElementById('tlBody').innerHTML = '<div class="empty-state">No lineup available yet for this match — try again closer to kickoff, or once it’s underway.</div>';
+    return;
+  }
+  S.formations = r.formations; S.roles = r.roles; S.roleDefaults = r.role_defaults;
+  const apply = (key, side) => {
+    const sd = S.sides[key];
+    sd.team = side.team; sd.xi = side.xi; sd.squad = side.squad;
+    sd.tactics = { ...(side.tactic_defaults || {}) };
+    sd.formation = side.formation || '4-3-3';
+    sd.custom = false; sd.error = false;
+    sd.lineupSource = side.lineup_source; sd.confirmed = side.confirmed;
+    sd.base = { tactics: { ...(side.tactic_defaults || {}) },
+                xi: (side.xi || []).map((s) => ({ id: s.id, role: s.role, family: s.family,
+                                                   x: s.x, y: s.y, line: s.line,
+                                                   name: s.player ? s.player.player : null })) };
+  };
+  apply('A', r.home); apply('B', r.away);
+  S.active = 'A';
+  ensureOption(teamSel, S.sides.A.team); ensureOption(oppSel, S.sides.B.team);
+  const fs = document.getElementById('formSel');
+  fs.innerHTML = S.formations.map((f) => `<option${f === cur().formation ? ' selected' : ''}>${f}</option>`).join('');
+  if (!S.formations.includes(cur().formation)) {
+    if (!Array.from(fs.options).some((o) => o.value === 'Custom')) fs.add(new Option('Custom', 'Custom'));
+    fs.value = 'Custom';
+  }
+  const ls = document.getElementById('tlLineupSrc');
+  if (ls) {
+    ls.textContent = cur().confirmed ? 'this match’s confirmed lineup' : 'this match’s predicted lineup';
+    ls.hidden = false;
+  }
+  S.lastMetrics = { A: null, B: null };
+  render(); runSim();
+}
 async function loadAll() {
   document.getElementById('tlBody').innerHTML = '<div class="tl-loading">Loading squads…</div>';
   await loadSide('A');
@@ -97,7 +139,9 @@ async function loadAll() {
   if (ls) {
     const src = cur().lineupSource;
     ls.textContent = src === 'last-ucl' ? 'last Champions League XI'
-      : (src === 'last-wc' ? 'last World Cup XI' : '');
+      : src === 'last-wc' ? 'last World Cup XI'
+      : src === 'this-match' ? (cur().confirmed ? 'this match’s confirmed lineup' : 'this match’s predicted lineup')
+      : '';
     ls.hidden = !ls.textContent;
   }
   S.lastMetrics = { A: null, B: null };
@@ -1531,6 +1575,8 @@ const _qp = new URLSearchParams(location.search);
 const _shared = _qp.get('s') ? decodeShare(_qp.get('s')) : null;
 if (_shared && _shared.a) {
   loadShared(_shared);
+} else if (_qp.get('match')) {
+  loadFromMatch(_qp.get('match'));
 } else {
   if (_qp.get('a')) S.sides.A.team = _qp.get('a');
   if (_qp.get('b')) S.sides.B.team = _qp.get('b');

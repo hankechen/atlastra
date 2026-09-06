@@ -542,12 +542,17 @@ async function loadLineups(isRefresh) {
     // Once the match is over the stats are final, so there's nothing to refresh --
     // drop the "Refresh stats" button, and offer fan ratings instead (only meaningful
     // once the players have actually played).
+    // "Simulate in Tactics Lab" is offered off ANY published lineup -- an upcoming
+    // (even predicted, not just confirmed) or a finished match's real XI, so you can
+    // either preview a matchup or replay what actually happened with different tactics.
+    const simBtn = `<a class="btn btn-ghost btn-sm" href="/tactics.html?match=${encodeURIComponent(EID)}">⚔ Simulate in Tactics Lab</a>`;
     const bar = head?.status === 'finished'
-      ? (_luXI.home.length || _luXI.away.length
-          ? `<div class="lp-refresh-bar"><span></span><button class="btn btn-primary btn-sm" id="lpRate">⭐ Rate Players</button></div>` : '')
+      ? `<div class="lp-refresh-bar"><span></span>${simBtn}${
+          _luXI.home.length || _luXI.away.length
+            ? ' <button class="btn btn-primary btn-sm" id="lpRate">⭐ Rate Players</button>' : ''}</div>`
       : `<div class="lp-refresh-bar"><span class="lp-updated" id="lpUpdated">Updated ${
       new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      }</span><button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
+      }</span>${simBtn} <button class="btn btn-ghost btn-sm lp-reload" id="lpReload">↻ Refresh stats</button></div>`;
     if (hRows && aRows) {
       const chips = placeSide(hx, hRows, true).map(c => chipHTML(c, true)).join('')
                   + placeSide(ax, aRows, false).map(c => chipHTML(c, false)).join('');

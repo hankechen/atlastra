@@ -770,6 +770,50 @@ def _last_used_xi(squad, tid):
     return laid or tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names)
 
 
+def _match_side_xi(d, eid, side, header):
+    """One side's REAL published lineup for THIS SPECIFIC match — the Tactics Lab entry
+    point from a match page's "Simulate in Tactics Lab" link. Unlike _last_used_xi/
+    _wc_last_xi (which reach for a club/nation's most recent European/World Cup teamsheet),
+    this is keyed off an exact event id, so it works for any match on the site, not just
+    a UCL/WC one.
+
+    National sides keep resolving their squad the normal way (by team name, via the World
+    Cup roster) rather than through the FotMob team-id club-roster path _tac_squad also
+    supports -- that id space is untested for national teams here, and the existing path
+    already works, so there is nothing to gain by risking it.
+
+    Falls back to the side's usual default XI (last Euro/WC teamsheet, else auto-best) when
+    no lineup is out yet for this match at all."""
+    team = header.get(side)
+    if not team:
+        return None
+    tid = None if header.get(f"{side}_national") else header.get(f"{side}_id")
+    squad = _tac_squad(d, team, tid=tid)
+    if not squad:
+        return None
+    xi, src, confirmed = None, "auto", False
+    lu = live_feed.lineups(eid)
+    if lu.get("available"):
+        sd = lu.get(side) or {}
+        starters = (sd.get("starting_xi") or [])[:11]
+        names = [p.get("name") for p in starters if p.get("name")]
+        if len(names) >= 8:                            # too few real names to be worth using
+            xi = tactics.build_layout_xi(
+                squad, [{"name": p.get("name"), "x": p.get("lx"), "y": p.get("ly")}
+                        for p in starters])
+            if not xi:
+                xi = tactics.build_named_xi(squad, sd.get("formation") or "4-3-3", names)
+            if xi:
+                src, confirmed = "this-match", bool(lu.get("confirmed"))
+    if not xi:
+        xi, src = _default_xi(d, team, squad)
+        if not xi:
+            xi, src = tactics.build_xi(squad, "4-3-3"), "auto"
+    formation = tactics.formation_of(xi) or "Custom"
+    return {"team": team, "formation": formation, "lineup_source": src, "confirmed": confirmed,
+            "squad": squad, "xi": _xi_wire(xi), "tactic_defaults": _side_tactics(d, team)}
+
+
 _TEAM_TACTICS: dict = {}
 
 
@@ -1307,6 +1351,18 @@ def api(path: str, q: dict) -> dict | list:
                     "tactic_keys": tactics.TACTIC_KEYS,
                     "tactic_defaults": (tactics.DEFAULT_TACTICS if blank
                                         else _side_tactics(d, team))}
+        if path == "/api/tactics/from_match":   # Tactics Lab: BOTH sides' real lineups for one match
+            eid = _int(q.get("id", ["0"])[0])
+            h = live_feed.header(eid) if eid else {"available": False}
+            home = _match_side_xi(d, eid, "home", h) if h.get("available") else None
+            away = _match_side_xi(d, eid, "away", h) if h.get("available") else None
+            if not home or not away:
+                return {"available": False}
+            return {"available": True, "event_id": eid,
+                    "home": home, "away": away,
+                    "formations": list(tactics.FORMATIONS.keys()),
+                    "roles": tactics.ROLES, "role_defaults": tactics.DEFAULT_ROLE,
+                    "tactic_keys": tactics.TACTIC_KEYS}
         if path == "/api/tactics/find":        # search any player to add to a squad (what-if)
             return {"results": d.tactics_search(q.get("q", [""])[0])}
         if path == "/api/tactics/seasons":     # which years of a player the Lab can field
