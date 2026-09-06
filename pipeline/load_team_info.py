@@ -1,19 +1,25 @@
 """
 Team manager + venue + squad from FotMob -> tables `team_meta` / `team_squad_fotmob`
-(use case 7).
+(use case 7), plus a daily-appended `team_injury_history` snapshot.
 
 Understat (our domestic spine) has no manager/stadium and its squad snapshot is
 only as fresh as the last manual scrape, but FotMob's team endpoint has all of
 it live: overview.coachHistory[-1] is the current manager, overview.venue carries
 the stadium name/city/capacity/opened/surface, and `squad` is today's actual
-roster (transfers included). We already store each club's FotMob id in
-`team_logos` (see load_team_logos), so we hit /api/data/teams?id=<fotmob_id>
-once per linked club (~96 calls) and pull both out of that single response.
+roster (transfers included, and each member's `injury` field -- null when fit,
+an {id, expectedReturn} object otherwise). We already store each club's FotMob
+id in `team_logos` (see load_team_logos), so we hit /api/data/teams?id=<fotmob_id>
+once per linked club (~96 calls) and pull all of it out of that single response.
+`team_injury_history` appends one row per player per day (not a wholesale
+replace like the other two tables) so a real longitudinal injury record builds
+up over time for a future ml/train_match_outcome.py feature -- see the comment
+at its INSERT below for why that can't just use today's snapshot retroactively.
 
 Run after load_team_logos:  python -m pipeline.load_team_info
 """
 import sys
 import time
+from datetime import date
 
 try:
     from config import DB_PATH
@@ -125,11 +131,31 @@ def load_team_info() -> None:
         con.executemany(
             "INSERT INTO team_squad_fotmob VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", squad_rows)
 
+    # team_squad_fotmob above is a pure snapshot (dropped and rebuilt every run), so it can
+    # never answer "who was out for a match six months ago" -- there's no history to add as
+    # a feature to ml/train_match_outcome.py's historical Elo/form classifier. This table is
+    # the fix, piggybacking on the FotMob calls this function already makes (no extra
+    # scraping): one row per player per DAY, appended rather than replaced, so a real
+    # longitudinal injury record accumulates for free as this refresher keeps running every
+    # 6h. Once there's a season or so of it, a genuinely backtestable injury feature becomes
+    # possible; today's live-only use (excluding injured players from the auto-XI a match
+    # prediction is built from) is in webapp/live_feed_fotmob.py's _squad_units.
+    con.execute("""CREATE TABLE IF NOT EXISTS team_injury_history
+        (snapshot_date DATE, team_id BIGINT, fotmob_player_id BIGINT,
+         player_name VARCHAR, injured BOOLEAN)""")
+    today = date.today()
+    con.execute("DELETE FROM team_injury_history WHERE snapshot_date = ?", [today])
+    if squad_rows:
+        con.executemany(
+            "INSERT INTO team_injury_history VALUES (?,?,?,?,?)",
+            [(today, r[0], r[1], r[2], r[11]) for r in squad_rows])
+
     n_mgr = sum(1 for r in rows if r[1])
     n_ven = sum(1 for r in rows if r[2])
     con.close()
     print(f"team_meta: {ok} teams ({n_mgr} with manager, {n_ven} with venue); "
-          f"team_squad_fotmob: {len(squad_rows)} players.")
+          f"team_squad_fotmob: {len(squad_rows)} players; "
+          f"team_injury_history: +{sum(1 for r in squad_rows if r[11])} injured today.")
 
 
 if __name__ == "__main__":

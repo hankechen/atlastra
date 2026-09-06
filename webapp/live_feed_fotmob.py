@@ -423,7 +423,15 @@ def _strict_card(name: str):
 
 def _squad_units(team_id):
     """Unit strengths for a club from its live FotMob roster, cached 6h. None if we can't
-    build a credible XI — the caller then falls back to the rating model."""
+    build a credible XI — the caller then falls back to the rating model.
+
+    Injured/knocked-out players (FotMob's own team-news flag, see fotmob_squad) are dropped
+    from the pool before the auto-XI is picked, so a side missing a key starter doesn't get
+    predicted at full strength -- e.g. Arsenal's projected XI stops including Saliba the
+    moment FotMob lists him as out. This is a live-only correction: there's no historical
+    archive of who was injured for a match played years ago, so it can't retroactively
+    become a trained feature of ml/train_match_outcome.py the way Elo/form can -- it only
+    ever adjusts today's/upcoming fixtures' auto-XI, which is exactly where it's used."""
     key = str(team_id)
     hit = _PRED_UNITS.get(key)
     if hit and hit[0] > time.time():
@@ -431,7 +439,7 @@ def _squad_units(team_id):
     units = None
     try:
         from webapp import tactics as _T
-        roster = fotmob_squad(team_id) or []
+        roster = [m for m in (fotmob_squad(team_id) or []) if not m.get("injured")]
         squad = []
         for m in roster:
             c = _strict_card(m.get("name") or "")
@@ -443,7 +451,9 @@ def _squad_units(team_id):
                                                      "def", "phy", "hea")}})
         # Coverage gate, not just a count. A Gibraltar or Faroese side reaches 11 cards only
         # by matching loosely, so a low carded share means the XI we would build is fiction --
-        # fall back to the rating model rather than predict off phantom players.
+        # fall back to the rating model rather than predict off phantom players. (Both sides
+        # of this ratio are already injury-filtered, so a squad thinned by injuries doesn't
+        # unfairly fail the gate just for having fewer bodies to match against.)
         if len(squad) >= 11 and roster and len(squad) / len(roster) >= 0.6:
             xi = _T.build_xi(squad, "4-3-3")
             if xi and sum(1 for x in xi if x.get("player")) >= 11:
@@ -1636,9 +1646,12 @@ _TEAMSQUAD_CACHE: dict[str, tuple] = {}
 
 
 def fotmob_squad(team_id) -> list:
-    """Current squad from FotMob's team page: [{id, name, group, shirt}] (group is
+    """Current squad from FotMob's team page: [{id, name, group, shirt, injured}] (group is
     keepers/defenders/midfielders/attackers). The authoritative live roster + player ids
-    (→ correct photos). Cached 6h."""
+    (→ correct photos). `injured` is FotMob's own team-news flag (null when fit, an
+    {id, expectedReturn} object -- including "Doubtful" tags, not just confirmed-out --
+    when not) straight off this same response; a real, currently-live signal, not
+    inferred from anything. Cached 6h."""
     key = str(team_id)
     hit = _TEAMSQUAD_CACHE.get(key)
     if hit and hit[0] > time.time():
@@ -1653,7 +1666,7 @@ def fotmob_squad(team_id) -> list:
             for m in (grp.get("members") or []):
                 if m.get("id") and m.get("name"):
                     out.append({"id": m["id"], "name": m["name"], "group": title,
-                                "shirt": m.get("shirtNumber")})
+                                "shirt": m.get("shirtNumber"), "injured": bool(m.get("injury"))})
     except Exception:                                      # noqa: BLE001
         pass
     if out:
