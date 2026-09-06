@@ -1,0 +1,23 @@
+{
+  "name": "atlastra-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Capacitor native shell for Atlastra (loads the live site; no bundled web assets).",
+  "scripts": {
+    "sync": "cap sync",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  },
+  "allowScripts": {
+    "sharp@0.32.6": true
+  }
+}

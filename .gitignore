@@ -35,3 +35,22 @@ tools/clip_verify.json
 tools/clips_manifest.json
 tools/recut.json
 tools/reextract_manifest.json
+
+# Capacitor mobile shell (mobile/) -- native build output/deps, all regenerable
+# via `npm install && npx cap sync` from the committed config + assets.
+mobile/node_modules/
+mobile/ios/App/Pods/
+mobile/ios/App/build/
+mobile/ios/App/DerivedData/
+mobile/ios/.xcode.env.local
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/capacitor-cordova-android-plugins/
+mobile/android/local.properties
+mobile/android/.idea/
+mobile/ios/App/App.xcodeproj/xcuserdata/
+mobile/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+mobile/ios/App/App.xcworkspace/xcuserdata/
+mobile/*.keystore
+mobile/*.jks

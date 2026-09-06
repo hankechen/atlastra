@@ -1,0 +1,16 @@
+{
+  "appId": "com.atlastra.app",
+  "appName": "Atlastra",
+  "webDir": "www",
+  "backgroundColor": "#0e1220",
+  "server": {
+    "url": "https://atlastra.dedyn.io",
+    "cleartext": false
+  },
+  "ios": {
+    "backgroundColor": "#0e1220"
+  },
+  "android": {
+    "backgroundColor": "#0e1220"
+  }
+}
