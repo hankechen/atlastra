@@ -69,6 +69,14 @@ function finish() {
   renderFinal(total, results, false);
 }
 
+// A Wordle-style square per round (same closeness colors the result rows already use),
+// so the share text reads at a glance even to someone who's never opened the site.
+function dailyShareText(score, res) {
+  const squares = res.map(r => r.diff <= 2 ? '🟩' : r.diff <= 4 ? '🟨' : '🟥').join('');
+  return `Atlastra Daily Challenge — ${todayKey()}\n${squares}  ${score}/${res.length * 100}\n`
+    + `https://atlastra.dedyn.io/daily.html`;
+}
+
 function renderFinal(score, res, replay) {
   const correct = res.filter(r => r.diff <= 2).length;
   const rows = res.map(r => `<div class="dc-rowmini">
@@ -82,11 +90,13 @@ function renderFinal(score, res, replay) {
       <div class="dc-total">${score}</div>
       <p class="muted" style="margin:2px 0 14px">${correct} / ${res.length} within 2 of the real rating</p>
       <div style="text-align:left">${rows}</div>
+      <button class="btn btn-ghost gm-sharebtn" id="dcShare">📋 Share result</button>
       ${replay ? '<p class="muted" style="margin-top:14px">Come back tomorrow for a new challenge.</p>'
         : '<p class="muted" style="margin-top:14px">Score locked in for today.</p>'}
     </section>
     <section class="card" id="lbCard"><div class="card-h"><h3>Today's Leaderboard</h3></div><div class="placeholder-note">Loading…</div></section>
   </div>`;
+  document.getElementById('dcShare').onclick = () => shareResult(dailyShareText(score, res));
   loadBoard();
 }
 

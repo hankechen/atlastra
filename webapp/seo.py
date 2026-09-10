@@ -35,6 +35,14 @@ from config import DB_PATH
 SITE_URL = (os.environ.get("ATLASTRA_SITE_URL") or "https://atlastra.duckdns.org").rstrip("/")
 SITE_NAME = "Atlastra"
 
+# Google Search Console's HTML-tag verification method wants exactly this meta tag
+# on the home page (the "content" value it gives you when you add a URL-prefix
+# property, WITHOUT the surrounding "google-site-verification=" prefix -- Search
+# Console's copy-paste snippet already has the tag written out; take just the
+# content="..." value from it). Unset until configured -- no-ops (tag omitted)
+# rather than shipping an empty/placeholder tag that would fail verification.
+GOOGLE_SITE_VERIFICATION = os.environ.get("ATLASTRA_GOOGLE_SITE_VERIFICATION")
+
 # Per-page copy for the fixed (non-entity) pages. Title is the full <title>; the
 # suffix " | Atlastra" is added automatically except on the home page.
 PAGE_META = {
@@ -186,6 +194,8 @@ def _meta_block(title: str, desc: str, canonical: str, noindex: bool) -> str:
     img = html.escape(f"{SITE_URL}/favicon.svg", quote=True)
     tags = [f'<meta name="description" content="{d}">',
             f'<link rel="canonical" href="{can}">']
+    if GOOGLE_SITE_VERIFICATION:
+        tags.append(f'<meta name="google-site-verification" content="{html.escape(GOOGLE_SITE_VERIFICATION, quote=True)}">')
     if noindex:
         tags.append('<meta name="robots" content="noindex, follow">')
     tags += [

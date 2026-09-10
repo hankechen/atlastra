@@ -117,6 +117,21 @@ function finish(solved) {
   renderDone(solved, score, guessesUsed, false);
 }
 
+// A Wordle-style square per guess: red for each wrong one, green on the guess that
+// solved it, and an empty square for whatever's left of max_guesses -- never reveals
+// the answer or the clues, so it's safe to post before someone else has played today's.
+function mysteryShareText(solved, guessesUsed) {
+  const max = puzzle.max_guesses;
+  const squares = Array.from({ length: max }, (_, i) => {
+    if (solved && i === guessesUsed - 1) return '🟩';
+    if (i < (solved ? guessesUsed - 1 : max)) return '🟥';
+    return '⬛';
+  }).join('');
+  const result = solved ? `${guessesUsed}/${max}` : `X/${max}`;
+  return `Atlastra Guess the Player — ${todayKey()}\n${squares}  ${result}\n`
+    + `https://atlastra.dedyn.io/mystery.html`;
+}
+
 function renderDone(solved, score, guessesUsed, replay) {
   const p = puzzle, photo = p.photo ? `<img src="${p.photo}" onerror="this.remove()">` : `<span class="ini">${initials(p.answer)}</span>`;
   const head = solved
@@ -125,6 +140,7 @@ function renderDone(solved, score, guessesUsed, replay) {
   const sline = mode === 'daily'
     ? (solved ? `<div class="gr-pts" style="font-weight:700">+${score} points · solved in ${guessesUsed} guess${guessesUsed === 1 ? '' : 'es'}</div>` : '<div class="gr-pts muted">No points today — better luck tomorrow.</div>')
     : (solved ? `<div class="gr-pts" style="font-weight:700">Solved in ${guessesUsed} guess${guessesUsed === 1 ? '' : 'es'}</div>` : '');
+  const shareBtn = mode === 'daily' ? `<button class="btn btn-ghost gm-sharebtn" id="myShare">📋 Share result</button>` : '';
   const btn = mode === 'practice'
     ? `<button class="btn btn-primary" id="nextBtn" style="max-width:240px;margin:14px auto 0">Next player →</button>`
     : `<a class="btn btn-ghost" href="/daily.html" style="max-width:260px;margin:14px auto 0">Try the Daily Challenge →</a>`;
@@ -133,11 +149,12 @@ function renderDone(solved, score, guessesUsed, replay) {
       <div class="my-photo">${photo}</div>
       <div class="hl-nm" style="font-size:21px;font-weight:800"><a href="${pHref(p.answer)}" style="color:inherit;text-decoration:none">${p.answer}</a></div>
       <div class="hl-sub" style="color:var(--muted);font-size:12.5px;margin-top:4px;justify-content:center;display:flex;gap:6px;align-items:center">${crestHTML(p.team_logo, 'crest-sm')}${p.team} · Atlastra ${p.rating}</div>
-      ${head}${sline}${btn}
+      ${head}${sline}${shareBtn}${btn}
     </section>
     <section class="card" id="lbCard"><div class="card-h"><h3>${mode === 'daily' ? "Today's Leaderboard" : 'Leaderboard'}</h3></div><div class="placeholder-note">Loading…</div></section>
   </div>`;
   if (mode === 'practice') document.getElementById('nextBtn').onclick = load;
+  if (mode === 'daily') document.getElementById('myShare').onclick = () => shareResult(mysteryShareText(solved, guessesUsed));
   loadBoard();
 }
 

@@ -113,3 +113,23 @@ function signInNudge() {
   if (Auth.user) return '';
   return `<div class="lb-nudge">Your scores are saved on this device. <a href="#" onclick="openAuthModal();return false">Sign in</a> to post them to the global leaderboard.</div>`;
 }
+
+// ---- share results (Wordle-style) ----
+let _gmToastT;
+function toast(msg) {
+  let el = document.getElementById('gmToast');
+  if (!el) { el = document.createElement('div'); el.id = 'gmToast'; el.className = 'gm-toast'; document.body.appendChild(el); }
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(_gmToastT); _gmToastT = setTimeout(() => el.classList.remove('show'), 3400);
+}
+// Native share sheet where available (mobile — lets you pick a contact/app directly);
+// clipboard everywhere else. A cancelled native share is left alone, not treated as a
+// failure that needs a clipboard fallback.
+async function shareResult(text) {
+  if (navigator.share) {
+    try { await navigator.share({ text }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(text); toast('Result copied — paste it anywhere!'); }
+  catch { toast('Could not copy automatically — select the text and copy it yourself.'); }
+}
