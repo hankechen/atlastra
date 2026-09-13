@@ -28,9 +28,61 @@ function tblRows(rows) {
     : `<tr><td class="p muted">No data yet</td><td>—</td></tr>`;
 }
 
+function draftCard(p) {
+  return `<div class="adm-draft" data-slug="${esc(p.slug)}">
+    <div class="adm-draft-h">
+      <span class="blog-emoji sm">${esc(p.emoji || '📝')}</span>
+      <div class="adm-draft-t"><b>${esc(p.title)}</b><span class="muted">${esc(p.subtitle || '')}</span></div>
+    </div>
+    <div class="adm-draft-meta">
+      <span>${esc(p.player || '')}</span><span>·</span><span>${p.read_min || 3} min</span>
+      <span>·</span><span>${esc(p.model || '')}</span><span>·</span><span>week ${esc(p.week || '')}</span>
+    </div>
+    <div class="adm-draft-actions">
+      <a class="btn btn-ghost btn-sm" href="/blogpost.html?slug=${encodeURIComponent(p.slug)}&preview=1" target="_blank">👁 Preview</a>
+      <button class="btn btn-primary btn-sm" data-act="approve">✓ Approve &amp; publish</button>
+      <button class="btn btn-ghost btn-sm" data-act="discard">✕ Discard</button>
+    </div>
+  </div>`;
+}
+
+async function blogAction(path, slug) {
+  try { await apiPost(path, { slug }); } catch { /* surfaced by the refresh below */ }
+  loadDrafts();
+}
+
+async function loadDrafts() {
+  const el = document.getElementById('adm-drafts');
+  if (!el) return;
+  let d; try { d = await api('/api/admin/blog/drafts'); } catch { return; }
+  const drafts = (d && d.drafts) || [];
+  el.innerHTML = `
+    <div class="card-h" style="margin-bottom:12px">
+      <h3>Blog drafts awaiting review</h3>
+      <button class="btn btn-ghost btn-sm" id="admGenNow">✨ Generate now</button>
+    </div>
+    ${drafts.length ? drafts.map(draftCard).join('')
+      : '<div class="adm-err" style="padding:20px">No drafts pending — the weekly auto-writer checks in once a day.</div>'}`;
+  el.querySelectorAll('.adm-draft').forEach((card) => {
+    const slug = card.dataset.slug;
+    card.querySelector('[data-act="approve"]').onclick = () => blogAction('/api/admin/blog/approve', slug);
+    card.querySelector('[data-act="discard"]').onclick = () => {
+      if (confirm('Discard this draft? This can’t be undone.')) blogAction('/api/admin/blog/discard', slug);
+    };
+  });
+  const gen = document.getElementById('admGenNow');
+  if (gen) gen.onclick = async () => {
+    gen.disabled = true; gen.textContent = 'Writing…';
+    try { await apiPost('/api/admin/blog/generate', { force: true }); } catch { /* shown by refresh */ }
+    await loadDrafts();
+  };
+}
+
 function render(d) {
   const u = d.users, t = d.traffic, c = d.content;
   OUT.innerHTML = `
+    <div id="adm-drafts" style="margin-bottom:18px"><div class="adm-err">Loading drafts…</div></div>
+
     <div class="card-h" style="margin-bottom:12px"><h3>Traffic</h3></div>
     <div class="tiles" style="margin-bottom:18px">
       ${tile('👥', fmt(t.uniq_1d), 'Unique visitors · 24h')}
@@ -95,6 +147,7 @@ function render(d) {
       }</tbody></table></div>`;
 
   drawCharts(d);
+  loadDrafts();
 }
 
 function drawCharts(d) {

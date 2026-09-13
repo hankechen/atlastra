@@ -2,12 +2,31 @@
 Atlastra blog — curated, data-driven articles.
 
 Posts are stored as structured "blocks" (p / h2 / quote / stat / table / list) so the
-frontend controls styling and everything stays crawlable/consistent. Add a post by
-appending to POSTS; newest first. list_posts() returns summaries for the index,
-get_post(slug) returns the full article.
-"""
+frontend controls styling and everything stays crawlable/consistent. `blogpost.js`
+renders `p.html` as raw HTML because posts are "trusted" -- true for the hand-written
+SEED_POSTS below, and true for auto-generated ones ONLY because every one of those is
+held as a 'draft' until a signed-in admin approves it (see auto_blog.py); nothing
+auto-published, unreviewed, ever reaches this trust boundary.
 
-POSTS = [
+Persistence: a small sqlite file (posts survive restarts/redeploys, unlike the old
+hardcoded-list-only version). SEED_POSTS ships in code (git history is its backup);
+generated posts live only in the DB.
+"""
+import json
+import sqlite3
+import sys
+import datetime
+
+try:
+    from config import DATA_DIR
+except ModuleNotFoundError:  # pragma: no cover
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from config import DATA_DIR
+
+DB_PATH = DATA_DIR / "blog.sqlite"
+
+SEED_POSTS = [
     {
         "slug": "why-pedri-isnt-effective-in-the-world-cup",
         "title": "Why Pedri isn’t effective in the World Cup",
@@ -96,7 +115,40 @@ POSTS = [
     },
 ]
 
-_BY_SLUG = {p["slug"]: p for p in POSTS}
+
+def _conn():
+    con = sqlite3.connect(str(DB_PATH))
+    con.execute("""CREATE TABLE IF NOT EXISTS posts (
+        slug TEXT PRIMARY KEY, title TEXT, subtitle TEXT, author TEXT, date TEXT,
+        read_min INTEGER, emoji TEXT, image TEXT, tags TEXT, player TEXT, body TEXT,
+        status TEXT DEFAULT 'draft', model TEXT, week TEXT, created_at TEXT)""")
+    return con
+
+
+def _row_to_post(row) -> dict:
+    (slug, title, subtitle, author, date, read_min, emoji, image, tags, player, body,
+     status, model, week, created_at) = row
+    return {"slug": slug, "title": title, "subtitle": subtitle, "author": author,
+            "date": date, "read_min": read_min, "emoji": emoji, "image": image,
+            "tags": json.loads(tags) if tags else [], "player": player,
+            "body": json.loads(body) if body else [], "status": status,
+            "model": model, "week": week, "created_at": created_at}
+
+
+def save_generated_post(post: dict, model: str, week: str) -> None:
+    """Insert a newly auto-generated post as a 'draft' -- never published directly."""
+    con = _conn()
+    con.execute(
+        "INSERT OR REPLACE INTO posts (slug, title, subtitle, author, date, read_min, "
+        "emoji, image, tags, player, body, status, model, week, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?, 'draft', ?, ?, ?)",
+        [post["slug"], post["title"], post.get("subtitle"), post.get("author", "Atlastra"),
+         post.get("date"), post.get("read_min", 4), post.get("emoji", "⚽"),
+         post.get("image"), json.dumps(post.get("tags") or []), post.get("player"),
+         json.dumps(post.get("body") or []), model, week,
+         datetime.datetime.now().isoformat(timespec="seconds")])
+    con.commit()
+    con.close()
 
 
 def _summary(p: dict) -> dict:
@@ -105,11 +157,77 @@ def _summary(p: dict) -> dict:
 
 
 def list_posts() -> dict:
-    return {"available": True, "posts": [_summary(p) for p in POSTS]}
+    """Public blog index: SEED_POSTS + published DB posts, newest first."""
+    con = _conn()
+    rows = con.execute(
+        "SELECT slug, title, subtitle, author, date, read_min, emoji, image, tags, "
+        "player, body, status, model, week, created_at FROM posts WHERE status = 'published'"
+    ).fetchall()
+    con.close()
+    posts = list(SEED_POSTS) + [_row_to_post(r) for r in rows]
+    posts.sort(key=lambda p: p.get("date") or "", reverse=True)
+    return {"available": True, "posts": [_summary(p) for p in posts]}
 
 
-def get_post(slug: str) -> dict:
-    p = _BY_SLUG.get((slug or "").strip())
-    if not p:
+def list_drafts() -> dict:
+    """Admin-only: posts awaiting review, newest first."""
+    con = _conn()
+    rows = con.execute(
+        "SELECT slug, title, subtitle, author, date, read_min, emoji, image, tags, "
+        "player, body, status, model, week, created_at FROM posts WHERE status = 'draft' "
+        "ORDER BY created_at DESC").fetchall()
+    con.close()
+    return {"available": True, "drafts": [_row_to_post(r) for r in rows]}
+
+
+def get_post(slug: str, include_drafts: bool = False) -> dict:
+    slug = (slug or "").strip()
+    for p in SEED_POSTS:
+        if p["slug"] == slug:
+            return {"available": True, "post": p}
+    con = _conn()
+    row = con.execute(
+        "SELECT slug, title, subtitle, author, date, read_min, emoji, image, tags, "
+        "player, body, status, model, week, created_at FROM posts WHERE slug = ?",
+        [slug]).fetchone()
+    con.close()
+    if not row:
         return {"available": False}
-    return {"available": True, "post": p}
+    post = _row_to_post(row)
+    if post["status"] != "published" and not include_drafts:
+        return {"available": False}
+    return {"available": True, "post": post}
+
+
+def approve_post(slug: str) -> bool:
+    """Publish a draft: stamp today's date (when it actually goes live) and flip status."""
+    con = _conn()
+    cur = con.execute(
+        "UPDATE posts SET status = 'published', date = ? WHERE slug = ? AND status = 'draft'",
+        [datetime.date.today().isoformat(), slug])
+    con.commit()
+    ok = cur.rowcount > 0
+    con.close()
+    return ok
+
+
+def week_has_post(week: str) -> bool:
+    """Any post (draft or published) already generated for this ISO week -- the
+    idempotency check so the weekly refresher can't spam duplicate drafts."""
+    con = _conn()
+    row = con.execute("SELECT 1 FROM posts WHERE week = ? LIMIT 1", [week]).fetchone()
+    con.close()
+    return row is not None
+
+
+def discard_post(slug: str) -> bool:
+    """Soft-delete: flips status rather than deleting the row, so week_has_post()
+    still sees this week as attempted -- a discard shouldn't make the weekly
+    refresher immediately regenerate another draft for the same week."""
+    con = _conn()
+    cur = con.execute(
+        "UPDATE posts SET status = 'discarded' WHERE slug = ? AND status = 'draft'", [slug])
+    con.commit()
+    ok = cur.rowcount > 0
+    con.close()
+    return ok

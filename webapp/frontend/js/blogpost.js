@@ -50,21 +50,32 @@ async function playerCallout(name) {
 
 (async function () {
   const el = document.getElementById('post');
-  const slug = new URLSearchParams(location.search).get('slug') || '';
+  const params = new URLSearchParams(location.search);
+  const slug = params.get('slug') || '';
+  // ?preview=1 -- an admin looking at a draft awaiting review, from /admin.html.
+  // Same rendering path either way; only the endpoint (and the banner) differs.
+  const preview = params.get('preview') === '1';
+  const endpoint = preview ? '/api/admin/blog/preview?slug=' : '/api/blog?slug=';
   let r;
-  try { r = await api('/api/blog?slug=' + encodeURIComponent(slug)); } catch { r = null; }
+  try { r = await api(endpoint + encodeURIComponent(slug)); } catch { r = null; }
   if (!r || !r.available || !r.post) {
-    el.innerHTML = '<div class="empty-state">Post not found. <a href="/blog.html">Back to the blog</a>.</div>';
+    el.innerHTML = preview
+      ? '<div class="empty-state">Draft not found — it may already have been approved or discarded. <a href="/admin.html">Back to admin</a>.</div>'
+      : '<div class="empty-state">Post not found. <a href="/blog.html">Back to the blog</a>.</div>';
     return;
   }
   const p = r.post;
   document.title = 'Atlastra — ' + p.title;
   document.getElementById('crumb').textContent = p.title;
+  const draftBanner = (preview && p.status === 'draft')
+    ? '<div class="placeholder-note" style="margin-bottom:14px">👁 Draft preview — not published. <a href="/admin.html">Back to admin</a> to approve or discard it.</div>'
+    : '';
   const tags = (p.tags || []).map((t) => `<span class="blog-tag">${esc(t)}</span>`).join('');
   const callout = p.player ? await playerCallout(p.player) : '';
   const figure = p.image
     ? `<figure class="blog-figure"><img src="${esc(p.image)}" alt="${esc(p.player || p.title)}"></figure>` : '';
   el.innerHTML = `
+    ${draftBanner}
     ${figure}
     <header class="blog-hero">
       <div class="blog-tags">${tags}</div>

@@ -75,6 +75,7 @@ from webapp import scout_ai  # noqa: E402
 from webapp import weekly_recap  # noqa: E402
 from webapp import signature_skills  # noqa: E402
 from webapp import blog  # noqa: E402
+from webapp import auto_blog  # noqa: E402
 from webapp import tactics  # noqa: E402
 from webapp import shortlink  # noqa: E402
 from webapp import build_player  # noqa: E402
@@ -1307,8 +1308,8 @@ def api(path: str, q: dict) -> dict | list:
         return signature_skills.generate(name, url, refresh=q.get("refresh", ["0"])[0] == "1")
     if path == "/api/highlight_players":       # names of players that have highlight reels
         return {"players": signature_skills.cached_players()}
-    if path == "/api/blog":                    # blog index, or a single post with ?slug=
-        slug = q.get("slug", [""])[0]
+    if path == "/api/blog":                    # blog index, or a single PUBLISHED post with ?slug=
+        slug = q.get("slug", [""])[0]          # draft preview is /api/admin/blog/preview (admin-gated)
         return blog.get_post(slug) if slug else blog.list_posts()
     if path == "/api/weekly_recap":           # AI week-in-review (top performers, goals, results)
         gather = getattr(live_feed, "week_summary_data", None)
@@ -1639,6 +1640,24 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(auth.submit_score(game, period, user["id"], user["username"], score))
             return
+        if u.path in ("/api/admin/blog/approve", "/api/admin/blog/discard", "/api/admin/blog/generate"):
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user or not user.get("is_admin"):
+                self._json({"error": "Admins only."}, 403)
+                return
+            if u.path.endswith("/approve"):
+                self._json({"ok": blog.approve_post(str(b.get("slug", ""))[:200])})
+            elif u.path.endswith("/discard"):
+                self._json({"ok": blog.discard_post(str(b.get("slug", ""))[:200])})
+            else:                                       # /generate -- manual trigger, e.g. to
+                gather = getattr(live_feed, "week_summary_data", None)  # test before the weekly
+                if gather is None:                                      # refresher's own run
+                    self._json({"available": False, "error": "Weekly data unavailable."})
+                    return
+                with SoccerDB(read_only=DB_READ_ONLY) as d:
+                    res = auto_blog.generate_weekly_draft(d, gather(), force=bool(b.get("force")))
+                self._json(res)
+            return
         if u.path == "/api/shorten":                   # long ?s=... build -> /t/<code>
             res = shortlink.shorten(str(b.get("target", ""))[:32],
                                     str(b.get("payload", ""))[:shortlink.MAX_PAYLOAD + 1])
@@ -1850,6 +1869,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Admins only."}, 403)
                 return
             self._json(admin.overview())
+            return
+        if u.path == "/api/admin/blog/drafts":         # auto-generated posts awaiting review
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user or not user.get("is_admin"):
+                self._json({"error": "Admins only."}, 403)
+                return
+            self._json(blog.list_drafts())
+            return
+        if u.path == "/api/admin/blog/preview":        # a draft (or any post) by slug, admins only
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user or not user.get("is_admin"):
+                self._json({"error": "Admins only."}, 403)
+                return
+            self._json(blog.get_post(parse_qs(u.query).get("slug", [""])[0], include_drafts=True))
             return
         if u.path == "/api/ingest/queue":              # SofaScore paths the pusher should fetch
             if not INGEST_TOKEN or self.headers.get("X-Ingest-Token") != INGEST_TOKEN:
@@ -2087,6 +2120,30 @@ def _player_stats_refresher():
         time.sleep(PLAYER_STATS_EVERY)
 
 
+def _blog_refresher():
+    """Once a week, write one auto-generated blog draft about the week's standout
+    performance -- see auto_blog.py. ALWAYS lands as a draft (never auto-published,
+    per the human-review gate blog.py's docstring explains), so this only ever adds
+    something for an admin to look at on /admin.html, never changes the public site
+    by itself. Checked on a daily cadence rather than sleeping a full week so a
+    restart near the boundary doesn't miss the week entirely; blog.week_has_post()
+    makes re-checking the same week a no-op."""
+    import time
+    BLOG_CHECK_EVERY = int(os.environ.get("ATLASTRA_BLOG_CHECK_EVERY", str(24 * 3600)))
+    time.sleep(int(os.environ.get("ATLASTRA_BLOG_DELAY", "180")))
+    while True:
+        try:
+            gather = getattr(live_feed, "week_summary_data", None)
+            if gather is not None:
+                with SoccerDB(read_only=DB_READ_ONLY) as d:
+                    res = auto_blog.generate_weekly_draft(d, gather())
+                if res.get("available"):
+                    print(f"blog refresher: drafted '{res['slug']}' ({res['model']})", flush=True)
+        except Exception as e:                         # noqa: BLE001
+            print(f"blog refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(BLOG_CHECK_EVERY)
+
+
 def _preview_warmer():
     """Keep _PREVIEW_CACHE hot for the soonest upcoming fixtures so the Preview tab is
     instant on the first click. The pusher warms each match's SofaScore preview paths
@@ -2150,6 +2207,8 @@ if __name__ == "__main__":
         print("team info refresher: on (FotMob, manager/venue/squad)")
         threading.Thread(target=_player_stats_refresher, daemon=True).start()
         print("player stats refresher: on (FotMob, per-player season totals)")
+    threading.Thread(target=_blog_refresher, daemon=True).start()
+    print("blog refresher: on (weekly AI draft, held for admin review)")
     if live_feed.CACHE_MODE:
         threading.Thread(target=_preview_warmer, daemon=True).start()
         print(f"preview warmer: on (soonest {PREVIEW_WARM_N} upcoming, every {PREVIEW_WARM_EVERY}s)")
