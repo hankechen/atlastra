@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily check for the Atlastra biweekly rating refresh (server is UTC; 05:00 UTC = late-night US / early-morning Europe)
+
+[Timer]
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

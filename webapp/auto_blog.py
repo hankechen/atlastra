@@ -68,7 +68,9 @@ Total ~450-650 words across the p/list/quote text. Do not add anything outside t
 
 def _slugify(title: str, week: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")
-    return f"{s[:70]}-{week.lower()}"
+    if len(s) > 70:
+        s = s[:70].rsplit("-", 1)[0]                   # trim to the last whole word
+    return f"{s}-{week.lower()}"
 
 
 def _iso_week():

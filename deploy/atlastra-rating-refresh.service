@@ -1,0 +1,11 @@
+[Unit]
+Description=Atlastra biweekly rating refresh (self-gated -- see tools/rating_refresh.py)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/atlastra
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/atlastra/.env
+ExecStart=/opt/atlastra/venv/bin/python -m tools.rating_refresh

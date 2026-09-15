@@ -169,8 +169,18 @@ def _norm_weights(vec):
 
 
 def _metric_series(df, expr):
+    # A column absent entirely (not just null) -- e.g. the SofaScore-backfilled
+    # errors_per_90/clearances_per_90 columns, only ever added by a separate
+    # optional step (load_sofa_domestic) -- degrades to all-NaN rather than a
+    # hard crash. _zscore already treats NaN as neutral (z=0), matching
+    # load_sofa_domestic's own documented "missing metric is neutral" intent;
+    # this just makes that intent survive the column being missing outright,
+    # not merely null-filled.
     s = pd.Series(0.0, index=df.index)
     for col, sign in expr:
+        if col not in df.columns:
+            s = s + float("nan")
+            continue
         s = s + sign * pd.to_numeric(df[col], errors="coerce")
     return s
 
