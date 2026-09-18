@@ -92,10 +92,25 @@ def _build_xwalk(con: duckdb.DuckDBPyConnection) -> int:
              [r.team_name for r in g.itertuples()])
         for se, g in us.groupby("season")
     }
+    latest_domestic_season = max(pools) if pools else None
 
     rows = []
     for se, grp in ucl.groupby("season"):
         ids, names, teams = pools.get(se, ([], [], []))
+        if not names and latest_domestic_season and se > latest_domestic_season:
+            # This UCL season is NEWER than any domestic season we have -- e.g.
+            # it just started and Understat hasn't published it yet (see
+            # [[player-total-stats-fotmob]]). Fall back to the most recent
+            # domestic pool so these rows can still link to a player_id instead
+            # of being silently dropped; _team_ok still gates the match, so a
+            # summer transfer just fails to match rather than mis-matching.
+            # The `se > latest_domestic_season` guard (not just "missing from
+            # pools") matters: UCL goes back to 2008/09 but domestic pool
+            # coverage starts later, so plenty of OLD UCL seasons are also
+            # absent from `pools` -- those must stay skipped, not fall back to
+            # today's pool and risk matching a 2010 UCL "Rodrigo" against a
+            # current-day player who happens to share a first name.
+            ids, names, teams = pools[latest_domestic_season]
         if not names:
             continue
         used, leftover = set(), []

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Biweekly league-rating refresh — the automated half of "update the rating every
-2 weeks" (UCL scope is a separate, not-yet-built FotMob migration; see
-[[auto-blog-drafts]]-style memory note for the sibling decision on that).
+Biweekly league + UCL rating refresh — the automated half of "update the rating
+every 2 weeks". UCL scope now refreshes too: pipeline.load_ucl_fotmob fills in
+the CURRENT UCL season from FotMob (SofaScore itself stays Mac-only/manual, see
+[[sofascore-ucl-data-source]]); historical UCL seasons are untouched by this job.
 
 Runs the specific pipeline steps a rating refresh needs -- Understat scrape,
-datamb scrape, their loaders, the rating engine, the stat views, and the
-combined ratings -- WITHOUT ever calling pipeline.run_pipeline or
+datamb scrape, their loaders, the UCL-FotMob loader, the rating engine, the
+stat views, and the combined ratings -- WITHOUT ever calling pipeline.run_pipeline or
 pipeline.init_db(reset=True), which deletes the entire warehouse file. Every
 step this script calls only touches its own output table(s) (DROP TABLE IF
 EXISTS <its table> + recreate), the same safe pattern every other refresher in
@@ -46,9 +47,9 @@ HEALTH_URL = "http://127.0.0.1:8000/"
 SERVICE = "atlastra"
 
 # Each is `python -m pipeline.<module>` -- run in this order. Skips the
-# SofaScore UCL scrape/load entirely, so UCL-scope ratings stay at whatever
-# they were last set to (by a manual full pipeline run) -- see the module
-# docstring for why that's a deliberate, temporary scope cut, not an oversight.
+# SofaScore UCL scrape/load itself (that stays Mac-only/manual for historical
+# seasons -- see pipeline/load_ucl.py), but load_ucl_fotmob keeps the CURRENT
+# UCL season's rows fresh via FotMob's server-reachable CDN instead.
 STEPS = [
     ["pipeline.scrape", "--quick"],   # Understat, focus season + players only -- no need to
                                        # re-pull 12 historical seasons every 2 weeks
@@ -60,10 +61,14 @@ STEPS = [
                                        # docstring) -- must run after load_datamb or the DROP above
                                        # wipes these columns every cycle instead of just leaving them
                                        # stale. No network dependency here, so no SofaScore-block issue.
+    ["pipeline.load_ucl_fotmob"],     # current UCL season only, into the same ucl_player_stats table
+                                       # SofaScore's loader builds (data_source='fotmob' scoped delete
+                                       # + insert) -- historical seasons untouched. Must run before
+                                       # build_views, which rebuilds the UCL<->player_id crosswalk.
     ["pipeline.rate"],                # player_ratings_v2, rating_weights (the base engine)
-    ["pipeline.build_views"],         # v_stats_* views (no data written, just view definitions)
-    ["pipeline.rate_combined"],       # player_ratings_combined -- league scope refreshes; UCL
-                                       # scope is untouched since its SofaScore input isn't re-scraped
+    ["pipeline.build_views"],         # v_stats_* views + ucl_understat_xwalk (crosswalk picks up
+                                       # whatever load_ucl_fotmob just wrote)
+    ["pipeline.rate_combined"],       # player_ratings_combined -- league AND UCL scope both refresh now
 ]
 
 

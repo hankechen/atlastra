@@ -141,6 +141,11 @@ SOFASCORE_BASE = "https://api.sofascore.com/api/v1"
 SOFASCORE_UCL_TOURNAMENT_ID = 7
 UCL_MIN_SEASON_CODE = "0809"  # earliest UCL season to collect (2008/09)
 
+# FotMob's Champions League league id -- used only to fill in the CURRENT UCL
+# season (SofaScore is Mac-only, see pipeline/load_ucl_fotmob.py) while historical
+# seasons stay SofaScore-sourced.
+FOTMOB_UCL_LEAGUE_ID = 42
+
 # Top-5 domestic uniqueTournament ids on SofaScore -- used to backfill the two
 # defensive metrics datamb lacks (clearances, errors) so the rating engine's CB
 # and DM vectors don't have to drop them. league_key -> SofaScore tournament id.
