@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
 Biweekly league + UCL rating refresh — the automated half of "update the rating
-every 2 weeks". UCL scope now refreshes too: pipeline.load_ucl_fotmob fills in
-the CURRENT UCL season from FotMob (SofaScore itself stays Mac-only/manual, see
-[[sofascore-ucl-data-source]]); historical UCL seasons are untouched by this job.
+every 2 weeks". Both scopes now refresh even though Understat has published
+ZERO 2026/27 domestic data: pipeline.load_player_season_fotmob fills the
+CURRENT domestic season straight into player_season_stats, and
+pipeline.load_ucl_fotmob fills the CURRENT UCL season into ucl_player_stats
+(SofaScore itself stays Mac-only/manual for history, see
+[[sofascore-ucl-data-source]]). See [[ucl-fotmob-loader]] for the pattern both
+share. This does NOT unblock the PRIMARY datamb/Wyscout-only rating engine
+(pipeline.rate / player_ratings_v2) -- only the common-metric
+player_ratings_combined (both scopes).
 
 Runs the specific pipeline steps a rating refresh needs -- Understat scrape,
-datamb scrape, their loaders, the UCL-FotMob loader, the rating engine, the
-stat views, and the combined ratings -- WITHOUT ever calling pipeline.run_pipeline or
+datamb scrape, their loaders, the domestic + UCL FotMob loaders, the rating
+engine, the stat views, and the combined ratings -- WITHOUT ever calling pipeline.run_pipeline or
 pipeline.init_db(reset=True), which deletes the entire warehouse file. Every
 step this script calls only touches its own output table(s) (DROP TABLE IF
 EXISTS <its table> + recreate), the same safe pattern every other refresher in
@@ -61,6 +67,11 @@ STEPS = [
                                        # docstring) -- must run after load_datamb or the DROP above
                                        # wipes these columns every cycle instead of just leaving them
                                        # stale. No network dependency here, so no SofaScore-block issue.
+    ["pipeline.load_player_season_fotmob"],  # current domestic season only, straight into
+                                       # player_season_stats (Understat itself has zero 2026/27 data --
+                                       # see [[player-total-stats-fotmob]]); INSERT OR REPLACE by PK,
+                                       # never wiped by a later pipeline.load since that only ever
+                                       # touches seasons present in the scraped Understat parquet.
     ["pipeline.load_ucl_fotmob"],     # current UCL season only, into the same ucl_player_stats table
                                        # SofaScore's loader builds (data_source='fotmob' scoped delete
                                        # + insert) -- historical seasons untouched. Must run before
