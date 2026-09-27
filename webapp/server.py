@@ -696,6 +696,13 @@ def _ucl_last_matches():
     is the whole point: a club's genuinely last teamsheet is usually a league or cup game,
     and Bayern's was a 4-2-3-1 of reserves against Wehen Wiesbaden. What a side puts out in
     this competition is a different question from what it puts out on a Tuesday in the cup.
+
+    Deliberately does NOT pass `season=_UCL_SEASON` -- that constant is pinned to the last
+    COMPLETED edition for `_ucl_field`'s bracket simulator (a stable, full 36-team final
+    table), but "last used XI" needs the OPPOSITE: whatever edition is actually being played
+    right now. Omitting the param lets FotMob default to its current season, so this never
+    goes stale the way a hardcoded season code would the moment a new UCL campaign starts
+    (see [[ucl-fotmob-loader]] for the same current-season-resolution problem elsewhere).
     """
     import time as _t
     hit = _UCL_LAST.get("rows")
@@ -704,7 +711,7 @@ def _ucl_last_matches():
     out: dict = {}
     try:
         auth = getattr(_fotmob_mod(), "_auth", None)
-        raw = auth.get(f"/api/data/leagues?id={_UCL_LEAGUE_ID}&season={_UCL_SEASON}") if auth else {}
+        raw = auth.get(f"/api/data/leagues?id={_UCL_LEAGUE_ID}") if auth else {}
         for m in ((raw or {}).get("fixtures") or {}).get("allMatches") or []:
             if not (m.get("status") or {}).get("finished"):
                 continue
