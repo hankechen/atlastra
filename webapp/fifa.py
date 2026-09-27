@@ -1,12 +1,15 @@
 """
-FIFA / EA FC 26 player ratings — stable, ability-based (not season-dependent), used to
+FIFA / EA FC 27 player ratings — stable, ability-based (not season-dependent), used to
 drive the Tactics Lab instead of our percentile Atlas ratings. Provides each player's
 overall + the six FIFA attributes (pace, shooting, passing, dribbling, defending, physic)
 plus heading, which the tactics engine turns into unit strengths.
 
-Data: data/fifa_ratings.json (built from the EA FC 26 dataset). Matched by folded name
-with a 3-tier fallback (full name → first-initial+surname → surname), keeping the highest
-overall on collisions.
+Data: data/fifa_ratings.json (built from fut.gg's public FC 27 player-search API, each
+player's base "Rare" card -- no Icons/Heroes/specials). Matched by folded name with a
+3-tier fallback (full name → first-initial+surname → surname), keeping the highest
+overall on collisions. Heading isn't in that source at all (only on an expensive
+per-player detail endpoint); FC27 cards carried over the outgoing FC26 file's heading
+value for returning players, and fall back to physicality for players new to FC27.
 """
 import json
 import sys
