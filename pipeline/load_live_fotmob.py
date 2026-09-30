@@ -29,6 +29,15 @@ COVERED = {
     77: ("WC", "FIFA World Cup", "International"),
     50: ("EURO", "UEFA EURO", "International"),
     44: ("COPA", "Copa América", "International"),
+    # UEFA Nations League: one FotMob primaryId per DIVISION (A/B/C/D), each id
+    # spanning all of that division's groups -- confirmed by pulling a real
+    # matchday and seeing e.g. id 9808 carry League C's groups 1/2/3/4 together,
+    # not a separate id per group. All four share one key/name so the live page
+    # shows one "UEFA Nations League" section rather than four.
+    9806: ("UNL", "UEFA Nations League", "International"),
+    9807: ("UNL", "UEFA Nations League", "International"),
+    9808: ("UNL", "UEFA Nations League", "International"),
+    9809: ("UNL", "UEFA Nations League", "International"),
     42: ("UCL", "UEFA Champions League", "Champions League"),
     47: ("EPL", "Premier League", "Top 5 Leagues"),
     87: ("LALIGA", "La Liga", "Top 5 Leagues"),
@@ -65,6 +74,15 @@ NAT_ISO = {
     "Japan": "JP", "South Korea": "KR", "Korea Republic": "KR", "Australia": "AU",
     "Iran": "IR", "Saudi Arabia": "SA", "Qatar": "QA", "Iraq": "IQ", "Uzbekistan": "UZ",
     "Jordan": "JO", "New Zealand": "NZ",
+    # UEFA Nations League runs all 55 UEFA members, including the smaller nations
+    # that never reach a WC/EURO/Copa field this dict was originally built for.
+    "North Macedonia": "MK", "San Marino": "SM", "Belarus": "BY", "Faroe Islands": "FO",
+    "Kazakhstan": "KZ", "Moldova": "MD", "Bulgaria": "BG", "Luxembourg": "LU",
+    "Estonia": "EE", "Kosovo": "XK", "Israel": "IL", "Lithuania": "LT",
+    "Azerbaijan": "AZ", "Gibraltar": "GI", "Andorra": "AD", "Georgia": "GE",
+    "Northern Ireland": "GB-NIR", "Bosnia and Herzegovina": "BA", "Armenia": "AM",
+    "Montenegro": "ME", "Latvia": "LV", "Cyprus": "CY", "Malta": "MT",
+    "Liechtenstein": "LI", "Turkiye": "TR",  # FotMob's own spelling, no diacritic
 }
 
 _auth = FotmobAuth()

@@ -33,13 +33,14 @@ function compRank(label) {
   if (l.includes('world cup')) return 0;
   if (/\beuro\b/.test(l)) return 1;                 // "UEFA EURO", not "Europa League"
   if (l.includes('copa')) return 2;                 // Copa América
-  if (l.includes('champions league')) return qual ? 9 : 3;
-  if (l.includes('premier league')) return 4;
-  if (l.includes('la liga') || l.includes('laliga')) return 5;
-  if (l.includes('serie a')) return 6;
-  if (l.includes('ligue 1')) return 7;
-  if (l.includes('bundesliga')) return 8;
-  return 10;                                         // the rest
+  if (l.includes('nations league')) return 3;
+  if (l.includes('champions league')) return qual ? 10 : 4;
+  if (l.includes('premier league')) return 5;
+  if (l.includes('la liga') || l.includes('laliga')) return 6;
+  if (l.includes('serie a')) return 7;
+  if (l.includes('ligue 1')) return 8;
+  if (l.includes('bundesliga')) return 9;
+  return 11;                                         // the rest
 }
 
 // group a flat match list by competition, then order the sections by importance
