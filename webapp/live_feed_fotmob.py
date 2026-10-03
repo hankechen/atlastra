@@ -71,9 +71,30 @@ def _status(general: dict, hstatus: dict):
     return "notstarted", reason.get("long") or "Not started", None
 
 
+# Pooled-host-nation tournaments: every match is at a neutral-ish venue regardless
+# of which side is listed "home" -- see _neutral_venue. Nations League (added to
+# live coverage separately, see [[nations-league-live-coverage]]) is NOT one of
+# these: it's a genuine home-and-away format, just between national teams.
+_WC_STYLE = {77, 50, 44}                              # WC / EURO / Copa América
+_NATIONS_LEAGUE = {9806, 9807, 9808, 9809}            # UEFA Nations League A/B/C/D
+
+
 def _national(general: dict) -> bool:
+    """True for any match between national teams -- gates the FIFA-rank/form rating
+    path vs the club-squad fitted engine (_model), NAT_ISO flag lookups, and squad-
+    building logic. NOT the same question as "is this a neutral tournament venue"
+    (_neutral_venue) -- conflating the two was a real bug: Nations League matches
+    were falling through to the club-XI engine entirely (home_national/away_national
+    both False), skipping the FIFA-rank signal the national-team path exists for."""
     pid = general.get("parentLeagueId")
-    return pid in {77, 50, 44}                        # WC / EURO / Copa
+    return pid in _WC_STYLE or pid in _NATIONS_LEAGUE
+
+
+def _neutral_venue(general: dict) -> bool:
+    """True only for WC/EURO/Copa, where the 'home' team isn't actually playing at
+    home -- dampens the Poisson home-advantage term in _model. Nations League stays
+    False here even though _national() is True for it: it's a real home fixture."""
+    return general.get("parentLeagueId") in _WC_STYLE
 
 
 # FotMob's knockout round notation ("1/8") -> readable name
@@ -115,6 +136,7 @@ def header(eid: int) -> dict:
     st = h.get("status") or {}
     stype, sdesc, minute = _status(g, st)
     intl = _national(g)
+    neutral = _neutral_venue(g)
     ib = ((d.get("content") or {}).get("matchFacts") or {}).get("infoBox") or {}
     ref = (ib.get("Referee") or {}).get("text")
     ut = g.get("matchTimeUTC")
@@ -131,7 +153,7 @@ def header(eid: int) -> dict:
         "status": stype, "status_desc": sdesc, "minute": minute,
         "home": home.get("name"), "home_id": home.get("id"),
         "home_country": NAT_ISO.get(home.get("name")) if intl else None,
-        "home_national": intl,
+        "home_national": intl, "neutral_venue": neutral,
         "away": away.get("name"), "away_id": away.get("id"),
         "away_country": NAT_ISO.get(away.get("name")) if intl else None,
         "away_national": intl,
@@ -540,7 +562,7 @@ def _model(eid):
         shape = _T._XG_SHAPE                               # over-dispersed, as validated
         pmf = _T._goal_pmf
     else:
-        adv = 0.20 * (0.4 if h["home_national"] else 1.0)     # WC venues ~neutral
+        adv = 0.20 * (0.4 if h["neutral_venue"] else 1.0)     # WC venues ~neutral
         # Stronger supremacy (wider clamp + 0.65 weight vs the old 0.5) so lopsided games push
         # the favourite's expected goals up to ~3-4 -> 3-0/4-0 scorelines become likely, not
         # just 2-0. Even games stay ~1.4 each.
