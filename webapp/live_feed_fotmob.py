@@ -551,17 +551,21 @@ def _model(eid):
     if hq is not None:
         hr, ar = 0.6 * hr + 0.4 * hq, 0.6 * ar + 0.4 * aq
     # The fitted engine where we can build both squads; the rating model where we can't.
-    shape = None
+    # Both now share the same over-dispersed PMF (see the `else` branch below) -- `fitted`
+    # tracks which ONE was actually used for the "source" label, independent of that.
+    fitted = False
     hu = au = None
     if not h["home_national"] and not h["away_national"]:
         hu, au = _squad_units(h["home_id"]), _squad_units(h["away_id"])
     if hu and au:
         from webapp import tactics as _T
+        fitted = True
         hx = max(0.2, _T._base_xg(hu, au) * _T._UCL_HOME_XG)
         ax = max(0.2, _T._base_xg(au, hu) * _T._UCL_AWAY_XG)
         shape = _T._XG_SHAPE                               # over-dispersed, as validated
         pmf = _T._goal_pmf
     else:
+        from webapp import tactics as _T
         adv = 0.20 * (0.4 if h["neutral_venue"] else 1.0)     # WC venues ~neutral
         # Stronger supremacy (wider clamp + 0.65 weight vs the old 0.5) so lopsided games push
         # the favourite's expected goals up to ~3-4 -> 3-0/4-0 scorelines become likely, not
@@ -569,7 +573,16 @@ def _model(eid):
         sup = max(-3.0, min(3.0, (hr - ar) / 230.0))
         hx = max(0.2, 1.35 + sup * 0.65 + adv)
         ax = max(0.2, 1.35 - sup * 0.65)
-        pmf = (lambda k, lam, _s=None: _pois(k, lam))
+        # Same over-dispersed PMF as the fitted club engine above, not plain Poisson --
+        # the module docstring already documents plain Poisson as the measured-worse
+        # distribution for club matches, and the reason generalises: real goal counts
+        # are over-dispersed relative to Poisson regardless of competition. Plain
+        # Poisson concentrates too much mass on the mean, so even a clearly-favoured
+        # side's "likeliest scoreline" stayed 1-1 instead of a 2-1/3-1 that matches its
+        # real win probability -- this was the rating path silently missing the fix
+        # the fitted path already had.
+        shape = _T._XG_SHAPE
+        pmf = _T._goal_pmf
     ph = pd = pa = 0.0
     grid = []
     for i in range(9):
@@ -612,7 +625,7 @@ def _model(eid):
     return {"consensus": cons, "predicted": predicted, "score": best, "scores": scores,
             "result": predicted, "conf": round(max(ph, pd, pa) / tot * 100),
             "xg": (hx, ax),                                # reused by win_probability()
-            "source": "fitted" if shape else "rating"}
+            "source": "fitted" if fitted else "rating"}
 
 
 def win_probability(eid: int) -> dict:
