@@ -3675,7 +3675,8 @@ class SoccerDB:
             return self._UNDERSTAT_POS_LABEL.get(tok)
         return None
 
-    def _player_stat_scopes(self, pid: int, season: str = FOCUS_SEASON) -> dict:
+    def _player_stat_scopes(self, pid: int, season: str = FOCUS_SEASON,
+                            live_overlay: bool = True) -> dict:
         """Cumulative totals split into league / ucl / combined, from the canonical
         v_stats_combined (row-stacked by competition). Combined = league + ucl
         (counts summed, % rates minutes-weighted). Scopes with no minutes are
@@ -3708,7 +3709,7 @@ class SoccerDB:
                 d[c] = _i(getattr(r, c))
             if d["minutes"]:
                 scopes[r.scp] = d
-        if season == FOCUS_SEASON:
+        if season == FOCUS_SEASON and live_overlay:
             try:
                 live = self.con.execute("""
                     SELECT f.matches, f.minutes, f.goals, f.assists, f.xg, f.xa,
@@ -4380,7 +4381,13 @@ class SoccerDB:
             fpid = self.con.execute(
                 "SELECT max(fotmob_player_id) FROM player_enrichment "
                 "WHERE player_id=? AND fotmob_player_id IS NOT NULL", [pid]).fetchone()
-            sv = dict(self._player_stat_scopes(pid, season).get(scope) or {})
+            # Compare is explicitly a "this season vs that season" tool -- showing a live
+            # current-season overlay under a historical season's own label would silently
+            # understate it (a player's 25/26 shows 5 games instead of a real 29) exactly
+            # like the profile page's tiles are allowed to for "current status", but here
+            # there's no equivalent live badge to make that honest. Real user-caught bug,
+            # see [[compare-live-overlay-bug]].
+            sv = dict(self._player_stat_scopes(pid, season, live_overlay=False).get(scope) or {})
             if sv.get("minutes"):                         # derive G+A per 90 for this scope
                 m = sv["minutes"]
                 sv["ga_per90"] = round(((sv.get("goals") or 0) + (sv.get("assists") or 0)) / m * 90, 2)
