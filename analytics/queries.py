@@ -3731,13 +3731,41 @@ class SoccerDB:
                     "passes_completed": None, "pass_accuracy_pct": None, "duels_won_pct": None,
                 }
                 # Whatever 'ucl' scope is still in `scopes` here is from the SAME stale
-                # `season` query as the league numbers this overlay just replaced -- e.g.
-                # a deep UCL run from the completed 2025/26 campaign, not anything played
+                # `season` query as the league numbers this overlay just replaced -- a
+                # deep UCL run from the completed 2025/26 campaign, not anything played
                 # this season. Combining it with the live league total would silently
                 # splice two different seasons together (the exact bug already caught
-                # once in league_standings()'s live overlay). Current-season UCL data
-                # simply isn't covered by this overlay yet, so drop it rather than mix.
-                scopes.pop("ucl", None)
+                # once in league_standings()'s live overlay), so it's dropped below.
+                #
+                # Current-season UCL DOES have its own live source now though
+                # (pipeline.load_ucl_fotmob, see [[ucl-fotmob-loader]] -- shipped after
+                # this drop-it comment was written) -- try that first. season resolved
+                # dynamically (MAX, not a hardcoded year) so this doesn't go stale the
+                # same way _UCL_SEASON/FOCUS_SEASON already have elsewhere.
+                ucl_season = self.con.execute(
+                    "SELECT max(season) FROM ucl_player_stats WHERE data_source = 'fotmob'"
+                ).fetchone()[0]
+                live_ucl = self.con.execute("""
+                    SELECT u.appearances, u.minutes_played, u.goals, u.assists, u.expected_goals,
+                           u.total_shots, u.key_passes, u.big_chances_created, u.successful_dribbles
+                    FROM ucl_player_stats u
+                    JOIN ucl_understat_xwalk x
+                         ON x.sofascore_player_id = u.sofascore_player_id AND x.season = u.season
+                    WHERE x.player_id = ? AND u.season = ? AND u.minutes_played > 0
+                """, [pid, ucl_season]).fetchone() if ucl_season else None
+                if live_ucl:
+                    scopes["ucl"] = {
+                        "games": _i(live_ucl[0]), "minutes": _i(live_ucl[1]),
+                        "goals": _r(live_ucl[2], 2), "assists": _r(live_ucl[3], 2),
+                        "xg": _r(live_ucl[4], 2), "xa": None,
+                        "shots": _i(live_ucl[5]), "chances_created": _i(live_ucl[6]),
+                        "big_chances_created": _i(live_ucl[7]),
+                        "dribbles_completed": _i(live_ucl[8]),
+                        "duels_won": None, "tackles": None, "interceptions": None,
+                        "passes_completed": None, "pass_accuracy_pct": None, "duels_won_pct": None,
+                    }
+                else:
+                    scopes.pop("ucl", None)
         lg, ucl = scopes.get("league"), scopes.get("ucl")
         if lg and ucl:
             comb = {c: round((lg[c] or 0) + (ucl[c] or 0), 2) for c in self._SCOPE_COUNTS}
