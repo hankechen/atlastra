@@ -201,7 +201,8 @@ table td,table th{padding-top:6px;padding-bottom:6px}
 /* featured players (Mbappé behind, Yamal front) as transparent cutouts bleeding
    out of the hero's right edge */
 .hero-figs{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden}
-.hero-fig{position:absolute;top:5%;display:block;pointer-events:auto;transition:transform .28s ease}
+.hero-fig{position:absolute;top:5%;display:block;pointer-events:auto;transition:transform .28s ease;
+  will-change:transform}
 .hero-fig img{display:block;height:100%;width:auto;object-fit:contain;object-position:top;
   filter:drop-shadow(0 12px 26px rgba(0,0,0,.5))}
 .hero-fig.fig-back{right:16%;height:132%;opacity:.92;z-index:1}
