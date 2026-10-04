@@ -98,6 +98,15 @@ STEPS = [
                                        # before (only ever ran via the full pipeline.run_pipeline,
                                        # which nothing here calls) -- so it had gone stale independently
                                        # of player_ratings_v2 itself. Added so it can't happen again.
+    ["tools.freeze_primary_rating"],  # stashes what pipeline.rate/profile just computed into
+                                       # *_live tables, then restores the frozen 2025/26 snapshot
+                                       # back onto player_ratings_v2/player_profile_metrics/
+                                       # player_radar_metrics/player_tendencies -- user asked to keep
+                                       # computing 2026/27 every cycle (so no progress is lost) but
+                                       # NOT show it yet, since only a handful of players clear the
+                                       # 600-min gate this early and ratings read as oddly low (see
+                                       # [[primary-rating-display-freeze]]). Remove this step (or
+                                       # repoint it at *_live) to cut the site over for real later.
     ["pipeline.build_views"],         # v_stats_* views + ucl_understat_xwalk (crosswalk picks up
                                        # whatever load_ucl_fotmob just wrote)
     ["pipeline.rate_combined"],       # player_ratings_combined -- league AND UCL scope both refresh now
