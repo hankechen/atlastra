@@ -14,8 +14,8 @@ each player on EACH of those metrics as a percentile within their position group
 "Areas of improvement" are the weaknesses ranked by the metric's WEIGHT in the
 position vector: fixing a high-weight weakness raises the player's rating most.
 
-Same population as the rating engine (datamb 2025/26, Top-5, >=600 min, main
-position). Writes:
+Same population as the rating engine (datamb's current season per
+config.DATAMB_SEASON, Top-5, >=600 min, main position). Writes:
   player_profile_metrics  -- one row per (player, metric): value, percentile, label
   v_player_profile        -- one row per player: position, rating, and the
                              comma-joined top strengths / weaknesses / improvements
@@ -37,11 +37,11 @@ from pipeline.load_enrich import (_norm, _name_compatible, MATCH_THRESHOLD,
                                   RECOVER_THRESHOLD)
 
 try:
-    from config import DB_PATH, FOCUS_SEASON, MIN_MINUTES_FOR_RATING
+    from config import DB_PATH, DATAMB_SEASON, MIN_MINUTES_FOR_RATING
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import DB_PATH, FOCUS_SEASON, MIN_MINUTES_FOR_RATING
+    from config import DB_PATH, DATAMB_SEASON, MIN_MINUTES_FOR_RATING
 
 warnings.filterwarnings("ignore")
 
@@ -219,7 +219,7 @@ def _assign_groups(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_profiles(season: str = FOCUS_SEASON,
+def build_profiles(season: str = DATAMB_SEASON,
                    min_minutes: int = MIN_MINUTES_FOR_RATING) -> None:
     con = duckdb.connect(str(DB_PATH))
     df = con.execute(f"""

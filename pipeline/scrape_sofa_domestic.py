@@ -21,12 +21,12 @@ import tls_requests
 
 try:
     from config import (RAW_DIR, SOFASCORE_BASE, SOFASCORE_TOP5_TOURNAMENTS,
-                        FOCUS_SEASON)
+                        DATAMB_SEASON)
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from config import (RAW_DIR, SOFASCORE_BASE, SOFASCORE_TOP5_TOURNAMENTS,
-                        FOCUS_SEASON)
+                        DATAMB_SEASON)
 
 warnings.filterwarnings("ignore")
 
@@ -88,7 +88,7 @@ def scrape_league(league_key: str, tid: int, code: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def scrape(season: str = FOCUS_SEASON) -> None:
+def scrape(season: str = DATAMB_SEASON) -> None:
     SOFA_RAW.mkdir(parents=True, exist_ok=True)
     print(f"=== SofaScore Top-5 domestic defense {_season_year(season)} ===")
     time.sleep(RATE_LIMIT_SEC)

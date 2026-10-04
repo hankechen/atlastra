@@ -98,8 +98,19 @@ DATAMB_POSITIONS = {
     "ST": "Striker",
 }
 
-# datamb publishes the current season only.
-DATAMB_SEASONS = [FOCUS_SEASON]
+# datamb publishes the current season only -- but "current" on ITS OWN site rolls
+# over independently of FOCUS_SEASON (which stays pinned to the newest season
+# Understat has actually published, often a full season behind). Conflating the
+# two was a real bug: when datamb rolled over to 2026/27 while Understat still had
+# nothing, every datamb request kept asking for the now-gone 2025/26 bucket and
+# 404'd -- which looked exactly like a paywall (and was treated as one) but
+# wasn't; the bulk .xlsx files were freely served the whole time, just under the
+# new season code. Confirmed live 2026-10-03: data/raw/datamb/{GK,CB,FB,CM,FW,ST}
+# all 200 under TOP72627. Bump this by hand each year datamb rolls over (same
+# manual-maintenance pattern as webapp/server.py's _UCL_SEASON) -- no "current
+# season" API endpoint found on datamb worth resolving this dynamically against.
+DATAMB_SEASON = "2627"
+DATAMB_SEASONS = [DATAMB_SEASON]
 
 # datamb covers "TOP7" = our Top-5 PLUS the Eredivisie (NL) and Primeira Liga
 # (PT). The rating engine pools "within position group", and mixing in the two

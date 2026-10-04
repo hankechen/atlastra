@@ -22,11 +22,11 @@ import duckdb
 import pandas as pd
 
 try:
-    from config import DB_PATH, RAW_DIR, FOCUS_SEASON, DATAMB_NON_TOP5_TEAMS
+    from config import DB_PATH, RAW_DIR, DATAMB_SEASON, DATAMB_NON_TOP5_TEAMS
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import DB_PATH, RAW_DIR, FOCUS_SEASON, DATAMB_NON_TOP5_TEAMS
+    from config import DB_PATH, RAW_DIR, DATAMB_SEASON, DATAMB_NON_TOP5_TEAMS
 
 warnings.filterwarnings("ignore")
 
@@ -43,7 +43,7 @@ def _slug(col: str) -> str:
     return re.sub(r"_+", "_", s)
 
 
-def load_datamb(season: str = FOCUS_SEASON) -> None:
+def load_datamb(season: str = DATAMB_SEASON) -> None:
     src = DATAMB_RAW / f"player_wyscout_{season}.parquet"
     if not src.exists():
         print(f"No {src.name} -- run `python -m pipeline.scrape_datamb` first. Skipping.")

@@ -30,11 +30,11 @@ import numpy as np
 import pandas as pd
 
 try:
-    from config import DB_PATH, FOCUS_SEASON, MIN_MINUTES_FOR_RATING
+    from config import DB_PATH, DATAMB_SEASON, MIN_MINUTES_FOR_RATING
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import DB_PATH, FOCUS_SEASON, MIN_MINUTES_FOR_RATING
+    from config import DB_PATH, DATAMB_SEASON, MIN_MINUTES_FOR_RATING
 
 warnings.filterwarnings("ignore")
 
@@ -267,7 +267,7 @@ def _rate_group(df: pd.DataFrame, group: str) -> pd.DataFrame:
     return out
 
 
-def rate(season: str = FOCUS_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) -> None:
+def rate(season: str = DATAMB_SEASON, min_minutes: int = MIN_MINUTES_FOR_RATING) -> None:
     con = duckdb.connect(str(DB_PATH))
     df = con.execute(f"""
         SELECT * FROM player_wyscout

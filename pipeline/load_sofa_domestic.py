@@ -25,11 +25,11 @@ import pandas as pd
 from rapidfuzz import fuzz
 
 try:
-    from config import DB_PATH, RAW_DIR, FOCUS_SEASON
+    from config import DB_PATH, RAW_DIR, DATAMB_SEASON
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import DB_PATH, RAW_DIR, FOCUS_SEASON
+    from config import DB_PATH, RAW_DIR, DATAMB_SEASON
 
 warnings.filterwarnings("ignore")
 
@@ -69,7 +69,7 @@ def _per90(total, minutes):
     return round(float(total) / float(minutes) * 90, 4)
 
 
-def load_sofa_domestic(season: str = FOCUS_SEASON) -> None:
+def load_sofa_domestic(season: str = DATAMB_SEASON) -> None:
     src = SOFA_RAW / f"domestic_defense_{season}.parquet"
     if not src.exists():
         print(f"No {src.name} -- run `python -m pipeline.scrape_sofa_domestic` first. Skipping.")

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
 Biweekly league + UCL rating refresh — the automated half of "update the rating
-every 2 weeks". Both scopes now refresh even though Understat has published
-ZERO 2026/27 domestic data: pipeline.load_player_season_fotmob fills the
-CURRENT domestic season straight into player_season_stats, and
-pipeline.load_ucl_fotmob fills the CURRENT UCL season into ucl_player_stats
-(SofaScore itself stays Mac-only/manual for history, see
-[[sofascore-ucl-data-source]]). See [[ucl-fotmob-loader]] for the pattern both
-share. This does NOT unblock the PRIMARY datamb/Wyscout-only rating engine
-(pipeline.rate / player_ratings_v2) -- only the common-metric
-player_ratings_combined (both scopes).
+every 2 weeks". Both the combined scopes AND the PRIMARY rating refresh now:
+- Combined (player_ratings_combined): pipeline.load_player_season_fotmob fills
+  the CURRENT domestic season straight into player_season_stats, and
+  pipeline.load_ucl_fotmob fills the CURRENT UCL season into ucl_player_stats
+  (SofaScore itself stays Mac-only/manual for history, see
+  [[sofascore-ucl-data-source]]). See [[ucl-fotmob-loader]] for the pattern.
+- Primary (player_ratings_v2, pipeline.rate + pipeline.profile): datamb.football
+  was never actually paywalled -- it was misdiagnosed as one (2026-09ish) when
+  its own site had rolled over to serving the 2026/27 season while this project's
+  scraper kept requesting the now-gone 2025/26 bucket under
+  config.FOCUS_SEASON, which is pinned to whatever Understat has published (a
+  season behind). Found and fixed 2026-10-03: config.DATAMB_SEASON is now a
+  SEPARATE constant from FOCUS_SEASON (datamb's own rollover is independent of
+  Understat's), and pipeline.rate/load_datamb/load_sofa_domestic/
+  scrape_sofa_domestic/profile all default to it. See [[datamb-season-fix]] for
+  the full story.
 
 Runs the specific pipeline steps a rating refresh needs -- Understat scrape,
 datamb scrape, their loaders, the domestic + UCL FotMob loaders, the rating
@@ -76,7 +83,15 @@ STEPS = [
                                        # SofaScore's loader builds (data_source='fotmob' scoped delete
                                        # + insert) -- historical seasons untouched. Must run before
                                        # build_views, which rebuilds the UCL<->player_id crosswalk.
-    ["pipeline.rate"],                # player_ratings_v2, rating_weights (the base engine)
+    ["pipeline.rate"],                # player_ratings_v2, rating_weights (the PRIMARY engine --
+                                       # datamb-only, config.DATAMB_SEASON, see the 2026-10-03 fix note
+                                       # at the top of this file)
+    ["pipeline.profile"],             # player_profile_metrics / v_player_profile -- the table that
+                                       # actually bridges player_ratings_v2 to a player_id for the
+                                       # profile page's rating/rank/percentile. Was NEVER in this list
+                                       # before (only ever ran via the full pipeline.run_pipeline,
+                                       # which nothing here calls) -- so it had gone stale independently
+                                       # of player_ratings_v2 itself. Added so it can't happen again.
     ["pipeline.build_views"],         # v_stats_* views + ucl_understat_xwalk (crosswalk picks up
                                        # whatever load_ucl_fotmob just wrote)
     ["pipeline.rate_combined"],       # player_ratings_combined -- league AND UCL scope both refresh now
