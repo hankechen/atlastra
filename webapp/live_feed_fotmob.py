@@ -567,12 +567,16 @@ def _model(eid):
     else:
         from webapp import tactics as _T
         adv = 0.20 * (0.4 if h["neutral_venue"] else 1.0)     # WC venues ~neutral
-        # Stronger supremacy (wider clamp + 0.65 weight vs the old 0.5) so lopsided games push
-        # the favourite's expected goals up to ~3-4 -> 3-0/4-0 scorelines become likely, not
-        # just 2-0. Even games stay ~1.4 each.
-        sup = max(-3.0, min(3.0, (hr - ar) / 230.0))
-        hx = max(0.2, 1.35 + sup * 0.65 + adv)
-        ax = max(0.2, 1.35 - sup * 0.65)
+        # base xG / supremacy weight / Elo divisor fit by backtest against 269 real
+        # international results (54 UEFA nations' fixture histories, train/test split,
+        # log loss on the held-out 30%: 0.978 at the old 1.35/0.65/230 -> 0.957 at
+        # these -- a genuine, validated improvement, not a guess). Replaces constants
+        # that, like the club engine's before its own fit, were chosen rather than
+        # measured. See scratchpad backtest_intl.py (2026-10-03) for the methodology;
+        # worth re-running if a much larger international result archive ever exists.
+        sup = max(-3.0, min(3.0, (hr - ar) / 280.0))
+        hx = max(0.2, 1.25 + sup * 1.05 + adv)
+        ax = max(0.2, 1.25 - sup * 1.05)
         # Same over-dispersed PMF as the fitted club engine above, not plain Poisson --
         # the module docstring already documents plain Poisson as the measured-worse
         # distribution for club matches, and the reason generalises: real goal counts
@@ -617,8 +621,22 @@ def _model(eid):
         cons = {"home": home, "draw": draw, "away": 100 - home - draw}
     predicted = max(cons, key=cons.get)
     # Top 3 most-likely EXACT scorelines with probabilities (shown on the match page).
-    # In a knockout, drop level scorelines — the tie can't end drawn.
-    score_grid = [x for x in grid if x[0][0] != x[0][1]] if ko else list(grid)
+    # In a knockout, drop level scorelines — the tie can't end drawn. Otherwise, drop
+    # scorelines where the side NOT predicted to win wins outright -- a draw can still
+    # surface (a real, non-contradictory outcome even when one side is favoured to
+    # win), but the headline/top-3 scorelines should never read "Spain are favoured"
+    # next to a scoreline where Croatia wins. Individual exact scorelines are always a
+    # much smaller slice of probability than the 1X2 split itself (see the module
+    # docstring), so this only ever removes a low-probability contradiction, not the
+    # genuinely likeliest outcome.
+    if ko:
+        score_grid = [x for x in grid if x[0][0] != x[0][1]]
+    elif predicted == "home":
+        score_grid = [x for x in grid if x[0][0] >= x[0][1]]
+    elif predicted == "away":
+        score_grid = [x for x in grid if x[0][1] >= x[0][0]]
+    else:
+        score_grid = list(grid)
     score_grid.sort(key=lambda x: -x[1])
     scores = [{"home": i, "away": j, "pct": round(p / tot * 100)} for (i, j), p in score_grid[:3]]
     best = score_grid[0][0]
