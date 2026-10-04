@@ -69,6 +69,12 @@ STEPS = [
     ["pipeline.scrape_datamb"],       # datamb.football Wyscout stats, current season only (DATAMB_SEASONS)
     ["pipeline.load"],                # reload Understat data into the core tables (own tables only)
     ["pipeline.load_datamb"],         # player_wyscout (DROPs + recreates -- wipes the backfill below)
+    ["pipeline.load_fotmob_clearances"],  # clearances_per_90 only (no FotMob errors_per_90
+                                       # equivalent), FotMob-sourced -- only fills rows still NULL,
+                                       # so a working load_sofa_domestic right after this still wins
+                                       # wherever SofaScore's real data is available. Added because
+                                       # SofaScore now blocks even the Mac (see [[datamb-season-fix]]),
+                                       # so this was 100% NULL -> neutral for all of 2026/27 otherwise.
     ["pipeline.load_sofa_domestic"],  # re-applies clearances/errors_per_90 onto player_wyscout from
                                        # the cached raw parquet (NOT a live SofaScore call -- see its
                                        # docstring) -- must run after load_datamb or the DROP above
