@@ -30,13 +30,13 @@ import sys
 import pandas as pd
 
 try:
-    from config import FOCUS_SEASON, MIN_MINUTES_FOR_RATING
+    from config import DATAMB_SEASON, MIN_MINUTES_FOR_RATING
     from pipeline.rate import (VECTORS, BUCKET_TO_GROUPS, _split_cm, _rate_group,
                                _norm_weights, _metric_series, _zscore, _is_rate)
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import FOCUS_SEASON, MIN_MINUTES_FOR_RATING
+    from config import DATAMB_SEASON, MIN_MINUTES_FOR_RATING
     from pipeline.rate import (VECTORS, BUCKET_TO_GROUPS, _split_cm, _rate_group,
                                _norm_weights, _metric_series, _zscore, _is_rate)
 
@@ -131,7 +131,11 @@ def config(con) -> dict:
     universe = _load_universe(con)
     positions = []
     for key, label in POSITIONS:
-        cols = _group_columns(key)
+        # a column can be entirely absent from the warehouse (e.g. errors_per_90,
+        # which depended on SofaScore and has no FotMob equivalent -- see
+        # pipeline.load_fotmob_clearances) without that breaking every OTHER
+        # position's sliders too.
+        cols = [(c, inv) for c, inv in _group_columns(key) if c in universe.columns]
         n = len(cols)
         group_df = universe[universe["position_group"] == key]
         sliders = []
@@ -150,7 +154,7 @@ def config(con) -> dict:
                           "field_size": int(len(group_df))})
     return {"available": True, "positions": positions, "minute_tiers": MINUTE_TIERS,
             "attr_min": _ATTR_MIN, "attr_max": _ATTR_MAX, "attr_default": _ATTR_DEFAULT,
-            "season": FOCUS_SEASON}
+            "season": DATAMB_SEASON}
 
 
 # ---- the fictional field: same query + overlay pipeline.rate.rate() uses ----------
@@ -168,7 +172,7 @@ def _load_universe(con) -> pd.DataFrame:
         return _UNIVERSE_CACHE
     df = con.execute(f"""
         SELECT * FROM player_wyscout
-        WHERE season = '{FOCUS_SEASON}' AND datamb_position = main_position
+        WHERE season = '{DATAMB_SEASON}' AND datamb_position = main_position
           AND minutes_played >= {MIN_MINUTES_FOR_RATING} AND in_top5
     """).df()
     df["datamb_group"] = None
@@ -241,7 +245,7 @@ def build_rating(con, group: str, minutes: int, attrs: dict[str, int]) -> dict:
     if len(group_df) < 5:
         return {"available": False, "error": "Not enough real players to compare against."}
 
-    cols = _group_columns(group)
+    cols = [(c, inv) for c, inv in _group_columns(group) if c in universe.columns]
     row = {"player": "Your Creation", "team_within_selected_timeframe": "Custom XI",
            "minutes_played": minutes}
     slider_out = []
