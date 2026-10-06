@@ -380,18 +380,32 @@ async function openPlayerModal(id) {
   const f2 = (v) => v == null ? '—' : (+v).toFixed(2);
   const passAcc = p && p.passes ? Math.round((p.accurate_passes || 0) / p.passes * 100) + '%' : '—';
   const cards = p ? (('🟨'.repeat(p.yellow || 0)) + (p.red ? '🟥' : '')) : '';
+  // headline numbers get their own big-tile strip (shareable-card focal point);
+  // the rest stay in the dense grid below
+  const hero = p ? `<div class="pm-hero">
+      <div class="pm-hero-cell pm-hero-rating" style="--rc:${p.rating != null ? ratingColor(p.rating) : 'var(--accent)'}">
+        <b>${p.rating != null ? (+p.rating).toFixed(1) : '—'}</b><span>Rating</span></div>
+      <div class="pm-hero-cell"><b>${p.goals ?? 0}</b><span>Goals</span></div>
+      <div class="pm-hero-cell"><b>${p.assists ?? 0}</b><span>Assists</span></div>
+      <div class="pm-hero-cell"><b>${f2(p.xg)}</b><span>xG</span></div>
+    </div>` : '';
   const grid = p ? [
-    _pmCell('Minutes', p.minutes ?? '—'), _pmCell('Goals', p.goals ?? 0),
-    _pmCell('Assists', p.assists ?? 0), _pmCell('Shots (SoT)', `${p.shots ?? 0} (${p.shots_on_target ?? 0})`),
-    _pmCell('xG', f2(p.xg)), _pmCell('xA', f2(p.xa)),
+    _pmCell('Minutes', p.minutes ?? '—'), _pmCell('Shots (SoT)', `${p.shots ?? 0} (${p.shots_on_target ?? 0})`),
+    _pmCell('xA', f2(p.xa)),
     _pmCell('Passes', `${p.passes ?? 0} · ${passAcc}`), _pmCell('Key passes', p.key_passes ?? 0),
     _pmCell('Big chances', p.big_chances_created ?? 0),
     _pmCell('Dribbles', `${p.dribbles ?? 0} (${p.dribble_attempts ?? 0})`),
     _pmCell('Tackles', p.tackles ?? 0), _pmCell('Recoveries', p.recoveries ?? 0),
     _pmCell('Duels won', p.duels_won ?? 0), _pmCell('Touches', p.touches ?? 0), _pmCell('Fouls', p.fouls ?? 0),
   ].join('') : '<div class="placeholder-note">No match stats recorded for this player (likely an unused substitute).</div>';
-  const chip = p && p.rating != null
-    ? `<span class="ratingchip" style="border-color:${ratingColor(p.rating)}">${(+p.rating).toFixed(1)}</span>` : '';
+  // small context strip (competition + live score) so a screenshot of just this
+  // card still makes sense without the rest of the page around it
+  const ctx = head && head.available ? `<div class="pm-ctx">
+      <span class="pm-ctx-comp">${esc(head.competition || '')}</span>
+      <span class="pm-ctx-mid">${esc(head.home)} <b>${head.home_score != null ? `${head.home_score}–${head.away_score}` : 'vs'}</b> ${esc(head.away)}</span>
+      ${head.status === 'inprogress' ? `<span class="live">● ${head.minute ? head.minute + "'" : 'LIVE'}</span>`
+        : head.status === 'finished' ? '<span class="tag">FT</span>' : ''}
+    </div>` : '';
   const sm = _luSub[id] || {};
   const subTxt = (sm.in != null ? ` · ▲ on ${sm.in}'` : '') + (sm.out != null ? ` · ▼ off ${sm.out}'` : '');
   const base = p ? `${esc(p.position || '')}${p.number != null ? ' · #' + p.number : ''} · ${esc(p.team || '')}${p.started ? '' : ' · sub'}` : '';
@@ -408,15 +422,18 @@ async function openPlayerModal(id) {
   wrap.className = 'pm-overlay';
   wrap.innerHTML = `<div class="pm-card">
       <button class="pm-x" aria-label="Close">×</button>
+      ${ctx}
       <div class="pm-head"><div class="pm-headtxt"><div class="pm-nm">${esc(name)} ${cards}</div><div class="pm-sub">${sub}</div>
         <div class="pm-club" id="pmClub"></div></div>
-        <div class="pm-headright"><span class="pm-crest" id="pmCrest"></span>${chip}</div></div>
+        <div class="pm-headright"><span class="pm-crest" id="pmCrest"></span></div></div>
       ${tourn}
+      ${hero}
       ${p ? '<div class="pm-sec-h">This match</div>' : ''}
-      <div class="pm-grid">${grid}</div>
+      ${p ? `<div class="pm-grid">${grid}</div>` : grid}
       <div class="pm-heat"><div class="pm-heat-h">Match heatmap</div><canvas id="pmHeat" width="300" height="195"></canvas></div>
       ${(_luAtlas[id] && _luAtlas[id].rating != null && !_luAtlas[id].est)
         ? `<a class="btn btn-ghost pm-full" href="/player.html?name=${encodeURIComponent(name)}&from=match&eid=${EID}">View full season profile →</a>` : ''}
+      <div class="pm-wm"><b>ATLASTRA</b><span>.dedyn.io</span></div>
     </div>`;
   document.body.appendChild(wrap);
   const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey); };

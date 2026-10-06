@@ -822,9 +822,19 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 /* scrollable overlay + margin:auto so a modal TALLER than the screen scrolls from
    the top (× reachable) instead of centring with its top clipped off-screen. */
 .pm-overlay{position:fixed;inset:0;z-index:50;background:rgba(4,7,16,.66);backdrop-filter:blur(3px);display:flex;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:20px}
-.pm-card{position:relative;margin:auto;width:100%;max-width:380px;background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.pm-card{position:relative;margin:auto;width:100%;max-width:380px;background:var(--card);border:1px solid var(--border2);border-radius:16px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden}
+.pm-card::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
 .pm-x{position:absolute;top:6px;right:8px;background:none;border:none;color:var(--muted);font-size:24px;line-height:1;cursor:pointer;padding:6px 12px;z-index:2}
 .pm-x:hover{color:var(--text)}
+/* competition + live score strip, so a screenshot of the card alone still reads */
+.pm-ctx{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap;
+  margin:-20px -20px 14px;padding:8px 36px 8px 20px;background:var(--card2);border-bottom:1px solid var(--border);
+  font-size:11.5px;color:var(--muted);text-align:center}
+.pm-ctx-comp{text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+.pm-ctx-mid{color:var(--text)}
+.pm-ctx-mid b{font-weight:800}
+.pm-ctx .live{color:var(--red);font-weight:700}
+.pm-ctx .tag{font-weight:700}
 .pm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding-right:18px}
 .pm-nm{font-size:18px;font-weight:700}
 .pm-sub{color:var(--muted);font-size:12.5px;margin-top:2px}
@@ -845,6 +855,17 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .pm-heat-h{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
 .pm-heat canvas{width:100%;height:auto;border-radius:8px;display:block}
 .pm-full{display:block;text-align:center;margin-top:14px}
+/* headline stat strip -- the big shareable numbers, above the dense grid */
+.pm-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.pm-hero-cell{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px 4px;text-align:center}
+.pm-hero-cell b{display:block;font-size:22px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+.pm-hero-cell span{display:block;color:var(--muted);font-size:10px;margin-top:3px;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.pm-hero-rating{background:linear-gradient(160deg,var(--accent-soft),var(--card2));border-color:var(--rc,var(--accent))}
+.pm-hero-rating b{color:var(--rc,var(--accent))}
+/* brand footer so a screenshot of just the card still carries the site name */
+.pm-wm{margin-top:16px;padding-top:12px;border-top:1px dashed var(--border);text-align:center}
+.pm-wm b{color:var(--accent2);font-size:11px;font-weight:800;letter-spacing:1px}
+.pm-wm span{color:var(--muted2);font-size:11px;font-weight:600}
 
 /* fan match ratings ("Rate Players" -- up to both starting XIs in one submission) */
 .rt-card{max-width:480px}
