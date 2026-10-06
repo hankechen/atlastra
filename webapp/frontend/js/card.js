@@ -117,7 +117,7 @@ function draw(d, img) {
     const fg = ctx.createLinearGradient(trkA, 0, trkA + fw, 0);
     fg.addColorStop(0, t.a2); fg.addColorStop(1, t.a);
     rr(trkA, y - 3, fw, 6, 3); ctx.fillStyle = fg; ctx.fill();
-    y += 28;
+    y += 24;
   }
 
   // footer brand
