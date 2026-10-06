@@ -1242,6 +1242,15 @@ def _fixture_preview(eid: int, d) -> dict:
         # poll cycles stay fast, then cache the finished result.
         for side in ("home", "away"):
             pv[side]["key"] = d.web_squad_key_players(pv[side].pop("squad", []))
+            if not pv[side].get("national"):
+                # club-fixture squads: the player's club per our (periodically-refreshed)
+                # warehouse can lag a real transfer the live squad feed already reflects
+                # (e.g. a summer signing), showing a self-contradictory label like
+                # "Youri Tielemans · Aston Villa" under a "MANCHESTER UNITED" heading.
+                # The team heading already names the club, so drop it here; national-team
+                # previews keep it since there the squad IS the country, not a club.
+                for kp in pv[side]["key"]:
+                    kp["club"] = None
         _PREVIEW_CACHE[eid] = (time.time(), pv)
     elif pv.get("available"):
         for side in ("home", "away"):      # pending: don't run enrichment yet
