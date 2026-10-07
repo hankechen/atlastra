@@ -22,11 +22,11 @@ import numpy as np
 import pandas as pd
 
 try:
-    from config import DB_PATH, FOCUS_SEASON, season_label
+    from config import DB_PATH, FOCUS_SEASON, DATAMB_SEASON, season_label
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import DB_PATH, FOCUS_SEASON, season_label
+    from config import DB_PATH, FOCUS_SEASON, DATAMB_SEASON, season_label
 
 try:
     from analytics.archetype_defs import ARCHETYPES
@@ -3682,16 +3682,20 @@ class SoccerDB:
         (counts summed, % rates minutes-weighted). Scopes with no minutes are
         omitted so the UI can disable them.
 
-        Current season only: the 'league' scope is overridden with live FotMob
-        totals (pipeline/load_player_stats_fotmob) when available -- v_stats_combined
-        is Understat-sourced and only as fresh as the last manual pipeline run, and as
-        of this season's rollover Understat has no 2026/27 data published at all yet
-        (confirmed directly against their site, not just stale on our end). FotMob's
-        public per-stat CDN doesn't cover shots/duels/tackles/interceptions/passes or
-        pass accuracy, so those stay blank on the live path -- an honest gap, not a
-        stale-season number sitting next to fresh ones. UCL isn't covered by this
-        overlay (still SofaScore-sourced, unaffected), so 'combined' below is simply
-        recomputed from the live league scope + whatever UCL scope already exists."""
+        DATAMB_SEASON (the current, in-progress season) only: the 'league' scope is
+        overridden with live FotMob totals (pipeline/load_player_stats_fotmob) when
+        available -- v_stats_combined's own DATAMB_SEASON row (pipeline.load_player_
+        season_fotmob, biweekly) can lag a live match by up to two weeks, and FotMob's
+        live per-stat CDN this overlay reads from updates same-day. Gated on
+        DATAMB_SEASON specifically, NOT FOCUS_SEASON -- it used to be the same season
+        and the two got conflated, which silently replaced a genuinely-selected
+        FOCUS_SEASON ('2025/26') with the live current season's numbers under a
+        contradictory label. FotMob's public per-stat CDN doesn't cover shots/duels/
+        tackles/interceptions/passes or pass accuracy, so those stay blank on the live
+        path -- an honest gap, not a stale-season number sitting next to fresh ones.
+        UCL isn't covered by this overlay (still SofaScore-sourced, unaffected), so
+        'combined' below is simply recomputed from the live league scope + whatever
+        UCL scope already exists."""
         rate_sql = ", ".join(
             f"SUM({c} * minutes) FILTER (WHERE {c} IS NOT NULL) "
             f"/ NULLIF(SUM(minutes) FILTER (WHERE {c} IS NOT NULL), 0) AS {c}"
@@ -3709,7 +3713,7 @@ class SoccerDB:
                 d[c] = _i(getattr(r, c))
             if d["minutes"]:
                 scopes[r.scp] = d
-        if season == FOCUS_SEASON and live_overlay:
+        if season == DATAMB_SEASON and live_overlay:
             try:
                 live = self.con.execute("""
                     SELECT f.matches, f.minutes, f.goals, f.assists, f.xg, f.xa,
@@ -3875,7 +3879,13 @@ class SoccerDB:
         datamb/Wyscout set. Read straight from player_wyscout joined to player_id via
         the datamb-name crosswalk the profile tables carry -- so it works for EVERY
         position (player_profile_metrics keeps only each line's SWOT metrics, so it
-        misses progressive passing for e.g. strikers). FOCUS_SEASON, top-5 domestic."""
+        misses progressive passing for e.g. strikers). `season` should be DATAMB_SEASON
+        (where player_wyscout's actual rows live). The crosswalk itself is read from
+        FOCUS_SEASON specifically, NOT `season` -- player_profile_metrics is the frozen
+        snapshot (see tools/freeze_primary_rating.py) and only ever has FOCUS_SEASON
+        rows, so joining it on `season` too would silently match nothing once the two
+        diverged (datamb-season-fix). The name-crosswalk itself doesn't meaningfully
+        change season to season, so reusing FOCUS_SEASON's here is safe."""
         g = self.con.execute("SELECT position_group FROM players WHERE player_id=?", [pid]).fetchone()
         if not g or not g[0]:
             return {}
@@ -3888,7 +3898,7 @@ class SoccerDB:
             JOIN xwalk x ON x.player = w.player
             JOIN players pl ON pl.player_id = x.player_id
             WHERE w.season = ?
-        """, [season, season]).df()
+        """, [FOCUS_SEASON, season]).df()
         if pid not in set(df["player_id"]):
             return {}
         grp = df.loc[df["player_id"] == pid, "grp"].iloc[0]
@@ -4041,9 +4051,15 @@ class SoccerDB:
         seasons_avail = [r[0] for r in self.con.execute(
             "SELECT DISTINCT season FROM v_stats_combined_player "
             "WHERE player_id = ? ORDER BY season DESC", [pid]).fetchall()]
+        # Default to the newest season with any real row (now genuinely 2026/27,
+        # since pipeline.load_player_season_fotmob started filling it) rather than
+        # pinning the default to FOCUS_SEASON -- that used to be the same thing,
+        # back when 2026/27 had no row at all and the stat tiles needed a live
+        # FotMob overlay patched onto the 2025/26 slot to show anything current.
+        # The composite rating/radar/SWOT/archetype analysis below still pins to
+        # FOCUS_SEASON specifically regardless of this -- see hist_level below.
         if season not in seasons_avail:
-            season = FOCUS_SEASON if FOCUS_SEASON in seasons_avail else (
-                seasons_avail[0] if seasons_avail else FOCUS_SEASON)
+            season = seasons_avail[0] if seasons_avail else FOCUS_SEASON
         # selected-season tiles from the COMBINED (domestic + UCL) per-player view
         t = self.con.execute("""
             SELECT games, goals, assists, xg, xa, chances_created, big_chances_created,
@@ -4065,16 +4081,17 @@ class SoccerDB:
         if wc:
             ratings["worldcup"] = {"rating": wc["rating"], "classification": wc["classification"],
                                    "apps": wc["apps"], "minutes": wc["minutes"]}
-        # Current season only: overlay live FotMob season totals (pipeline/
-        # load_player_stats_fotmob) over the stat tiles -- v_stats_combined_player is
-        # Understat-sourced and only as fresh as the last manual pipeline run (and, as
-        # of this season's rollover, Understat has no 2026/27 data published at all
-        # yet). Whole-tiles swap, not a per-field merge: mixing a live total with a
-        # stale-season total in the SAME per-90 rate would misrepresent both, the same
-        # reasoning as league_standings()'s live overlay above. pass_accuracy isn't on
-        # FotMob's per-stat CDN, so it's simply blank rather than a stale number.
+        # DATAMB_SEASON (current season) only: overlay live FotMob season totals
+        # (pipeline/load_player_stats_fotmob) over the stat tiles -- v_stats_combined_
+        # player's own DATAMB_SEASON row only refreshes on the biweekly pipeline run,
+        # this live CDN read is same-day. Whole-tiles swap, not a per-field merge:
+        # mixing a live total with a stale-season total in the SAME per-90 rate would
+        # misrepresent both, the same reasoning as league_standings()'s live overlay
+        # above. pass_accuracy isn't on FotMob's per-stat CDN, so it's simply blank
+        # rather than a stale number. Gated on DATAMB_SEASON not FOCUS_SEASON -- see
+        # _player_stat_scopes's docstring for why those used to be (wrongly) the same.
         live = None
-        if season == FOCUS_SEASON:
+        if season == DATAMB_SEASON:
             try:
                 live = self.con.execute("""
                     SELECT f.matches, f.minutes, f.goals, f.assists, f.xg, f.xa,
@@ -4113,8 +4130,16 @@ class SoccerDB:
         # (player_radar_hist / player_swot_hist, 5 axes, Understat+FotMob only --
         # see pipeline/profile_history.py). Older seasons have neither. hist_level
         # tells the UI which (current | reduced | none).
+        #
+        # This query is season-AGNOSTIC (player_radar_metrics has no season column --
+        # it's the frozen FOCUS_SEASON snapshot, see tools/freeze_primary_rating.py),
+        # so showing it for DATAMB_SEASON (the new default -- see seasons_avail above)
+        # is correct: 2026/27's own pool is still too small for its own analysis, so
+        # this deliberately keeps showing 2025/26's. The frontend labels it correctly
+        # by comparing the displayed season to `pinned_season` itself, not by assuming
+        # "current" always means "the season shown in the selector".
         _AXIS_ORDER = ["Finishing", "Chance Creation", "Dribbling", "Passing", "Defending"]
-        if season == FOCUS_SEASON:
+        if season in (FOCUS_SEASON, DATAMB_SEASON):
             pm = self.con.execute(
                 "SELECT metric_label, percentile FROM player_radar_metrics WHERE player_id = ?",
                 [pid]).df()
@@ -4172,20 +4197,23 @@ class SoccerDB:
         # Position for the SELECTED season. Current season keeps the rich FotMob
         # detail (LW/RW/CAM); past seasons use Understat's per-season position so a
         # career position change actually shows (coarse, but real for all players).
-        if season == FOCUS_SEASON:
+        # `prof` itself is season-agnostic (today's FotMob position), so DATAMB_SEASON
+        # (the live default) correctly gets it too, same reasoning as hist_level above.
+        if season in (FOCUS_SEASON, DATAMB_SEASON):
             pos_group, pos_detail = prof["position_group"], prof.get("detailed_position")
         else:
             season_pos = self._player_season_position(pid, season)
             pos_group, pos_detail = (season_pos or prof["position_group"]), None
-        # Progressive passing/carrying (datamb/Wyscout per-90 vs position). Only the
-        # current season has the datamb dataset, and it isn't split by competition, so
-        # inject the same per-90 value into every stat scope + the tile percentiles so
-        # the Per-90 grid can render it like any other rate stat. The World Cup scope
-        # is EXCLUDED -- datamb is domestic-league data, not tournament data.
+        # Progressive passing/carrying (datamb/Wyscout per-90 vs position). datamb only
+        # ever holds ONE live season at a time (player_wyscout is rebuilt each pipeline
+        # run, no history kept) under DATAMB_SEASON specifically -- NOT FOCUS_SEASON,
+        # see config.py. Only inject it while actually viewing DATAMB_SEASON: splicing
+        # 2026/27's progressive-passing rate into a 2025/26-labelled tile would be the
+        # same kind of season-mixing the live stat overlay below was just fixed for.
         scopes = self._player_stat_scopes(pid, season)
         tile_pct = self._tile_percentiles(pid, season)
-        if season == FOCUS_SEASON and scopes:
-            for key, info in self._progressive_stats(pid, season).items():
+        if season == DATAMB_SEASON and scopes:
+            for key, info in self._progressive_stats(pid, DATAMB_SEASON).items():
                 per90 = info["per90"]
                 for sck, sc in scopes.items():    # one datamb dataset -> same rate in all scopes
                     if sck == "worldcup":         # domestic data doesn't apply to the WC
@@ -4216,14 +4244,12 @@ class SoccerDB:
             "percentile": round(ctx[1]) if ctx and ctx[1] is not None else None,
             "ratings": ratings,  # {"league": {...}, "ucl": {...}}  common-metric
             "avg_rating": avg_rating,  # FotMob/SofaScore average match rating (all comps)
-            # while stats_scopes/tiles are showing a live overlay, `season`/`pinned_season`
-            # above still read "2025/26" (FOCUS_SEASON's own code hasn't moved -- that's
-            # the bigger, separate re-rating project, not this fix) -- this label lets the
-            # UI show the numbers' REAL season without touching the season selector itself.
+            # tiles_live signals the live-vs-biweekly-snapshot distinction described
+            # above, not a season mismatch -- `season` already equals DATAMB_SEASON
+            # whenever this can be true (see the gate above), so the dropdown and
+            # this label already agree.
             "tiles": tiles, "tiles_live": bool(live),
-            "tiles_season_label": (season_label(f"{int(FOCUS_SEASON[:2]) + 1:02d}"
-                                                f"{int(FOCUS_SEASON[2:]) + 1:02d}")
-                                   if live else None),
+            "tiles_season_label": season_label(DATAMB_SEASON) if live else None,
             "radar": radar,
             # per-stat percentile vs position peers, ONE MAP PER SCOPE, so the bar under
             # a tile ranks against the competition whose number the tile is showing

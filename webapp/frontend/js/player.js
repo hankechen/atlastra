@@ -156,10 +156,24 @@ async function load(name, careerStat = 'xa', season = null) {
   // hist_level: what the radar/SWOT/heatmap reflect for the chosen season —
   // 'current' (full datamb), 'reduced' (per-season, Understat+FotMob), 'none'.
   if (p.hist_level === 'current') {
-    banner.hidden = true;
-    setText('radarNote', 'Compared to same position in Top-5 leagues · ' + selLabel);
-    setText('simNote', 'By statistical profile · ' + selLabel);
-    setText('ratingNote', 'Common-metric rating · combined stats below');
+    // 'current' now also covers the live default season (DATAMB_SEASON) -- its own
+    // pool is still too small for its own analysis, so this is really still showing
+    // pinned_season's numbers. Only treat it as a clean match when the selector is
+    // literally on the pinned season too; otherwise say so, same shape as 'reduced'.
+    if (selLabel === p.pinned_season) {
+      banner.hidden = true;
+      setText('radarNote', 'Compared to same position in Top-5 leagues · ' + selLabel);
+      setText('simNote', 'By statistical profile · ' + selLabel);
+      setText('ratingNote', 'Common-metric rating · combined stats below');
+    } else {
+      banner.hidden = false;
+      banner.innerHTML = `Showing <b>${selLabel}</b> stats. Radar, strengths &amp; weaknesses, ` +
+        `composite rating, archetype &amp; signature actions reflect <b>${p.pinned_season}</b> ` +
+        `(latest season with a big enough sample).`;
+      setText('radarNote', 'Compared to same position in Top-5 leagues · ' + p.pinned_season + ' (latest)');
+      setText('simNote', 'By statistical profile · ' + p.pinned_season + ' (latest)');
+      setText('ratingNote', 'Common-metric rating · combined stats below');
+    }
   } else {
     banner.hidden = false;
     setText('ratingNote', 'Common-metric rating · ' + selLabel);
@@ -290,7 +304,7 @@ async function load(name, careerStat = 'xa', season = null) {
 
   // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
   document.getElementById('tilesLive').innerHTML = p.tiles_live
-    ? `<span class="live" title="League totals refreshed live from FotMob -- the ${p.pinned_season} season selector above hasn't caught up yet, this card has">● ${p.tiles_season_label}</span>` : '';
+    ? `<span class="live" title="Refreshed live from FotMob -- more current than the ${p.tiles_season_label} season snapshot the per-90 breakdown below is built from">● live</span>` : '';
   statScopes = p.stats_scopes || {};
   tilePct = p.tile_pct || {};
   wcTilePct = p.wc_tile_pct || {};
