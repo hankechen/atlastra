@@ -1317,6 +1317,9 @@ def api(path: str, q: dict) -> dict | list:
     if path == "/api/player_bio":             # foot + height (FotMob), keyed by fotmob player id
         return getattr(live_feed, "player_bio",
                        lambda _p: {"available": False})(q.get("pid", [""])[0])
+    if path == "/api/player_percentiles":     # per-stat percentile ranks (FotMob), keyed by fotmob player id
+        return getattr(live_feed, "player_percentiles",
+                       lambda _p: {"available": False})(q.get("pid", [""])[0])
     if path == "/api/signature_skills":       # Gemini reads the player's reel -> ranked skills
         name = q.get("name", [""])[0]
         pv = getattr(live_feed, "player_video", lambda _n: {})(name) or {}

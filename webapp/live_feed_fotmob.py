@@ -1688,6 +1688,53 @@ def player_bio(pid: int) -> dict:
     return out
 
 
+# --- Per-stat percentiles for the CURRENT season, from FotMob's own playerData -----
+# The profile's stat-tile percentile bars (analytics.queries._tile_percentiles) rank
+# against v_stats_combined's own field for that season -- which, for the live/current
+# season early in a year, can be too thin (few players past the minutes bar yet) to
+# rank against at all. FotMob computes its own percentile per stat on the player page
+# itself (playerData.firstSeasonStats.statsSection), presumably against a bigger/live
+# population, so this is a straight read of THEIR number for OUR matching tile, not a
+# second percentile calculation. Mapped to the same keys _tile_percentiles uses so the
+# frontend can merge the two without caring which one answered. Cached 24h like player_bio.
+_PPCT_CACHE: dict[int, tuple] = {}
+_PPCT_TITLE_TO_KEY = {
+    "Goals": "goals", "xG": "xg", "Assists": "assists", "xA": "xa",
+    "Chances created": "chances_created", "Big chances created": "big_chances_created",
+    "Dribbles": "dribbles_completed", "Duels won": "duels_won",
+    "Duels won %": "duels_won_pct", "Tackles": "tackles",
+    "Interceptions": "interceptions", "Pass accuracy": "pass_accuracy_pct",
+}
+
+
+def player_percentiles(pid: int) -> dict:
+    """{available, items: {our_tile_key: 0-100}} from FotMob's own per-stat percentile
+    rank for this player's current (first-listed) season. Items not in FotMob's list
+    for this player (e.g. a keeper's outfield stats) are simply absent."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {"available": False}
+    hit = _PPCT_CACHE.get(pid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    try:
+        d = _auth.get(f"/api/data/playerData?id={pid}")
+    except Exception:                                    # noqa: BLE001
+        return {"available": False}
+    groups = (((d or {}).get("firstSeasonStats") or {}).get("statsSection") or {}).get("items") or []
+    items = {}
+    for grp in groups:
+        for it in grp.get("items") or []:
+            key = _PPCT_TITLE_TO_KEY.get(it.get("title"))
+            pr = it.get("percentileRank")
+            if key and pr is not None:
+                items[key] = int(round(pr))
+    out = {"available": bool(items), "player_id": pid, "items": items}
+    _PPCT_CACHE[pid] = (time.time() + 86400, out)
+    return out
+
+
 # --- UCL top speed (real UEFA tracking) → pace for the Tactics Lab -----------
 # The Champions League exposes physical stats FotMob doesn't for domestic leagues.
 # We pull the full "Top speed" leaderboard (max sprint km/h per player, keyed by FotMob

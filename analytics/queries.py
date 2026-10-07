@@ -3773,11 +3773,22 @@ class SoccerDB:
                     scopes.pop("ucl", None)
         lg, ucl = scopes.get("league"), scopes.get("ucl")
         if lg and ucl:
-            comb = {c: round((lg[c] or 0) + (ucl[c] or 0), 2) for c in self._SCOPE_COUNTS}
+            # A stat NEITHER side has (both None -- e.g. duels/tackles/pass accuracy
+            # while the live overlay is active, or duels before they were tracked at
+            # all pre-2025/26) must stay None, not get "or 0"'d into a fabricated
+            # zero -- that used to pair a false "0" with a percentile bar implying a
+            # real, ranked number. Only sum/blend when at least one side actually has
+            # the stat.
+            comb = {c: (None if lg[c] is None and ucl[c] is None
+                        else round((lg[c] or 0) + (ucl[c] or 0), 2))
+                    for c in self._SCOPE_COUNTS}
             tm = (lg["minutes"] or 0) + (ucl["minutes"] or 0)
             for c in self._SCOPE_RATES:
-                comb[c] = round(((lg[c] or 0) * (lg["minutes"] or 0)
-                                 + (ucl[c] or 0) * (ucl["minutes"] or 0)) / tm) if tm else None
+                if lg[c] is None and ucl[c] is None:
+                    comb[c] = None
+                else:
+                    comb[c] = round(((lg[c] or 0) * (lg["minutes"] or 0)
+                                     + (ucl[c] or 0) * (ucl["minutes"] or 0)) / tm) if tm else None
             scopes["combined"] = comb
         elif lg or ucl:
             scopes["combined"] = dict(lg or ucl)
@@ -4266,6 +4277,7 @@ class SoccerDB:
             "season": season,
             "seasons": [{"value": s, "label": _fmt_season(s)} for s in seasons_avail],
             "is_current": season == FOCUS_SEASON,
+            "is_live_season": season == DATAMB_SEASON,
             "pinned_season": _fmt_season(FOCUS_SEASON),
             "hist_level": hist_level,   # current | reduced | none (radar/SWOT/heatmap)
             "strengths": strengths,

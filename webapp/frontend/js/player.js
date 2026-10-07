@@ -285,22 +285,43 @@ async function load(name, careerStat = 'xa', season = null) {
   })();
 
 
-  // dual ratings (League + UCL, common-metric)
-  const lg = p.ratings?.league, ucl = p.ratings?.ucl;
-  document.getElementById('rLeague').textContent = lg?.rating ?? '—';
-  document.getElementById('cLeague').textContent = lg ? lg.classification : 'not rated';
-  drawGauge('gaugeLeague', lg?.rating);
-  document.getElementById('rUcl').textContent = ucl?.rating ?? '—';
-  document.getElementById('cUcl').textContent = ucl ? ucl.classification : 'no UCL minutes';
-  drawGauge('gaugeUcl', ucl?.rating);
-  // World Cup gauge — only for seasons that had a World Cup the player featured in
-  const wc = p.ratings?.worldcup, wcBox = document.getElementById('rgaugeWc');
-  if (wc) {
-    wcBox.style.display = '';
-    document.getElementById('rWc').textContent = wc.rating;
-    document.getElementById('cWc').textContent = `${wc.classification} · ${wc.apps} app${wc.apps === 1 ? '' : 's'}`;
-    drawGauge('gaugeWc', wc.rating);
-  } else { wcBox.style.display = 'none'; }
+  // dual ratings (League + UCL, common-metric). The live/default season's own
+  // common-metric ratings aren't computed yet (its pool is still too small this
+  // early on) -- say so plainly rather than show two gauges reading "not rated".
+  const lg = p.ratings?.league, ucl = p.ratings?.ucl, wc = p.ratings?.worldcup;
+  const dual = document.getElementById('ratingsDual');
+  if (!lg && !ucl && p.is_live_season) {
+    dual.innerHTML = `<div class="placeholder-note" style="text-align:center;padding:14px 0">
+      Coming soon — ${selLabel}'s sample is still too small to rate.</div>`;
+  } else {
+    dual.innerHTML = `
+      <div class="rgauge"><div class="lbl">League</div>
+        <div class="gauge sm"><canvas id="gaugeLeague" width="124" height="78"></canvas>
+          <div class="val"><b id="rLeague">—</b></div></div>
+        <div class="cls" id="cLeague"></div></div>
+      <div class="rgauge"><div class="lbl">UCL</div>
+        <div class="gauge sm"><canvas id="gaugeUcl" width="124" height="78"></canvas>
+          <div class="val"><b id="rUcl">—</b></div></div>
+        <div class="cls" id="cUcl"></div></div>
+      <div class="rgauge" id="rgaugeWc" style="display:none"><div class="lbl">World Cup</div>
+        <div class="gauge sm"><canvas id="gaugeWc" width="124" height="78"></canvas>
+          <div class="val"><b id="rWc">—</b></div></div>
+        <div class="cls" id="cWc"></div></div>`;
+    document.getElementById('rLeague').textContent = lg?.rating ?? '—';
+    document.getElementById('cLeague').textContent = lg ? lg.classification : 'not rated';
+    drawGauge('gaugeLeague', lg?.rating);
+    document.getElementById('rUcl').textContent = ucl?.rating ?? '—';
+    document.getElementById('cUcl').textContent = ucl ? ucl.classification : 'no UCL minutes';
+    drawGauge('gaugeUcl', ucl?.rating);
+    // World Cup gauge — only for seasons that had a World Cup the player featured in
+    const wcBox = document.getElementById('rgaugeWc');
+    if (wc) {
+      wcBox.style.display = '';
+      document.getElementById('rWc').textContent = wc.rating;
+      document.getElementById('cWc').textContent = `${wc.classification} · ${wc.apps} app${wc.apps === 1 ? '' : 's'}`;
+      drawGauge('gaugeWc', wc.rating);
+    } else { wcBox.style.display = 'none'; }
+  }
 
   // total + per-90 stat tiles, each with its own League/UCL/Combined scope toggle
   document.getElementById('tilesLive').innerHTML = p.tiles_live
@@ -313,6 +334,35 @@ async function load(name, careerStat = 'xa', season = null) {
   if (!statScopes[scopePer90]) scopePer90 = dflt;
   setupScopeTog('togTotals', 'totalTiles', TOTAL_DEFS, () => scopeTotals, k => { scopeTotals = k; });
   setupScopeTog('togPer90', 'tiles', PER90_DEFS, () => scopePer90, k => { scopePer90 = k; });
+
+  // Tile percentile bars for the live season come from our own field
+  // (v_stats_combined for DATAMB_SEASON), which can be too thin to rank against this
+  // early in a season -- tiles_live already means "we're showing FotMob's live
+  // numbers", so when our own bars are empty, ask FotMob for its OWN percentile on
+  // the same stats and merge those in instead of showing no bar at all. Re-fetched
+  // every load() (season change), not gated like the bio/form block below, since
+  // whether it's needed changes with the selected season.
+  if (p.tiles_live) {
+    const pm = /playerimages\/(\d+)\./.exec(p.photo || '');
+    if (pm) {
+      api('/api/player_percentiles?pid=' + pm[1]).then((pp) => {
+        if (!pp || !pp.available || !pp.items) return;
+        for (const scope of ['league', 'ucl', 'combined']) {
+          const sv = statScopes[scope];
+          if (!sv) continue;
+          // Only attach a percentile where the tile actually has a real number --
+          // the live overlay leaves several fields (duels, tackles, pass accuracy)
+          // null rather than fetch them, and a percentile bar next to "—" implies a
+          // ranked number that was never shown.
+          const have = {};
+          for (const k in pp.items) if (sv[k] != null) have[k] = pp.items[k];
+          tilePct[scope] = { ...have, ...(tilePct[scope] || {}) };  // ours wins if both answered
+        }
+        renderTiles('totalTiles', TOTAL_DEFS, scopeTotals);
+        renderTiles('tiles', PER90_DEFS, scopePer90);
+      }).catch(() => {});
+    }
+  }
 
   // strengths / weaknesses
   document.getElementById('strengths').innerHTML = p.strengths.map(s => `<li class="ok">✔ ${s}</li>`).join('') || '<li class="muted">—</li>';
