@@ -32,9 +32,16 @@ _FALLBACK_SECRET = None  # extraction is reliable; no hardcoded lyrics fallback
 
 _APP_RE = re.compile(r'src="(/_next/static/chunks/pages/_app-[^"]+\.js)"')
 _FOO_RE = re.compile(r'foo:"(production:[0-9a-f]+)"')
-# the secret is the JS string literal assigned just before the signature call:
-#   o=(t="<secret>",S("".concat(JSON.stringify(n)).concat(t)))
-_SECRET_RE = re.compile(r'\(t=("(?:[^"\\]|\\.)*?"),[A-Za-z_$]+\("".concat', re.S)
+# The secret used to be a quoted string literal immediately before a `.concat()`
+# chain building the signature; FotMob's Oct 2026 bundle switched the whole
+# signature call to a template literal (`${JSON.stringify(r)}${c}`), with the
+# secret itself now ALSO a backtick template literal assigned to a short
+# identifier (`c=\`[Spoken Intro...\``). Match that shape generically (a short
+# identifier assigned a long backtick string) rather than anchoring to the
+# signature call's exact surrounding code, which is what broke -- the call
+# shape is free to keep changing release to release, same as the single-letter
+# variable names, but "a long run of real text in backticks" is a stable target.
+_SECRET_RE = re.compile(r'[A-Za-z_$][\w$]*=`((?:[^`\\]|\\.){100,})`')
 
 
 class FotmobAuth:
@@ -66,12 +73,23 @@ class FotmobAuth:
             raise ValueError("could not locate _app chunk")
         js = tls_requests.get(HOME + m.group(1), timeout=25).text
         foo = _FOO_RE.search(js)
-        sec = _SECRET_RE.search(js)
-        if not foo or not sec:
-            raise ValueError("could not parse foo/secret from _app chunk")
+        if not foo:
+            raise ValueError("could not parse foo from _app chunk")
+        # The secret-assignment pattern is free to shift shape release to release
+        # (it already has once -- see _SECRET_RE's comment); the file-wide search
+        # can hit unrelated long backtick strings elsewhere in a 500KB+ bundle, so
+        # scope it to the same closure as `foo` by searching backward from foo's
+        # position and taking the NEAREST preceding match, not the file's first.
+        window_start = max(0, foo.start() - 10000)
+        sec_matches = list(_SECRET_RE.finditer(js, window_start, foo.start()))
+        if not sec_matches:
+            raise ValueError("could not parse secret from _app chunk")
         self._foo = foo.group(1)
-        # group(1) is a JS string literal incl. quotes; JSON-decode the escapes.
-        self._secret = json.loads(sec.group(1))
+        # group(1) is raw template-literal content (real newlines, not JSON-escaped)
+        # -- only backtick/backslash need unescaping, unlike the old quoted-string
+        # shape which was valid JSON.
+        raw = sec_matches[-1].group(1)
+        self._secret = raw.replace("\\`", "`").replace("\\\\", "\\")
 
     # ---- public API -------------------------------------------------------
     def xmas(self, path: str) -> str:
