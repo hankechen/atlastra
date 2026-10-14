@@ -606,6 +606,7 @@ const ICONS = {
   plan: '<path d="M4 6h7M4 12h13M4 18h9"/><circle cx="19" cy="6" r="2"/><circle cx="20" cy="18" r="2"/>',
   buildplayer: '<circle cx="10.5" cy="10" r="4"/><path d="M3.5 20.5c0-3.7 3.1-5.6 7-5.6 1 0 1.9.1 2.7.4"/><path d="M18 13.5v6M15 16.5h6"/>',
   ask: '<path d="M4 5.5h16v10.5H9.5L5.5 20v-4H4z"/><circle cx="8.3" cy="10.7" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10.7" r="1" fill="currentColor" stroke="none"/><circle cx="15.7" cy="10.7" r="1" fill="currentColor" stroke="none"/>',
+  github: '<path fill="currentColor" stroke="none" d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56 0-.27-.01-1-.02-1.97-3.2.7-3.88-1.54-3.88-1.54-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 012.9-.39c.98 0 1.97.13 2.9.39 2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.07.78 2.15 0 1.55-.01 2.8-.01 3.18 0 .31.21.67.8.56A10.52 10.52 0 0023.5 12c0-6.27-5.23-11.5-11.5-11.5z"/>',
 };
 const svg = (k) => `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
 
@@ -717,6 +718,8 @@ function renderSidebar(active) {
       <div class="sb-div"></div>
       <div class="nav-label">Leagues<span class="chev">${svg('chevD')}</span></div>
       <nav class="nav">${leagues}</nav>
+      <div class="sb-div"></div>
+      <nav class="nav"><a href="https://github.com/hankechen/atlastra" class="navi" target="_blank" rel="noopener">${svg('github')}<span class="t">GitHub</span></a></nav>
     </div>
     <a href="/profile.html" class="sb-user"><span class="ava"${Store.profile().picture ? ` style="background-image:url('${Store.profile().picture}');background-size:cover;background-position:center;color:transparent"` : ''}>${initials(Store.name())}<i class="on"></i></span>
       <span class="u-tx"><b>${Store.name()}</b><span class="u-sub" id="sbUserSub">View Profile</span></span><span class="chev">${svg('chevR')}</span></a>
