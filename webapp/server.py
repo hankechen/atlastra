@@ -1004,6 +1004,7 @@ def _tactics_advisor(b):
     _TAC_ADVISOR[key] = txt
     return {"available": True, "text": txt}
 from webapp import admin  # noqa: E402
+from webapp import health  # noqa: E402
 from webapp import seo  # noqa: E402
 
 FRONTEND = Path(__file__).resolve().parent / "frontend"
@@ -1888,6 +1889,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Admins only."}, 403)
                 return
             self._json(admin.overview())
+            return
+        if u.path == "/api/admin/health":               # reliability signals (admins only)
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user or not user.get("is_admin"):
+                self._json({"error": "Admins only."}, 403)
+                return
+            self._json(health.overview())
             return
         if u.path == "/api/admin/blog/drafts":         # auto-generated posts awaiting review
             user = auth.user_for_token(self._cookie("atla_session"))

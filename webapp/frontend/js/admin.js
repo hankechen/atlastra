@@ -190,7 +190,36 @@ function drawCharts(d) {
       s.map(x => x.count), green);
 }
 
+// System Health: reliability signals a human should notice without having to
+// be told the site feels off (see memory fotmob-signing-break-oct13 -- the
+// live feed went to zero rows for days with nothing anywhere saying so).
+async function loadHealth() {
+  const el = document.getElementById('adm-health');
+  if (!el) return;
+  let h; try { h = await api('/api/admin/health'); } catch { return; }
+  const lf = h.live_feed, dp = h.deploy;
+  const lfText = lf.ok ? `Updated ${ago(lf.updated_at)}` : (lf.detail || 'Not updating');
+  const dpText = dp.available
+    ? `${esc(dp.sha)} · ${ago(new Date(dp.deployed_at).getTime() / 1000)}`
+    : (dp.detail || 'Unknown');
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-h" style="margin-bottom:4px"><h3>System Health</h3></div>
+      <div class="adm-health">
+        <div class="adm-health-row">
+          <div class="adm-health-l"><span class="adm-dot ${lf.ok ? 'ok' : 'bad'}"></span><b>Live match feed</b></div>
+          <div class="adm-health-r ${lf.ok ? '' : 'bad'}">${esc(lfText)}</div>
+        </div>
+        <div class="adm-health-row">
+          <div class="adm-health-l"><span class="adm-dot na"></span><b>Last deploy</b></div>
+          <div class="adm-health-r">${esc(dpText)}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function load() {
+  loadHealth();
   try {
     render(await api('/api/admin/overview'));
   } catch (e) {
