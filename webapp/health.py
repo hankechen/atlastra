@@ -30,9 +30,16 @@ _LIVE_STALE_AFTER = 20 * 60
 _DEPLOY_SHA_PATH = Path(__file__).resolve().parent.parent / ".deployed_sha"
 
 
-def _live_feed_status() -> dict:
+def _live_feed_status(read_only: bool) -> dict:
+    # Must match whatever mode server.py's own pooled connection already uses
+    # (its DB_READ_ONLY) -- DuckDB refuses to open a second connection to the
+    # same file in a different mode, and analytics.queries._pool_acquire falls
+    # back to an UNPOOLED connect_retry() on a mode mismatch, which hits that
+    # refusal directly: "Can't open a connection to same database file with a
+    # different configuration than existing connections." Hardcoding True here
+    # broke on prod (FOTMOB=1 -> DB_READ_ONLY=False), so the caller passes it in.
     try:
-        with SoccerDB(read_only=True) as d:
+        with SoccerDB(read_only=read_only) as d:
             row = d.con.execute("SELECT max(updated_at) FROM live_matches").fetchone()
         updated_at = row[0] if row else None
     except Exception as e:                              # noqa: BLE001
@@ -65,10 +72,11 @@ def _deploy_status() -> dict:
     return {"available": True, "sha": sha[:10], "deployed_at": deployed_at}
 
 
-def overview() -> dict:
-    """Everything the System Health card needs, in one call."""
+def overview(db_read_only: bool) -> dict:
+    """Everything the System Health card needs, in one call. `db_read_only`
+    must be the caller's own DB_READ_ONLY -- see _live_feed_status."""
     return {
         "checked_at": time.time(),
-        "live_feed": _live_feed_status(),
+        "live_feed": _live_feed_status(db_read_only),
         "deploy": _deploy_status(),
     }

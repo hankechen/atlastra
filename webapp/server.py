@@ -1895,7 +1895,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user or not user.get("is_admin"):
                 self._json({"error": "Admins only."}, 403)
                 return
-            self._json(health.overview())
+            self._json(health.overview(DB_READ_ONLY))
             return
         if u.path == "/api/admin/blog/drafts":         # auto-generated posts awaiting review
             user = auth.user_for_token(self._cookie("atla_session"))
