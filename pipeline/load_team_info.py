@@ -19,7 +19,7 @@ Run after load_team_logos:  python -m pipeline.load_team_info
 """
 import sys
 import time
-from datetime import date
+from datetime import date, datetime, timezone
 
 try:
     from config import DB_PATH
@@ -61,6 +61,50 @@ def _extract(d: dict) -> dict:
     }
 
 
+def _extract_results(d: dict, fotmob_id: int, team_id: int, limit: int = 8) -> list:
+    """This club's most recently FINISHED matches, real-time -- date/opponent/
+    score/venue, from the same /api/data/teams response's overview.overviewFixtures
+    (no extra call). No xG: FotMob's basic fixtures list doesn't carry it, and
+    web_team() used to pair a LIVE record/squad with a STALE prior-season xG match
+    log (team_match_stats, Understat, only as fresh as the last manual pipeline
+    run) -- e.g. a season-finale result from six months ago sitting under a squad
+    and league position that are both already into the NEXT season. This table
+    is the fix: real current results, score-only, no mismatched timeframe.
+
+    `fotmob_id` and `team_id` are deliberately separate: the fixture payload's
+    home/away "id" fields are FotMob's OWN numeric ids (fotmob_id's namespace),
+    not our warehouse team_id -- comparing home.get("id") against team_id
+    directly silently matched nothing, which made is_home always False and
+    "opponent" sometimes come out as the club's own name."""
+    rows = []
+    for f in reversed((d.get("overview") or {}).get("overviewFixtures") or []):
+        st = f.get("status") or {}
+        if not st.get("finished"):
+            continue
+        home, away = f.get("home") or {}, f.get("away") or {}
+        is_home = home.get("id") == fotmob_id
+        gf = (home if is_home else away).get("score")
+        ga = (away if is_home else home).get("score")
+        if gf is None or ga is None:
+            continue
+        rows.append((team_id, _iso_ts(st.get("utcTime")), "H" if is_home else "A",
+                     (away if is_home else home).get("name"), int(gf), int(ga),
+                     "W" if gf > ga else "D" if gf == ga else "L"))
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _iso_ts(s):
+    if not s:
+        return None
+    try:
+        return int(datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%fZ")
+                   .replace(tzinfo=timezone.utc).timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
 def _extract_squad(d: dict, team_id: int) -> list:
     """Squad rows for one team from the same /api/data/teams response.
     Note the nesting: d["squad"] is {"squad": [...groups], "isNationalTeam": bool},
@@ -99,7 +143,7 @@ def load_team_info() -> None:
         con.close()
 
     auth = FotmobAuth()
-    rows, squad_rows, ok = [], [], 0
+    rows, squad_rows, result_rows, ok = [], [], [], 0
     for tid, fid, tname in teams:
         try:
             d = auth.get(f"/api/data/teams?id={int(fid)}")
@@ -110,6 +154,7 @@ def load_team_info() -> None:
         rows.append((int(tid), m["manager"], m["venue"], m["city"],
                      m["capacity"], m["opened"], m["surface"]))
         squad_rows.extend(_extract_squad(d, int(tid)))
+        result_rows.extend(_extract_results(d, int(fid), int(tid)))
         ok += 1
         time.sleep(RATE_LIMIT_SEC)
 
@@ -130,6 +175,14 @@ def load_team_info() -> None:
     if squad_rows:
         con.executemany(
             "INSERT INTO team_squad_fotmob VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", squad_rows)
+
+    con.execute("DROP TABLE IF EXISTS team_results_fotmob")
+    con.execute("""CREATE TABLE team_results_fotmob
+        (team_id BIGINT, match_ts BIGINT, venue VARCHAR, opponent VARCHAR,
+         gf INTEGER, ga INTEGER, result VARCHAR)""")
+    if result_rows:
+        con.executemany(
+            "INSERT INTO team_results_fotmob VALUES (?,?,?,?,?,?,?)", result_rows)
 
     # team_squad_fotmob above is a pure snapshot (dropped and rebuilt every run), so it can
     # never answer "who was out for a match six months ago" -- there's no history to add as
@@ -155,6 +208,7 @@ def load_team_info() -> None:
     con.close()
     print(f"team_meta: {ok} teams ({n_mgr} with manager, {n_ven} with venue); "
           f"team_squad_fotmob: {len(squad_rows)} players; "
+          f"team_results_fotmob: {len(result_rows)} finished matches; "
           f"team_injury_history: +{sum(1 for r in squad_rows if r[11])} injured today.")
 
 

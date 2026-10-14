@@ -2905,7 +2905,24 @@ class SoccerDB:
                 "updated_at": df["updated_at"].max()}   # latest row (live overlay), not first
 
     def _team_form(self, team_name: str, season: str, n: int = 5) -> list:
-        """Last-n results as W/D/L, oldest→newest (for a form string)."""
+        """Last-n results as W/D/L, oldest→newest (for a form string). Same
+        live-vs-frozen split as web_team's results/scorers: team_match_stats is
+        Understat-sourced and frozen at FOCUS_SEASON's own data, so this used to
+        show the COMPLETED prior season's closing form (e.g. its May run-in)
+        directly beside a live, in-progress record and standings position --
+        two different timeframes with nothing distinguishing them. Prefers
+        team_results_fotmob (live, see pipeline/load_team_info.py) when it has
+        rows for this team."""
+        if season == FOCUS_SEASON:
+            try:
+                tid = self.find_team_id(team_name)
+                live = self.con.execute(
+                    "SELECT result FROM team_results_fotmob WHERE team_id = ? "
+                    "ORDER BY match_ts DESC LIMIT ?", [tid, n]).df().iloc[:, 0].tolist()
+            except Exception:                            # noqa: BLE001 -- table not built yet
+                live = []
+            if live:
+                return list(reversed(live))
         form = self.con.execute("""
             SELECT CASE WHEN points=3 THEN 'W' WHEN points=1 THEN 'D' ELSE 'L' END
             FROM team_match_stats tms JOIN teams t USING(team_id)
@@ -3045,7 +3062,19 @@ class SoccerDB:
 
     def web_team(self, name: str, season: str = FOCUS_SEASON) -> dict:
         """Team performance bundle (use case 6): standing, record, goals, xG/xPts,
-        form, recent results and top scorers."""
+        form, recent results and top scorers.
+
+        team.js never passes `season` -- every call uses the default, so `live`
+        below (gated on `season == FOCUS_SEASON`) is effectively always live for
+        this page. Record/squad already swap to FotMob's current-season data when
+        it's available; results/scorers below do the same, for the same reason:
+        team_match_stats/player_season_stats are Understat-sourced and frozen at
+        FOCUS_SEASON's own data (last refreshed whenever the pipeline last ran),
+        so leaving them in unconditionally paired a live, in-progress record with
+        a Results list and Top Scorers table from the COMPLETED prior season --
+        e.g. a May season-finale result sitting under a squad and league position
+        that were already well into the next campaign. Whole-section swap, not a
+        per-field merge, same reasoning as every other live overlay in this file."""
         tid = self.find_team_id(name)
         if tid is None:
             return {}
@@ -3074,18 +3103,55 @@ class SoccerDB:
         n_teams = self.con.execute(
             "SELECT COUNT(*) FROM team_season_stats WHERE league_key = ? AND season = ?",
             [head[2], season]).fetchone()[0]
-        rf = self.team_form(head[0], season, last=8)
-        results = [{"date": str(r.date), "venue": r.venue, "opponent": r.opponent,
-                    "opponent_logo": self.team_logo(r.opponent),
-                    "gf": int(r.gf), "ga": int(r.ga), "result": r.result,
-                    "xg_for": _r(r.xg_for, 2), "xg_against": _r(r.xg_against, 2)}
-                   for r in rf.itertuples()]
-        scorers = self.con.execute("""
-            SELECT pl.player_name, ps.goals, ps.assists
-            FROM player_season_stats ps JOIN players pl USING(player_id)
-            WHERE ps.team_id = ? AND ps.season = ?
-            ORDER BY ps.goals DESC, ps.assists DESC LIMIT 5
-        """, [tid, season]).df()
+        # Results: live current-season matches (team_results_fotmob, see
+        # pipeline/load_team_info.py) when available -- no xG, FotMob's basic
+        # fixtures list doesn't carry it, an honest gap rather than a stale number.
+        # Falls back to the frozen season's real Understat match log (WITH xG)
+        # only when live has nothing, same as every other live-overlay fallback.
+        results = None
+        if season == FOCUS_SEASON:
+            try:
+                lr = self.con.execute("""
+                    SELECT match_ts, venue, opponent, gf, ga, result
+                    FROM team_results_fotmob WHERE team_id = ? ORDER BY match_ts DESC
+                """, [tid]).fetchall()
+            except Exception:                            # noqa: BLE001 -- table not built yet
+                lr = []
+            if lr:
+                results = [{"date": ts, "venue": v, "opponent": opp,
+                            "opponent_logo": self.team_logo(opp), "gf": gf, "ga": ga,
+                            "result": res, "xg_for": None, "xg_against": None}
+                           for ts, v, opp, gf, ga, res in lr]
+        if results is None:
+            rf = self.team_form(head[0], season, last=8)
+            results = [{"date": str(r.date), "venue": r.venue, "opponent": r.opponent,
+                        "opponent_logo": self.team_logo(r.opponent),
+                        "gf": int(r.gf), "ga": int(r.ga), "result": r.result,
+                        "xg_for": _r(r.xg_for, 2), "xg_against": _r(r.xg_against, 2)}
+                       for r in rf.itertuples()]
+        # Top scorers: live current-season goals/assists (player_stats_fotmob,
+        # keyed by fotmob_team_id via team_logos) when available, same reasoning.
+        scorers = None
+        if season == FOCUS_SEASON:
+            try:
+                ls = self.con.execute("""
+                    SELECT f.player_name, f.goals, f.assists
+                    FROM player_stats_fotmob f
+                    JOIN team_logos tl ON tl.fotmob_team_id = f.fotmob_team_id
+                    WHERE tl.team_id = ?
+                    ORDER BY f.goals DESC, f.assists DESC LIMIT 5
+                """, [tid]).df()
+            except Exception:                            # noqa: BLE001 -- table not built yet
+                ls = None
+            if ls is not None and not ls.empty:
+                scorers = ls
+        if scorers is None:
+            scorers = self.con.execute("""
+                SELECT pl.player_name, ps.goals, ps.assists
+                FROM player_season_stats ps JOIN players pl USING(player_id)
+                WHERE ps.team_id = ? AND ps.season = ?
+                ORDER BY ps.goals DESC, ps.assists DESC LIMIT 5
+            """, [tid, season]).df()
         # use case 7: manager + venue (FotMob), and full squad
         try:
             meta = self.con.execute(

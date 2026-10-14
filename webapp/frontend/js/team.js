@@ -69,7 +69,7 @@ async function load(name) {
       <span class="res-ven">${r.venue}</span>
       <span class="res-opp">${crestHTML(r.opponent_logo, 'crest-sm')}${r.opponent}</span>
       <span class="res-sc"><b>${r.gf}–${r.ga}</b></span>
-      <span class="res-xg muted">xG ${r.xg_for} – ${r.xg_against}</span>
+      ${r.xg_for != null ? `<span class="res-xg muted">xG ${r.xg_for} – ${r.xg_against}</span>` : ''}
     </div>`).join('') || '<div class="muted">No matches.</div>';
 
   document.getElementById('scorers').innerHTML = (d.top_scorers || []).map((p, i) => `
