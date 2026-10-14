@@ -44,7 +44,7 @@ from pathlib import Path
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import DB_PATH, FOTMOB_LEAGUE_IDS, FOCUS_SEASON
+from config import DB_PATH, FOTMOB_LEAGUE_IDS, FOCUS_SEASON, DATAMB_SEASON
 from analytics.queries import connect_retry
 from pipeline.fotmob_auth import FotmobAuth
 from pipeline.load_team_logos import load_team_logos
@@ -192,7 +192,16 @@ def _match_league(con, league_key: str, fm_rows: list) -> list:
 
 
 def refresh() -> int:
-    load_team_logos()   # keep the fotmob_team_id -> team_id crosswalk current first
+    # DATAMB_SEASON (the live season), NOT load_team_logos' own FOCUS_SEASON
+    # default -- this module exists specifically to match CURRENT-season
+    # transfers/promotions onto team_logos (see the module docstring's "Team
+    # match" paragraph), so matching against the frozen prior season's FotMob
+    # roster defeated that intent: a club promoted into the current top flight
+    # (team_logos has no per-season column, one row per team+league) never
+    # got linked at all, silently dropping it out of every live standings/
+    # results view that joins through team_logos (see memory
+    # team-season-mixing-fix / the Hull City-Ipswich Town-Coventry City gap).
+    load_team_logos(DATAMB_SEASON)   # keep the fotmob_team_id -> team_id crosswalk current first
 
     con = connect_retry(DB_PATH, read_only=False)
     try:
