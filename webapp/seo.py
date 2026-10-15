@@ -233,7 +233,45 @@ def _entity_meta(page: str, query: dict) -> tuple[str, str] | None:
         return (f"{name} — Squad & Ratings",
                 f"{name} squad ratings, league standing, form and performance "
                 f"analysis on Atlastra.")
+    if page == "blogpost.html":
+        slug = (query.get("slug") or [""])[0]
+        if slug:
+            try:
+                from webapp.blog import get_post
+                r = get_post(slug)
+            except Exception:                                 # noqa: BLE001 -- SEO is best-effort
+                r = {"available": False}
+            if r.get("available"):
+                p = r["post"]
+                title = p.get("title") or slug
+                desc = p.get("subtitle") or f"{title} on Atlastra."
+                return title, desc
     return None
+
+
+def _own_title(text: str) -> str | None:
+    """The page's own shipped <title>, for pages with no PAGE_META entry. Without
+    this, inject_head's old fallback replaced a real, page-specific title (e.g.
+    "Atlastra — Tactics Lab") with the same generic "Atlastra | Atlastra" on
+    every uncovered page -- a real regression caught by diffing local vs. prod
+    titles across all 44 pages (tactics/value/dnamap/predict/biggame/draft/
+    mystery/guess/higherlower/daily/findnext/blog/buildplayer/highlights/admin/
+    ask/offline/match/blogpost/profile/styles/card all affected, several of them
+    NOT noindexed so it was actively hurting search snippets too). Strips the
+    "Atlastra — " prefix every page shell already uses, since the caller
+    re-appends " | Atlastra" as a suffix instead."""
+    lo = text.lower()
+    i, j = lo.find("<title"), lo.find("</title>")
+    if not (0 <= i < j):
+        return None
+    k = text.find(">", i)
+    if k < 0 or k >= j:
+        return None
+    raw = html.unescape(text[k + 1:j]).strip()
+    for sep in (" — ", " - "):
+        if raw.lower().startswith("atlastra" + sep):
+            return raw[len("atlastra" + sep):].strip() or None
+    return raw if raw and raw.lower() != "atlastra" else None
 
 
 def inject_head(body: bytes, page: str, query: dict, req_path: str) -> bytes:
@@ -251,8 +289,9 @@ def inject_head(body: bytes, page: str, query: dict, req_path: str) -> bytes:
         meta = PAGE_META.get(page)
         if meta:
             raw_title, desc, _home = meta
-        else:                                             # unknown page -> generic
-            raw_title, desc = SITE_NAME, PAGE_META["index.html"][1]
+        else:                 # no registry entry -> keep the page's own title
+            raw_title = _own_title(text) or SITE_NAME
+            desc = PAGE_META["index.html"][1]
         noindex = page in NOINDEX_PAGES
     is_home = bool(PAGE_META.get(page, (None, None, False))[2])
     title = raw_title if is_home else f"{raw_title} | {SITE_NAME}"
@@ -262,7 +301,8 @@ def inject_head(body: bytes, page: str, query: dict, req_path: str) -> bytes:
     if page == "index.html":
         canonical = SITE_URL + "/"
     elif ent:
-        canonical = f"{SITE_URL}/{page}?name={quote((query.get('name') or [''])[0], safe='')}"
+        qkey = "slug" if page == "blogpost.html" else "name"
+        canonical = f"{SITE_URL}/{page}?{qkey}={quote((query.get(qkey) or [''])[0], safe='')}"
     else:
         canonical = f"{SITE_URL}/{page}"
 
