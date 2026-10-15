@@ -22,13 +22,13 @@ import time
 from datetime import date, datetime, timezone
 
 try:
-    from config import DB_PATH
+    from config import DB_PATH, FOTMOB_LEAGUE_IDS
     from analytics.queries import connect_retry
     from pipeline.fotmob_auth import FotmobAuth
 except ModuleNotFoundError:  # pragma: no cover
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import DB_PATH
+    from config import DB_PATH, FOTMOB_LEAGUE_IDS
     from analytics.queries import connect_retry
     from pipeline.fotmob_auth import FotmobAuth
 
@@ -95,6 +95,45 @@ def _extract_results(d: dict, fotmob_id: int, team_id: int, limit: int = 8) -> l
     return rows
 
 
+def _extract_fixtures(d: dict, league_key: str, fid_to_tid: dict) -> list:
+    """This club's remaining (not-yet-played) fixtures in its OWN domestic league
+    only, from the same /api/data/teams response (no extra call) -- built for the
+    season Monte Carlo simulator (see memory monte-carlo-season-sim). Filtered by
+    tournament.leagueId against FOTMOB_LEAGUE_IDS so cup/continental fixtures
+    (EFL Cup, Champions League) don't leak into a league-table simulation -- a
+    club's overviewFixtures mixes every competition it's in with no separate
+    list per competition, confirmed e.g. Arsenal's: 32 remaining Premier League
+    fixtures vs 6 Champions League vs 1 EFL Cup, otherwise indistinguishable
+    without this filter.
+
+    Both sides resolved to OUR team_id via fid_to_tid (the same team_logos
+    crosswalk load_team_info already builds for _extract_results) -- a fixture
+    against a club we can't resolve (no team_logos link, e.g. Coventry City,
+    see memory team-season-mixing-fix) is simply skipped, same "absent rather
+    than wrong" convention league_standings' live overlay already uses.
+
+    Keyed by FotMob's own match id (f["id"]) so the caller can dedupe: this
+    function runs once per club, and a shared fixture appears in BOTH sides'
+    own fixture lists."""
+    want_league_id = FOTMOB_LEAGUE_IDS.get(league_key)
+    if want_league_id is None:
+        return []
+    rows = []
+    for f in (d.get("overview") or {}).get("overviewFixtures") or []:
+        st = f.get("status") or {}
+        if st.get("finished"):
+            continue
+        if (f.get("tournament") or {}).get("leagueId") != want_league_id:
+            continue
+        fid = f.get("id")
+        home, away = f.get("home") or {}, f.get("away") or {}
+        h_tid, a_tid = fid_to_tid.get(home.get("id")), fid_to_tid.get(away.get("id"))
+        if fid is None or h_tid is None or a_tid is None:
+            continue
+        rows.append((int(fid), league_key, h_tid, a_tid))
+    return rows
+
+
 def _iso_ts(s):
     if not s:
         return None
@@ -136,15 +175,20 @@ def load_team_info() -> None:
     con = connect_retry(DB_PATH, read_only=False)
     try:
         teams = con.execute(
-            "SELECT team_id, fotmob_team_id, team_name FROM team_logos "
+            "SELECT team_id, fotmob_team_id, team_name, league_key FROM team_logos "
             "WHERE team_id IS NOT NULL AND fotmob_team_id IS NOT NULL"
         ).fetchall()
     finally:
         con.close()
 
+    # FotMob team id -> our team_id, for resolving fixture opponents (see
+    # _extract_fixtures) without a second DB round-trip per club.
+    fid_to_tid = {int(fid): int(tid) for tid, fid, _, _ in teams}
+
     auth = FotmobAuth()
-    rows, squad_rows, result_rows, ok = [], [], [], 0
-    for tid, fid, tname in teams:
+    rows, squad_rows, result_rows, fixture_rows, seen_fixture_ids, ok = \
+        [], [], [], [], set(), 0
+    for tid, fid, tname, league_key in teams:
         try:
             d = auth.get(f"/api/data/teams?id={int(fid)}")
             m = _extract(d)
@@ -155,6 +199,11 @@ def load_team_info() -> None:
                      m["capacity"], m["opened"], m["surface"]))
         squad_rows.extend(_extract_squad(d, int(tid)))
         result_rows.extend(_extract_results(d, int(fid), int(tid)))
+        for fx in _extract_fixtures(d, league_key, fid_to_tid):
+            if fx[0] in seen_fixture_ids:          # shared fixture, already
+                continue                           # seen from the other side
+            seen_fixture_ids.add(fx[0])
+            fixture_rows.append(fx)
         ok += 1
         time.sleep(RATE_LIMIT_SEC)
 
@@ -184,6 +233,17 @@ def load_team_info() -> None:
         con.executemany(
             "INSERT INTO team_results_fotmob VALUES (?,?,?,?,?,?,?)", result_rows)
 
+    # Remaining league fixtures -- the input to the season Monte Carlo simulator
+    # (see memory monte-carlo-season-sim). One row per real fixture (deduped
+    # above), both sides already resolved to our own team_id.
+    con.execute("DROP TABLE IF EXISTS team_fixtures_fotmob")
+    con.execute("""CREATE TABLE team_fixtures_fotmob
+        (fotmob_match_id BIGINT, league_key VARCHAR,
+         home_team_id BIGINT, away_team_id BIGINT)""")
+    if fixture_rows:
+        con.executemany(
+            "INSERT INTO team_fixtures_fotmob VALUES (?,?,?,?)", fixture_rows)
+
     # team_squad_fotmob above is a pure snapshot (dropped and rebuilt every run), so it can
     # never answer "who was out for a match six months ago" -- there's no history to add as
     # a feature to ml/train_match_outcome.py's historical Elo/form classifier. This table is
@@ -209,6 +269,7 @@ def load_team_info() -> None:
     print(f"team_meta: {ok} teams ({n_mgr} with manager, {n_ven} with venue); "
           f"team_squad_fotmob: {len(squad_rows)} players; "
           f"team_results_fotmob: {len(result_rows)} finished matches; "
+          f"team_fixtures_fotmob: {len(fixture_rows)} remaining league fixtures; "
           f"team_injury_history: +{sum(1 for r in squad_rows if r[11])} injured today.")
 
 
