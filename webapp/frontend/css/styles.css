@@ -490,6 +490,14 @@ select{background:var(--elev);border:1px solid var(--border2);color:var(--text);
 .pos-n{color:var(--green)} .neg-n{color:var(--red)}
 .formcell{white-space:nowrap}
 
+.ss-tbl .tcell{min-width:140px}
+.ss-bar{position:relative;width:88px;height:18px;border-radius:5px;background:var(--card2);overflow:hidden;margin:0 auto}
+.ss-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px 0 0 5px;opacity:.9}
+.ss-bar-fill.ss-title{background:var(--gold)}
+.ss-bar-fill.ss-top4{background:var(--accent)}
+.ss-bar-fill.ss-rel{background:var(--red)}
+.ss-bar-lbl{position:relative;z-index:1;display:block;text-align:center;line-height:18px;font-size:11px;font-weight:600;color:var(--text)}
+
 /* ---- Team performance page ---- */
 .thead{display:flex;align-items:center;gap:22px;margin-bottom:20px}
 .tcrest{width:88px;height:88px;flex:none;display:flex;align-items:center;justify-content:center;

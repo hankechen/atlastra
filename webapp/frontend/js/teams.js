@@ -78,9 +78,46 @@ async function loadLeaders(key) {
     <div class="ll-grid">${d.leaders.map(card).join('')}</div></section>`;
 }
 
+// ---- per-league sub-tab: Season Sim (Monte Carlo title/top-4/relegation odds) ----
+function simAge(s) {
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+const simBar = (pct, cls) => `<div class="ss-bar"><div class="ss-bar-fill ${cls}" style="width:${Math.max(pct, pct > 0 ? 2 : 0)}%"></div><span class="ss-bar-lbl">${pct}%</span></div>`;
+async function loadSeasonSim(key) {
+  const el = _content();
+  const d = await api('/api/season_sim?league=' + encodeURIComponent(key));
+  if (!d.available) {
+    el.innerHTML = `<div class="empty">${d.error || 'Season simulation not available for this league.'}</div>`;
+    return;
+  }
+  const n = d.table.length;
+  el.innerHTML = `<section class="card"><div class="card-h"><h3>Season Simulation</h3>
+      <span class="see">${d.n_trials.toLocaleString()} trials · ${d.n_fixtures} fixtures left · updated ${simAge(d.age_seconds)}</span></div>
+    <div class="ltbl-wrap"><table class="ltbl ss-tbl"><thead><tr>
+      <th>#</th><th>Team</th><th>Pts</th><th>Title</th><th>Top 4</th><th>Relegation</th><th>Proj. Pts</th>
+    </tr></thead><tbody>${d.table.map(t => `
+      <tr class="ltbl-row ${posClass(Math.round(t.median_position), n)}" onclick="location.href='${teamHref(t.team)}'">
+        <td class="pos">${Math.round(t.median_position)}</td>
+        <td class="tcell"><span class="tn">${t.team}</span></td>
+        <td><b>${t.current_points}</b></td>
+        <td>${simBar(t.title_pct, 'ss-title')}</td>
+        <td>${simBar(t.top4_pct, 'ss-top4')}</td>
+        <td>${simBar(t.relegation_pct, 'ss-rel')}</td>
+        <td class="muted">${t.median_points} <small>(${t.p10_points}–${t.p90_points})</small></td>
+      </tr>`).join('')}</tbody></table></div>
+    <div class="placeholder-note" style="margin:14px">Monte Carlo: the remaining fixtures are played out ${d.n_trials.toLocaleString()} times, each
+      match drawn from Atlastra's own blended match model (the same 50/50 fitted-squad + Elo/form ensemble live on the match
+      Odds tab) with a scoreline sampled from the fitted xG grid for realistic goal difference. Odds are the share of trials
+      each team finished there — not a single predicted table. Proj. Pts shows the median and 10th–90th percentile range.</div>
+    </section>`;
+}
+
 // open a league: render its sub-tabs (Standings / Fixtures / League Leaders)
 const LEAGUE_SUBS = [['standings', 'Standings', loadStandings],
-  ['fixtures', 'Fixtures', loadFixtures], ['leaders', 'League Leaders', loadLeaders]];
+  ['fixtures', 'Fixtures', loadFixtures], ['leaders', 'League Leaders', loadLeaders],
+  ['sim', 'Season Sim', loadSeasonSim]];
 const seasonLabel = () => (SEASONS.find(s => s.value === curSeason) || {}).label || 'this season';
 const runSub = () => (LEAGUE_SUBS.find(s => s[0] === curSub)[2])(curKey);
 function openLeague(key, sub = 'standings') {

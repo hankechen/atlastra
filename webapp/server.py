@@ -49,7 +49,7 @@ def fetch_image(url: str):
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from analytics.queries import SoccerDB, warm_pool  # noqa: E402
-from config import FOCUS_SEASON, SOFASCORE_BASE  # noqa: E402
+from config import FOCUS_SEASON, SOFASCORE_BASE, FOTMOB_LEAGUE_IDS  # noqa: E402
 from webapp import auth  # noqa: E402
 
 
@@ -1509,6 +1509,16 @@ def api(path: str, q: dict) -> dict | list:
             return d.web_aging_curves()
         if path == "/api/projected_table":        # next season's table if nobody moves
             return d.web_projected_table(q.get("league", [None])[0])
+        if path == "/api/season_sim":             # Monte Carlo title/top-4/relegation odds
+            lk = q.get("league", ["ENG-Premier League"])[0]
+            hit = _SEASON_SIM_CACHE.get(lk)
+            if not hit:
+                return {"available": False,
+                       "error": "Not computed yet -- check back shortly."
+                                if lk in _SEASON_SIM_LEAGUES else
+                                f"{lk!r} isn't one of the simulated leagues."}
+            computed_at, r = hit
+            return {**r, "computed_at": computed_at, "age_seconds": round(time.time() - computed_at)}
         if path == "/api/match_danger":           # likeliest goal involvements in a fixture
             return d.web_match_danger(q.get("home", ["Arsenal"])[0],
                                       q.get("away", ["Liverpool"])[0])
@@ -2147,6 +2157,46 @@ def _player_stats_refresher():
         time.sleep(PLAYER_STATS_EVERY)
 
 
+# league_key -> cached Monte Carlo season-simulation result (see
+# webapp/season_sim.py). A simulate_league() call takes ~15-25s per league
+# (and makes live FotMob calls, so it needs _FOTMOB_LOCK like every other
+# refresher here) -- far too slow for a request to wait on, so /api/
+# season_sim only ever reads this cache; a background thread fills it.
+_SEASON_SIM_CACHE: dict = {}
+_SEASON_SIM_LEAGUES = list(FOTMOB_LEAGUE_IDS)   # the same 5 top-flight leagues
+
+
+def _season_sim_refresher():
+    """Rebuild the Monte Carlo season-simulation cache for every top-5 league
+    on a loop. Depends on team_fixtures_fotmob/team_standings_fotmob/live squad
+    units -- all of which team_info_refresher/standings_refresher populate --
+    so this starts well after those (ATLASTRA_SEASON_SIM_DELAY) rather than
+    racing them for data that doesn't exist yet. See webapp/season_sim.py for
+    the simulation itself and its own performance notes (a naive first version
+    took 115-150s/league; the shipped one is ~15-25s after a batch-prefetch
+    fix -- still slow enough that each league's run is wrapped in _FOTMOB_LOCK
+    for its whole duration, same as team_info_refresher's own ~40s refresh."""
+    import time
+    from webapp.season_sim import simulate_league
+    SEASON_SIM_EVERY = int(os.environ.get("ATLASTRA_SEASON_SIM_EVERY", str(3600)))  # 1h
+    time.sleep(int(os.environ.get("ATLASTRA_SEASON_SIM_DELAY", "300")))
+    while True:
+        for lk in _SEASON_SIM_LEAGUES:
+            try:
+                with _FOTMOB_LOCK:
+                    with SoccerDB(read_only=DB_READ_ONLY) as d:
+                        r = simulate_league(d.con, lk, n_trials=10_000)
+                if r.get("available"):
+                    _SEASON_SIM_CACHE[lk] = (time.time(), r)
+                    print(f"season sim refresh: {lk} ({r['n_fixtures']} fixtures)", flush=True)
+                else:
+                    print(f"season sim refresh: {lk} skipped ({r.get('error')})", flush=True)
+            except Exception as e:                         # noqa: BLE001
+                print(f"season sim refresher: {lk}: {type(e).__name__}: {str(e)[:120]}", flush=True)
+            time.sleep(3)                      # small gap before the next league
+        time.sleep(SEASON_SIM_EVERY)
+
+
 def _blog_refresher():
     """Once a week, write one auto-generated blog draft about the week's standout
     performance -- see auto_blog.py. ALWAYS lands as a draft (never auto-published,
@@ -2234,6 +2284,8 @@ if __name__ == "__main__":
         print("team info refresher: on (FotMob, manager/venue/squad)")
         threading.Thread(target=_player_stats_refresher, daemon=True).start()
         print("player stats refresher: on (FotMob, per-player season totals)")
+        threading.Thread(target=_season_sim_refresher, daemon=True).start()
+        print("season sim refresher: on (FotMob, Monte Carlo title/top-4/relegation odds)")
     threading.Thread(target=_blog_refresher, daemon=True).start()
     print("blog refresher: on (weekly AI draft, held for admin review)")
     if live_feed.CACHE_MODE:
