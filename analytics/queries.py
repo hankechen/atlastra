@@ -3279,17 +3279,27 @@ class SoccerDB:
             WHERE strip_accents(lower(t.team_name)) LIKE strip_accents(lower('%'||?||'%'))
             ORDER BY t.team_name LIMIT 8
         """, [q]).df()
-        # national teams from the international feed (link to /nat.html via SofaScore id)
+        # National teams: fifa_rankings is the stable 211-team roster (always current,
+        # no match-window dependency), so a country is searchable year-round -- not
+        # just during the ~handful of days a FIFA window puts it in live_matches.
+        # live_matches is only a LEFT JOIN enrichment, for team_id/cc when a recent
+        # match happens to be in the rolling window (needed for the /nat.html link
+        # and flag; absent rather than wrong when it isn't -- see team_id/cc going
+        # NULL below, which the frontend must treat as "no deep link available").
         ndf = self.con.execute("""
-            SELECT team, any_value(cc) AS cc, any_value(team_id) AS team_id, count(*) AS n
-            FROM (
-                SELECT home_team AS team, home_country AS cc, home_team_id AS team_id
-                FROM live_matches WHERE tournament_group = 'International' AND home_country IS NOT NULL
-                UNION ALL
-                SELECT away_team, away_country, away_team_id
-                FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL)
-            WHERE strip_accents(lower(team)) LIKE strip_accents(lower('%'||?||'%'))
-            GROUP BY team ORDER BY n DESC, team LIMIT 8
+            WITH live AS (
+                SELECT team, any_value(cc) AS cc, any_value(team_id) AS team_id
+                FROM (
+                    SELECT home_team AS team, home_country AS cc, home_team_id AS team_id
+                    FROM live_matches WHERE tournament_group = 'International' AND home_country IS NOT NULL
+                    UNION ALL
+                    SELECT away_team, away_country, away_team_id
+                    FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL)
+                GROUP BY team)
+            SELECT f.team_name AS team, live.cc, live.team_id
+            FROM fifa_rankings f LEFT JOIN live ON live.team = f.team_name
+            WHERE strip_accents(lower(f.team_name)) LIKE strip_accents(lower('%'||?||'%'))
+            ORDER BY f.ranking LIMIT 8
         """, [q]).df()
         return {
             "query": q,

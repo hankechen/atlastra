@@ -497,9 +497,9 @@ function attachSearchDropdown(input, opts = {}) {
               t.team, esc(t.league))).join('');
         const national = (d.national || []).slice(0, 4);
         if (national.length) html += '<div class="dd-h">National Teams</div>' + national.map(t =>
-          row(`/nat.html?id=${t.team_id}`,
+          row(t.team_id != null ? `/nat.html?id=${t.team_id}` : `/search.html?q=${encodeURIComponent(t.team)}`,
               `<span class="crest-pic">${flagISO2(t.cc) || '🏳️'}</span>`,
-              t.team, 'National team')).join('');
+              t.team, t.team_id != null ? 'National team' : 'National team · no recent matches')).join('');
       }
       if (onPick) {                              // add-a-player mode: no "see all" nav footer
         html = html || '<div class="dd-empty">No players found</div>';

@@ -33,11 +33,11 @@ async function runSearch(q) {
       <span class="srend">›</span>
     </div>`).join('');
   const natRows = nat.map(t => `
-    <div class="sr" onclick="location.href='/nat.html?id=${t.team_id}'">
+    <div class="sr"${t.team_id != null ? ` onclick="location.href='/nat.html?id=${t.team_id}'"` : ''}>
       <span class="pic crest-pic">${flagISO2(t.cc) || '🏳️'}</span>
       <span class="srx"><div class="nm">${t.team}</div>
-        <div class="sub">National team</div></span>
-      <span class="srend">›</span>
+        <div class="sub">National team${t.team_id == null ? ' · no recent matches' : ''}</div></span>
+      <span class="srend">${t.team_id != null ? '›' : ''}</span>
     </div>`).join('');
   tEl.innerHTML = (clubRows + natRows) || '<div class="empty">No teams.</div>';
 }
