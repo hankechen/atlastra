@@ -20,8 +20,17 @@ def available() -> bool:
 
 
 def _post(parts, temperature=0.3, model=MODEL, retries=5, timeout=150):
+    """Every give-up path prints why before returning None. Without this, every
+    caller's fallback (auto_blog, scout_ai, weekly_recap, ask_agent) collapses to
+    the same "no LLM configured" message whether the key is missing, Google is
+    rate-limiting us, or the API is having a multi-minute outage -- which once
+    cost ~15 minutes of blind debugging before the real cause (a sustained
+    upstream 503) was found by bypassing this function and calling the raw API
+    directly. These prints are the fix: the real status/exception is now always
+    on stdout (journalctl on prod), one grep away."""
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
+        print("gemini: no GEMINI_API_KEY set", flush=True)
         return None
     url = f"{_BASE}/{model}:generateContent?key={key}"
     body = json.dumps({"contents": [{"parts": parts}],
@@ -33,16 +42,22 @@ def _post(parts, temperature=0.3, model=MODEL, retries=5, timeout=150):
             cands = d.get("candidates") or []
             if cands:
                 return "".join(p.get("text", "") for p in cands[0]["content"]["parts"]).strip()
+            print(f"gemini: response had no candidates -- {str(d)[:200]}", flush=True)
             return None
         except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:200]
             if e.code in (503, 429, 500) and attempt < retries - 1:
+                print(f"gemini: HTTP {e.code} (attempt {attempt + 1}/{retries}), retrying -- {detail}",
+                      flush=True)
                 time.sleep(min(30, 5 * (attempt + 1)))   # patient for free-tier rate limits
                 continue
+            print(f"gemini: HTTP {e.code}, giving up -- {detail}", flush=True)
             return None
-        except Exception:                                # noqa: BLE001
+        except Exception as e:                           # noqa: BLE001
             if attempt < retries - 1:
                 time.sleep(1.5)
                 continue
+            print(f"gemini: {type(e).__name__}: {str(e)[:200]}, giving up", flush=True)
             return None
     return None
 
