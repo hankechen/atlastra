@@ -219,20 +219,38 @@ def _extract_obj(text: str) -> dict | None:
     return None
 
 
-def _route(question: str) -> dict:
+def _route(question: str) -> tuple[dict, bool]:
+    """(decision, llm_ok). llm_ok is False ONLY when the Gemini call itself
+    failed (outage/rate-limit/network) -- distinct from the model replying but
+    declining or returning unparseable JSON, which is llm_ok=True with an
+    empty decision. ask() needs this distinction so a Gemini outage doesn't
+    get reported as "I can't answer that kind of question" (see ask()'s
+    OFFLINE_MSG -- this conflation was a real bug, found the same week
+    gemini.py started logging its own failures instead of swallowing them)."""
     from webapp import gemini
     tool_list = "\n".join(f"- {name}: {t['desc']} Params: {t['params']}"
                           for name, t in TOOLS.items())
     prompt = SYSTEM_ROUTE.format(tool_list=tool_list) + f"\n\nQuestion: {question}"
     raw = gemini.generate(prompt, temperature=0.1)
-    return _extract_obj(raw) or {}
+    if raw is None:
+        return {}, False
+    return _extract_obj(raw) or {}, True
 
 
-def _synthesize(question: str, data) -> str:
+def _synthesize(question: str, data) -> str | None:
+    """None specifically means the Gemini call failed -- see _route()'s
+    docstring for why ask() needs to tell that apart from an ordinary empty
+    reply."""
     from webapp import gemini
     payload = json.dumps(data, ensure_ascii=False, default=str)[:6000]
     prompt = f"{SYSTEM_SYNTH}\n\nQuestion: {question}\n\nData (JSON):\n{payload}"
-    return (gemini.generate(prompt, temperature=0.3) or "").strip()
+    raw = gemini.generate(prompt, temperature=0.3)
+    return raw.strip() if raw is not None else None
+
+
+OFFLINE_MSG = ("Ask Atlastra can't reach its AI model right now (this usually clears up "
+              "within a few minutes) -- try Search or Stat Leaders directly, or ask again "
+              "shortly.")
 
 
 def ask(question: str, db_read_only: bool = True) -> dict:
@@ -253,7 +271,9 @@ def ask(question: str, db_read_only: bool = True) -> dict:
         return {"answer": "Ask Atlastra is temporarily offline (AI not configured) -- "
                           "try Search or Stat Leaders directly.", "tool_used": None}
 
-    decision = _route(question)
+    decision, llm_ok = _route(question)
+    if not llm_ok:
+        return {"answer": OFFLINE_MSG, "tool_used": None}
     tool_name = decision.get("tool")
     if not tool_name or tool_name not in TOOLS:
         answer = str(decision.get("direct_answer") or "").strip()
@@ -271,6 +291,8 @@ def ask(question: str, db_read_only: bool = True) -> dict:
         data = {"error": f"{type(e).__name__} while fetching data"}
 
     answer = _synthesize(question, data)
+    if answer is None:
+        return {"answer": OFFLINE_MSG, "tool_used": tool_name}
     if not answer:
         answer = "I found some data but couldn't put together an answer -- try rephrasing."
     return {"answer": answer, "tool_used": tool_name}
