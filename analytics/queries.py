@@ -1277,10 +1277,19 @@ class SoccerDB:
                 for r in df.itertuples()]
 
     def web_national_teams(self) -> list[dict]:
-        """National teams from the international feed (live_matches: WC + qualifiers +
-        major tournaments). Each with its flag code + recent record/form and a click
-        target (latest finished match, else next fixture). Sorted by points then GD
-        over the available window (small — it's just the current international window)."""
+        """National teams: the full FIFA-ranked roster (fifa_rankings -- 211 teams,
+        always current, same backing table [[search-national-teams-fix]] used to make
+        national-team search work year-round) is the base, LEFT JOINed with whatever's
+        in the international live feed right now. Record/form/event_id are only ever
+        non-zero when a country actually has a match in the current rolling window
+        (live_matches WHERE tournament_group = 'International') -- "absent rather than
+        wrong" the rest of the time (0 played, no form, no click target), not hidden
+        entirely. Without this, the whole tab was blank for the many weeks between FIFA
+        windows (same root cause as the search bug, just never fixed here -- a country
+        existing shouldn't depend on whether it has a match in roughly the last week).
+        Sorted by points/GD first (so anything actually live bubbles to the top). FIFA
+        rank as the tiebreak keeps the dormant majority in a sensible order instead of
+        alphabetical, since points/GD are 0 for all of them."""
         agg = self.con.execute("""
             WITH m AS (
                 SELECT event_id, start_timestamp, status_type, home_team AS team,
@@ -1291,18 +1300,25 @@ class SoccerDB:
                 SELECT event_id, start_timestamp, status_type, away_team,
                        away_team_id, away_country, away_score, home_score,
                        CASE winner_code WHEN 2 THEN 'W' WHEN 1 THEN 'L' WHEN 3 THEN 'D' END
-                FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL)
-            SELECT team, any_value(cc) AS cc, any_value(team_id) AS team_id,
-                   count(*) FILTER (WHERE status_type = 'finished') AS played,
-                   count(*) FILTER (WHERE res = 'W') AS w,
-                   count(*) FILTER (WHERE res = 'D') AS d,
-                   count(*) FILTER (WHERE res = 'L') AS l,
-                   COALESCE(SUM(gf) FILTER (WHERE status_type = 'finished'), 0) AS gf,
-                   COALESCE(SUM(ga) FILTER (WHERE status_type = 'finished'), 0) AS ga,
-                   max(CASE WHEN status_type = 'finished' THEN event_id END) AS last_event,
-                   arg_min(CASE WHEN status_type = 'notstarted' THEN event_id END,
-                           CASE WHEN status_type = 'notstarted' THEN start_timestamp END) AS next_event
-            FROM m GROUP BY team
+                FROM live_matches WHERE tournament_group = 'International' AND away_country IS NOT NULL),
+            live AS (
+                SELECT team, any_value(cc) AS cc, any_value(team_id) AS team_id,
+                       count(*) FILTER (WHERE status_type = 'finished') AS played,
+                       count(*) FILTER (WHERE res = 'W') AS w,
+                       count(*) FILTER (WHERE res = 'D') AS d,
+                       count(*) FILTER (WHERE res = 'L') AS l,
+                       COALESCE(SUM(gf) FILTER (WHERE status_type = 'finished'), 0) AS gf,
+                       COALESCE(SUM(ga) FILTER (WHERE status_type = 'finished'), 0) AS ga,
+                       max(CASE WHEN status_type = 'finished' THEN event_id END) AS last_event,
+                       arg_min(CASE WHEN status_type = 'notstarted' THEN event_id END,
+                               CASE WHEN status_type = 'notstarted' THEN start_timestamp END) AS next_event
+                FROM m GROUP BY team)
+            SELECT f.team_name AS team, live.cc, live.team_id, f.ranking AS fifa_rank,
+                   COALESCE(live.played, 0) AS played, COALESCE(live.w, 0) AS w,
+                   COALESCE(live.d, 0) AS d, COALESCE(live.l, 0) AS l,
+                   COALESCE(live.gf, 0) AS gf, COALESCE(live.ga, 0) AS ga,
+                   live.last_event, live.next_event
+            FROM fifa_rankings f LEFT JOIN live ON live.team = f.team_name
         """).df()
         # last-5 form (most recent first) per team
         formdf = self.con.execute("""
@@ -1322,7 +1338,7 @@ class SoccerDB:
         form = {r.team: list(r.form) for r in formdf.itertuples()}
         rows = [{
             "team": r.team, "country_code": r.cc, "team_id": _i(r.team_id),
-            "fifa_rank": self.fifa_rank(r.team),
+            "fifa_rank": _i(r.fifa_rank),
             "played": _i(r.played), "w": _i(r.w), "d": _i(r.d), "l": _i(r.l),
             "gf": _i(r.gf), "ga": _i(r.ga), "gd": _i(r.gf) - _i(r.ga),
             "points": _i(r.w) * 3 + _i(r.d),
@@ -1330,7 +1346,8 @@ class SoccerDB:
             "event_id": _i(r.last_event) if pd.notna(r.last_event) else (
                 _i(r.next_event) if pd.notna(r.next_event) else None),
         } for r in agg.itertuples()]
-        rows.sort(key=lambda x: (-x["points"], -x["gd"], x["team"]))
+        rows.sort(key=lambda x: (-x["points"], -x["gd"],
+                                  x["fifa_rank"] if x["fifa_rank"] is not None else 999, x["team"]))
         return rows
 
     # ---- Champions League hub (use of ucl_matches + v_stats_ucl) ----
