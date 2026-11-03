@@ -301,9 +301,19 @@ def _write_cache(key: str, report: str, model_used: str) -> str:
     return generated_at
 
 
-def _bg_generate(data: dict, key: str):
+def _bg_generate(data: dict, key: str, protect_existing: bool = False):
     """Run the (slow) LLM generation off the request path and persist it to the cache.
-    Deduped per key so a burst of requests only triggers one generation."""
+    Deduped per key so a burst of requests only triggers one generation.
+
+    protect_existing=True means a real AI-authored report is already cached for this
+    key (the user clicked Regenerate on a report that was already good) -- if this
+    attempt falls back to the rule-based report (both LLMs failed, e.g. the kind of
+    multi-minute Gemini outage seen this week -- see [[gemini-outage-blog-fallback]]
+    memory), DON'T overwrite the cache with a worse result. Without this, Regenerate
+    was a one-way downgrade: it deleted the existing good report up front, and an
+    outage mid-regeneration left the user permanently stuck on the generic fallback
+    with no error shown and no way back -- the exact "silent degradation" class of
+    bug fixed elsewhere this session for Ask Atlastra."""
     with _INFLIGHT_LOCK:
         if key in _INFLIGHT:
             return
@@ -312,7 +322,11 @@ def _bg_generate(data: dict, key: str):
     def run():
         try:
             report, model_used = _generate_ai(data)
-            _write_cache(key, report, model_used)
+            if protect_existing and model_used == ENGINE_NAME:
+                print(f"scout report bg: regen for {key!r} fell back to {ENGINE_NAME} -- "
+                      f"keeping the existing AI report instead of overwriting it", flush=True)
+            else:
+                _write_cache(key, report, model_used)
         except Exception as e:  # noqa: BLE001
             print(f"scout report bg: {type(e).__name__}: {str(e)[:120]}", flush=True)
         finally:
@@ -325,29 +339,31 @@ def _bg_generate(data: dict, key: str):
 def scout_report(data: dict, refresh: bool = False) -> dict:
     """Return a scouting report for a player.
 
-    Insta-load: a cached AI report is served immediately. Otherwise we return the
-    instant rule-based report right away (so the page never blocks on the LLM) and
-    kick off AI generation in the background; the client polls without ``refresh``
-    and swaps in the AI version once it lands in the cache."""
+    Insta-load: a cached report is served immediately. Otherwise (no cache, or
+    refresh=True) we kick off AI generation in the background and return something
+    to show right away so the page never blocks on the LLM -- the existing cached
+    report if there is one (so a Regenerate click doesn't visibly downgrade the
+    page while it works), else the instant rule-based report. The client polls
+    without ``refresh`` and swaps in the AI version once it lands in the cache."""
     if not data or not data.get("name"):
         return {"available": False, "error": "Player not found."}
     key = f"{data['name']}|{data.get('season', '')}"
     con = _conn()
-    if not refresh:
-        row = _cached_row(con, key)
-        con.close()
-        if row:
-            return {"available": True, "cached": True, "pending": False, "report": row[0],
-                    "model": row[1], "generated_at": row[2], "player": data["name"],
-                    "season": data.get("season")}
-    else:
-        con.execute("DELETE FROM reports WHERE key = ?", [key])  # force a fresh AI write
-        con.commit()
-        con.close()
+    row = _cached_row(con, key)
+    con.close()
 
-    # No cached report yet -> generate the AI version in the background and return the
-    # instant rule-based report so the page fills immediately.
-    _bg_generate(data, key)
+    if row and not refresh:
+        return {"available": True, "cached": True, "pending": False, "report": row[0],
+                "model": row[1], "generated_at": row[2], "player": data["name"],
+                "season": data.get("season")}
+
+    _bg_generate(data, key, protect_existing=bool(row and row[1] != ENGINE_NAME))
+    if row:
+        # Keep showing the last good report while regeneration runs in the
+        # background, instead of dropping straight to the generic instant one.
+        return {"available": True, "cached": True, "pending": True, "report": row[0],
+                "model": row[1], "generated_at": row[2], "player": data["name"],
+                "season": data.get("season")}
     generated_at = datetime.datetime.now().isoformat(timespec="seconds")
     return {"available": True, "cached": False, "pending": True, "report": _local_report(data),
             "model": ENGINE_NAME, "generated_at": generated_at, "player": data["name"],

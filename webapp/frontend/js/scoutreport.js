@@ -55,19 +55,25 @@ function render(d, pending) {
   btn.onclick = () => load(true);
 }
 
-// Poll (without refresh) until the background AI report lands in the cache, then swap
-// it in. Gives up quietly after ~60s, leaving the instant report on screen.
-async function pollForAi(token, tries) {
-  if (token !== POLL_TOKEN || tries <= 0) return;
+// Poll (without refresh) until the background generation actually produces something
+// NEWER than what's already on screen, then swap it in. Compares generated_at rather
+// than just "is something cached" -- a Regenerate click keeps the existing good report
+// visible while it works (see scout_ai.py's protect_existing), so cache presence alone
+// can't tell "still regenerating" from "already done" the way it could when refresh
+// used to delete the row first. Gives up quietly after ~60s, clearing the spinner and
+// settling back on whatever's already showing (the prior good report, never a downgrade).
+async function pollForAi(token, tries, baseline, fallbackD) {
+  if (token !== POLL_TOKEN) return;
+  if (tries <= 0) { render(fallbackD, false); return; }
   await new Promise((r) => setTimeout(r, 4000));
   if (token !== POLL_TOKEN) return;
   let qs = '/api/scout_report?name=' + encodeURIComponent(NAME);
   if (SEASON) qs += '&season=' + encodeURIComponent(SEASON);
   let d;
-  try { d = await api(qs); } catch { pollForAi(token, tries - 1); return; }
+  try { d = await api(qs); } catch { pollForAi(token, tries - 1, baseline, fallbackD); return; }
   if (token !== POLL_TOKEN) return;
-  if (d.available && d.cached) { render(d, false); return; }   // AI report ready
-  pollForAi(token, tries - 1);
+  if (d.available && d.generated_at && d.generated_at !== baseline) { render(d, false); return; }
+  pollForAi(token, tries - 1, baseline, fallbackD);
 }
 
 async function load(refresh) {
@@ -86,7 +92,7 @@ async function load(refresh) {
   if (!d.available) { renderError(d.error || 'Report unavailable.'); return; }
 
   render(d, !!d.pending);
-  if (d.pending) pollForAi(token, 15);   // upgrade to the AI report when it's ready
+  if (d.pending) pollForAi(token, 15, d.generated_at, d);   // upgrade when a newer report lands
 }
 
 load(false);
