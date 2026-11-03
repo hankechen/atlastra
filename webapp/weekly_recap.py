@@ -102,13 +102,12 @@ def generate(data: dict, refresh: bool = False) -> dict:
         return {"available": False, "error": "No matches this week yet."}
     week = _iso_week()
     con = _conn()
-    if not refresh:
-        row = con.execute("SELECT recap, model, generated_at FROM recaps WHERE week = ?",
-                          [week]).fetchone()
-        if row:
-            con.close()
-            return {"available": True, "cached": True, "recap": row[0], "model": row[1],
-                    "generated_at": row[2], "week": week}
+    row = con.execute("SELECT recap, model, generated_at FROM recaps WHERE week = ?",
+                      [week]).fetchone()
+    if row and not refresh:
+        con.close()
+        return {"available": True, "cached": True, "recap": row[0], "model": row[1],
+                "generated_at": row[2], "week": week}
 
     user = "Write the weekly round-up from this data (JSON):\n\n" + json.dumps(data, ensure_ascii=False)
     recap, model_used = None, None
@@ -128,6 +127,18 @@ def generate(data: dict, refresh: bool = False) -> dict:
             recap = None
     if not recap:                                        # offline fallback
         recap, model_used = _local_recap(data), ENGINE_NAME
+
+    # refresh=True used to be unconditional: a failed regeneration (both LLMs down,
+    # e.g. the kind of Gemini outage hit repeatedly this week) would silently
+    # overwrite an already-good AI recap with the generic local one, cache-wide
+    # (this cache is shared across every visitor, keyed only by ISO week) -- same
+    # destructive-downgrade bug already fixed in scout_ai.py's Regenerate. If a real
+    # AI recap is already cached for this week and this attempt only managed the
+    # local fallback, keep the existing one instead.
+    if row and row[1] != ENGINE_NAME and model_used == ENGINE_NAME:
+        con.close()
+        return {"available": True, "cached": True, "recap": row[0], "model": row[1],
+                "generated_at": row[2], "week": week}
 
     generated_at = datetime.datetime.now().isoformat(timespec="seconds")
     con.execute("INSERT OR REPLACE INTO recaps VALUES (?,?,?,?)",
