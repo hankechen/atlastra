@@ -92,7 +92,9 @@ async function load(refresh) {
   if (!d.available) { renderError(d.error || 'Report unavailable.'); return; }
 
   render(d, !!d.pending);
-  if (d.pending) pollForAi(token, 15, d.generated_at, d);   // upgrade when a newer report lands
+  // 20 tries * 4s = ~80s -- a real regeneration was timed at ~65-70s, so 15/~60s cut it
+  // close enough to occasionally miss a genuinely-completed report.
+  if (d.pending) pollForAi(token, 20, d.generated_at, d);   // upgrade when a newer report lands
 }
 
 load(false);
