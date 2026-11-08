@@ -2157,6 +2157,32 @@ def _player_stats_refresher():
         time.sleep(PLAYER_STATS_EVERY)
 
 
+def _ucl_stats_refresher():
+    """Rebuild the current UCL season's player stats (ucl_player_stats, data_source
+    'fotmob' rows only) on a loop. See pipeline/load_ucl_fotmob.py -- previously this
+    data only refreshed every ~13 days as one step of the biweekly rating-refresh
+    pipeline (tools/rating_refresh.py), which is a long gap given UCL matchdays land
+    roughly every two weeks themselves; user-reported stale UCL stats. Same pattern
+    as _player_stats_refresher (also a connect_retry(..., read_only=False) loader
+    called from a background thread -- proven safe to call a second time from WITHIN
+    this process while the server's own pooled connection stays open; DuckDB's
+    single-writer lock is what blocks a DIFFERENT process, not a second same-process
+    connection). Left in the biweekly pipeline too as a harmless no-op safety net --
+    this is the thing that actually keeps it fresh day to day now."""
+    import time
+    from pipeline import load_ucl_fotmob as ucl
+    UCL_STATS_EVERY = int(os.environ.get("ATLASTRA_UCL_STATS_EVERY", str(24 * 3600)))
+    time.sleep(int(os.environ.get("ATLASTRA_UCL_STATS_DELAY", "300")))
+    while True:
+        try:
+            with _FOTMOB_LOCK:
+                n = ucl.refresh()
+            print(f"UCL stats refresh (FotMob): {n} player-rows", flush=True)
+        except Exception as e:                         # noqa: BLE001
+            print(f"UCL stats refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
+        time.sleep(UCL_STATS_EVERY)
+
+
 # league_key -> cached Monte Carlo season-simulation result (see
 # webapp/season_sim.py). A simulate_league() call takes ~15-25s per league
 # (and makes live FotMob calls, so it needs _FOTMOB_LOCK like every other
@@ -2284,6 +2310,8 @@ if __name__ == "__main__":
         print("team info refresher: on (FotMob, manager/venue/squad)")
         threading.Thread(target=_player_stats_refresher, daemon=True).start()
         print("player stats refresher: on (FotMob, per-player season totals)")
+        threading.Thread(target=_ucl_stats_refresher, daemon=True).start()
+        print("UCL stats refresher: on (FotMob, current-season player stats, daily)")
         threading.Thread(target=_season_sim_refresher, daemon=True).start()
         print("season sim refresher: on (FotMob, Monte Carlo title/top-4/relegation odds)")
     threading.Thread(target=_blog_refresher, daemon=True).start()
