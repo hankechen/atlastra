@@ -2232,6 +2232,7 @@ def _blog_refresher():
     restart near the boundary doesn't miss the week entirely; blog.week_has_post()
     makes re-checking the same week a no-op."""
     import time
+    from webapp.auto_blog import _iso_week
     BLOG_CHECK_EVERY = int(os.environ.get("ATLASTRA_BLOG_CHECK_EVERY", str(24 * 3600)))
     time.sleep(int(os.environ.get("ATLASTRA_BLOG_DELAY", "180")))
     while True:
@@ -2240,8 +2241,13 @@ def _blog_refresher():
             if gather is not None:
                 with SoccerDB(read_only=DB_READ_ONLY) as d:
                     res = auto_blog.generate_weekly_draft(d, gather())
+                blog.record_refresher_attempt(_iso_week(), res)
                 if res.get("available"):
                     print(f"blog refresher: drafted '{res['slug']}' ({res['model']})", flush=True)
+                else:
+                    # Previously silent -- "already generated", "no standout performer",
+                    # and a genuine LLM outage all looked identical from the outside.
+                    print(f"blog refresher: skipped -- {res.get('skipped')}", flush=True)
         except Exception as e:                         # noqa: BLE001
             print(f"blog refresher: {type(e).__name__}: {str(e)[:120]}", flush=True)
         time.sleep(BLOG_CHECK_EVERY)

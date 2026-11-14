@@ -122,7 +122,41 @@ def _conn():
         slug TEXT PRIMARY KEY, title TEXT, subtitle TEXT, author TEXT, date TEXT,
         read_min INTEGER, emoji TEXT, image TEXT, tags TEXT, player TEXT, body TEXT,
         status TEXT DEFAULT 'draft', model TEXT, week TEXT, created_at TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS refresher_log (
+        id INTEGER PRIMARY KEY CHECK (id = 1), week TEXT, checked_at TEXT,
+        available INTEGER, slug TEXT, model TEXT, skipped TEXT)""")
     return con
+
+
+def record_refresher_attempt(week: str, result: dict) -> None:
+    """Persist the weekly auto-writer's last attempt (success or the specific reason it
+    skipped), so /admin.html can tell "hasn't run yet" apart from "ran and failed" --
+    without this, every non-available outcome (no standout performer, already drafted,
+    model output failed validation, or a genuine LLM outage) looked identical to the
+    admin as "nothing to report yet". A single row, overwritten each attempt -- this is
+    a status indicator, not a history log."""
+    con = _conn()
+    con.execute(
+        "INSERT OR REPLACE INTO refresher_log (id, week, checked_at, available, slug, model, skipped) "
+        "VALUES (1, ?, ?, ?, ?, ?, ?)",
+        [week, datetime.datetime.now().isoformat(timespec="seconds"),
+         1 if result.get("available") else 0, result.get("slug"), result.get("model"),
+         result.get("skipped")])
+    con.commit()
+    con.close()
+
+
+def last_refresher_attempt() -> dict | None:
+    con = _conn()
+    row = con.execute(
+        "SELECT week, checked_at, available, slug, model, skipped FROM refresher_log WHERE id = 1"
+    ).fetchone()
+    con.close()
+    if not row:
+        return None
+    week, checked_at, available, slug, model, skipped = row
+    return {"week": week, "checked_at": checked_at, "available": bool(available),
+            "slug": slug, "model": model, "skipped": skipped}
 
 
 def _row_to_post(row) -> dict:
@@ -170,14 +204,18 @@ def list_posts() -> dict:
 
 
 def list_drafts() -> dict:
-    """Admin-only: posts awaiting review, newest first."""
+    """Admin-only: posts awaiting review, newest first, plus the weekly auto-writer's
+    most recent attempt (see record_refresher_attempt) -- so an empty draft list reads
+    as "checked recently, nothing to report" or "last attempt failed: <reason>" instead
+    of being silently indistinguishable from "hasn't run yet"."""
     con = _conn()
     rows = con.execute(
         "SELECT slug, title, subtitle, author, date, read_min, emoji, image, tags, "
         "player, body, status, model, week, created_at FROM posts WHERE status = 'draft' "
         "ORDER BY created_at DESC").fetchall()
     con.close()
-    return {"available": True, "drafts": [_row_to_post(r) for r in rows]}
+    return {"available": True, "drafts": [_row_to_post(r) for r in rows],
+            "last_attempt": last_refresher_attempt()}
 
 
 def get_post(slug: str, include_drafts: bool = False) -> dict:

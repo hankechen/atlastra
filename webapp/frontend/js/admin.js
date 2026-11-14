@@ -51,6 +51,19 @@ async function blogAction(path, slug) {
   loadDrafts();
 }
 
+// Why the last check didn't produce a draft -- distinguishes "hasn't run yet" from
+// "ran and found nothing to say" from "ran and the AI call actually failed", which
+// otherwise all looked identical as an empty list. See blog.record_refresher_attempt.
+function lastAttemptNote(la) {
+  if (!la) return 'The weekly auto-writer hasn’t run yet since the last restart.';
+  const when = ago(new Date(la.checked_at).getTime() / 1000);
+  if (la.available) return `Last check ${when} drafted a post (already reviewed, or approved above).`;
+  const reason = la.skipped || 'unknown reason';
+  const isFailure = /LLM|validation|Exception|Error/i.test(reason);
+  return `${isFailure ? '⚠️' : '✓'} Last check ${when}: ${esc(reason)}` +
+    (isFailure ? ' — try "Generate now" once that clears up.' : '');
+}
+
 async function loadDrafts() {
   const el = document.getElementById('adm-drafts');
   if (!el) return;
@@ -62,7 +75,7 @@ async function loadDrafts() {
       <button class="btn btn-ghost btn-sm" id="admGenNow">✨ Generate now</button>
     </div>
     ${drafts.length ? drafts.map(draftCard).join('')
-      : '<div class="adm-err" style="padding:20px">No drafts pending — the weekly auto-writer checks in once a day.</div>'}`;
+      : `<div class="adm-err" style="padding:20px">No drafts pending. ${lastAttemptNote(d && d.last_attempt)}</div>`}`;
   el.querySelectorAll('.adm-draft').forEach((card) => {
     const slug = card.dataset.slug;
     card.querySelector('[data-act="approve"]').onclick = () => blogAction('/api/admin/blog/approve', slug);
