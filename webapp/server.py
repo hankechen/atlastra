@@ -80,6 +80,7 @@ from webapp import tactics  # noqa: E402
 from webapp import shortlink  # noqa: E402
 from webapp import build_player  # noqa: E402
 from webapp import ask_agent  # noqa: E402
+from webapp import career  # noqa: E402
 
 _TAC_SQUAD: dict = {}                                     # team -> (expiry, squad) cache
 # Club → FotMob team id (authoritative live roster + correct player-photo ids).
@@ -453,6 +454,40 @@ def _tac_rebuild(d, team, slots):
                    "role": s.get("role") or tactics.DEFAULT_ROLE.get(s.get("family"), ""),
                    "player": full})
     return xi, squad
+
+
+def _play_tactics_match(d, team, xi_wire, tactics_body, opponent_wire, seed=None):
+    """Play one match out -- shared by POST /api/tactics/match and
+    webapp.career's matchday engine, so there's one real implementation, not
+    a fork. opponent_wire is {"team", "xi", "tactics"}, same shape the
+    client already sends. Returns None if no opponent was set (the HTTP
+    route turns that into a 'No opponent set.' error; career.py never calls
+    this without one)."""
+    if not (opponent_wire.get("team") and opponent_wire.get("xi")):
+        return None
+    xi, _ = _tac_rebuild(d, team, xi_wire)
+    oxi, _ = _tac_rebuild(d, opponent_wire["team"], opponent_wire["xi"])
+    opp = {"name": opponent_wire["team"], "tactics": opponent_wire.get("tactics"),
+           "units": tactics.team_units(oxi, opponent_wire.get("tactics"))}
+    fh = _team_form(d, team).get("form")
+    fa = _team_form(d, opponent_wire["team"]).get("form")
+    return tactics.simulate_match(xi, tactics_body, oxi, opp, team=team,
+                                  opp_name=opponent_wire["team"], form_home=fh, form_away=fa,
+                                  seed=seed)
+
+
+def _auto_xi_wire(d, team):
+    """A club's current best starting XI in wire form + its tactic defaults --
+    exactly what GET /api/tactics/squad returns for `team`, factored out so
+    webapp.career can build an AI opponent's side the identical way without
+    an HTTP round-trip. Returns (xi_wire, tactic_defaults)."""
+    squad = _tac_squad(d, team)
+    if not squad:
+        return [], dict(tactics.DEFAULT_TACTICS)
+    real, _real_src = _default_xi(d, team, squad)
+    formation = tactics.formation_of(real) if real else "4-3-3"
+    xi = real or tactics.build_xi(squad, formation)
+    return _xi_wire(xi), _side_tactics(d, team)
 
 
 # ---- Champions League campaign: the REAL European field --------------------------- #
@@ -1815,17 +1850,27 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"available": False, "error": "No opponent set."})
                 return
             with SoccerDB(read_only=DB_READ_ONLY) as d:
-                team = b.get("team", "")
-                xi, _ = _tac_rebuild(d, team, b.get("xi"))
-                oxi, _ = _tac_rebuild(d, ob["team"], ob["xi"])
-                opp = {"name": ob["team"], "tactics": ob.get("tactics"),
-                       "units": tactics.team_units(oxi, ob.get("tactics"))}
-                fh = _team_form(d, team).get("form")
-                fa = _team_form(d, ob["team"]).get("form")
-                res = tactics.simulate_match(xi, b.get("tactics"), oxi, opp, team=team,
-                                             opp_name=ob["team"], form_home=fh, form_away=fa,
-                                             seed=_int(b.get("seed")) or None)
+                res = _play_tactics_match(d, b.get("team", ""), b.get("xi"), b.get("tactics"),
+                                          ob, seed=_int(b.get("seed")) or None)
             self._json(res)
+            return
+        if u.path in ("/api/career/start", "/api/career/advance", "/api/career/delete"):
+            # Manager Career Mode -- a persistent save tied to an account, same
+            # reasoning as every other per-user state on this site (sign-in
+            # required, no guest mode for this feature). See webapp/career.py.
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Sign in to play a career."}, 401)
+                return
+            if u.path.endswith("/delete"):
+                self._json({"ok": career.delete_career(user["id"])})
+                return
+            with SoccerDB(read_only=DB_READ_ONLY) as d:
+                if u.path.endswith("/start"):
+                    res = career.start_career(d, user["id"], str(b.get("team", "")))
+                else:
+                    res = career.advance_matchday(d, user["id"], b.get("xi"), b.get("tactics"))
+            self._json(res, 200 if res.get("available") else 400)
             return
         if u.path == "/api/tactics/ucl":               # Tactics Lab: play a Champions League run
             field = _ucl_field()
@@ -1939,6 +1984,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Not signed in."}, 401)
                 return
             self._json({"data": json.loads(auth.get_data(user["id"]) or "null")})
+            return
+        if u.path == "/api/career/state":              # Manager Career Mode: the active save
+            user = auth.user_for_token(self._cookie("atla_session"))
+            if not user:
+                self._json({"error": "Sign in to play a career."}, 401)
+                return
+            self._json(career.get_career(user["id"]))
             return
         if u.path == "/api/leaderboard":               # public game leaderboard
             qq = parse_qs(u.query)

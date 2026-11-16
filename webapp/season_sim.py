@@ -176,6 +176,41 @@ def _draw_scoreline(rng: random.Random, grid: dict, outcome: str):
     return cells[-1][0]
 
 
+def simulate_one_fixture(model, feats, elo, venue_map, any_map, home_id: int,
+                         away_id: int, tid_to_fotmob: dict, rng=None):
+    """One real draw for a single fixture -- the same distribution
+    simulate_league() draws from 10,000x per fixture, here drawn ONCE. Used
+    by webapp/career.py's Manager Career Mode to resolve every OTHER club's
+    result for a matchday the user is playing through themselves via the
+    richer Tactics Lab match engine. Returns (home_goals, away_goals,
+    outcome) -- always a real scoreline, not just a goal-difference number,
+    since career mode needs something to show on a results list.
+
+    Caller loads `model, feats, elo` from ART and `venue_map, any_map` from
+    _prefetch_form(con) ONCE per matchday (not once per fixture) -- same
+    split simulate_league() already uses, just without the inner trial
+    loop."""
+    rng = rng or random.Random()
+    probs, grid = _fixture_distribution(model, feats, elo, venue_map, any_map,
+                                        home_id, away_id, tid_to_fotmob)
+    outcome = _draw_outcome(rng, probs)
+    if grid is not None:
+        sc = _draw_scoreline(rng, grid, outcome)
+        if sc is not None:
+            return sc[0], sc[1], outcome
+    # No card-based grid for this fixture (one side has no buildable XI --
+    # rare for a top-5-league club, per _squad_units' own 0.6-coverage gate)
+    # -- synthesize a scoreline consistent with the outcome and the same
+    # measured average margin simulate_league() uses for its GD-only
+    # fallback (_FALLBACK_MARGIN), so there's still an actual score to show.
+    m = round(abs(_FALLBACK_MARGIN[outcome]))
+    if outcome == "H":
+        return max(m, 1), 0, outcome
+    if outcome == "A":
+        return 0, max(m, 1), outcome
+    return 1, 1, outcome
+
+
 def simulate_league(con, league_key: str, n_trials: int = N_TRIALS_DEFAULT,
                     seed: int | None = None) -> dict:
     """Run the Monte Carlo season simulation for one league's remaining

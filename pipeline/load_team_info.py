@@ -114,7 +114,13 @@ def _extract_fixtures(d: dict, league_key: str, fid_to_tid: dict) -> list:
 
     Keyed by FotMob's own match id (f["id"]) so the caller can dedupe: this
     function runs once per club, and a shared fixture appears in BOTH sides'
-    own fixture lists."""
+    own fixture lists.
+
+    Also carries a kickoff timestamp (match_ts, same status.utcTime field
+    _extract_results reads for finished matches) -- not used by the Monte
+    Carlo season simulator, but needed by webapp/career.py's Manager Career
+    Mode to group remaining fixtures into real matchdays (sort each team's
+    own remaining fixtures by match_ts; round N = index N for every team)."""
     want_league_id = FOTMOB_LEAGUE_IDS.get(league_key)
     if want_league_id is None:
         return []
@@ -130,7 +136,7 @@ def _extract_fixtures(d: dict, league_key: str, fid_to_tid: dict) -> list:
         h_tid, a_tid = fid_to_tid.get(home.get("id")), fid_to_tid.get(away.get("id"))
         if fid is None or h_tid is None or a_tid is None:
             continue
-        rows.append((int(fid), league_key, h_tid, a_tid))
+        rows.append((int(fid), league_key, h_tid, a_tid, _iso_ts(st.get("utcTime"))))
     return rows
 
 
@@ -234,15 +240,16 @@ def load_team_info() -> None:
             "INSERT INTO team_results_fotmob VALUES (?,?,?,?,?,?,?)", result_rows)
 
     # Remaining league fixtures -- the input to the season Monte Carlo simulator
-    # (see memory monte-carlo-season-sim). One row per real fixture (deduped
-    # above), both sides already resolved to our own team_id.
+    # (see memory monte-carlo-season-sim) and to Manager Career Mode's matchday
+    # grouping (webapp/career.py). One row per real fixture (deduped above),
+    # both sides already resolved to our own team_id.
     con.execute("DROP TABLE IF EXISTS team_fixtures_fotmob")
     con.execute("""CREATE TABLE team_fixtures_fotmob
         (fotmob_match_id BIGINT, league_key VARCHAR,
-         home_team_id BIGINT, away_team_id BIGINT)""")
+         home_team_id BIGINT, away_team_id BIGINT, match_ts BIGINT)""")
     if fixture_rows:
         con.executemany(
-            "INSERT INTO team_fixtures_fotmob VALUES (?,?,?,?)", fixture_rows)
+            "INSERT INTO team_fixtures_fotmob VALUES (?,?,?,?,?)", fixture_rows)
 
     # team_squad_fotmob above is a pure snapshot (dropped and rebuilt every run), so it can
     # never answer "who was out for a match six months ago" -- there's no history to add as
