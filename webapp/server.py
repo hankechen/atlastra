@@ -93,6 +93,22 @@ _FOTMOB_TEAM_ID = {
     "Bournemouth": 8678,
 }
 _GROUP_POS = {"keepers": "GK", "defenders": "CB", "midfielders": "CM", "attackers": "ST"}
+_TEAM_LOGOS_FOTMOB_ID: dict = {}
+
+
+def _team_logos_fotmob_id(d, team):
+    """FotMob id for any of the ~91 top-5-league clubs crest-linked in team_logos --
+    far more complete than _FOTMOB_TEAM_ID (a hand-kept whitelist of just the ~19
+    clubs the what-if sandbox happened to get tested against; every OTHER club fell
+    through to tactics_squad's national-team branch and built an empty squad --
+    found when Manager Career Mode hit this for Celta Vigo). Cached process-wide;
+    team_logos barely changes within a run."""
+    if not _TEAM_LOGOS_FOTMOB_ID:
+        rows = d.con.execute(
+            "SELECT team_name, fotmob_team_id FROM team_logos "
+            "WHERE team_id IS NOT NULL AND fotmob_team_id IS NOT NULL").fetchall()
+        _TEAM_LOGOS_FOTMOB_ID.update({name: int(fid) for name, fid in rows})
+    return _TEAM_LOGOS_FOTMOB_ID.get(team)
 # Manual roster overrides {team: [(player_name, fotmob_id)]} — force a player into a squad
 # regardless of FotMob's live roster (e.g. loaned-out players the user wants available).
 _SQUAD_ADD = {
@@ -276,7 +292,7 @@ def _tac_squad(d, team, tid=None):
     if hit and hit[0] > _t.time():
         return hit[1]
     from webapp import fifa
-    tid = tid or _FOTMOB_TEAM_ID.get(team)
+    tid = tid or _FOTMOB_TEAM_ID.get(team) or _team_logos_fotmob_id(d, team)
     if tid:                                              # club → FotMob roster + FIFA ratings
         sq = _build_club_squad(team, tid)
     else:                                                # national → World Cup squad + FIFA
